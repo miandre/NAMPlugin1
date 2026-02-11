@@ -374,6 +374,9 @@ void NeuralAmpModeler::OnReset()
   // If there is a model or IR loaded, they need to be checked for resampling.
   _ResetModelAndIR(sampleRate, GetBlockSize());
   mToneStack->Reset(sampleRate, maxBlockSize);
+  // Pre-size internal mono buffers to the current host max block size.
+  // ProcessBlock() should then only write/clear active frames.
+  _PrepareBuffers(kNumChannelsInternal, (size_t)maxBlockSize);
   _UpdateLatency();
 }
 
@@ -771,9 +774,7 @@ void NeuralAmpModeler::_InitToneStack()
 void NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t numFrames)
 {
   const bool updateChannels = numChannels != _GetBufferNumChannels();
-  const bool updateFrames = updateChannels || (_GetBufferNumFrames() != numFrames);
-  //  if (!updateChannels && !updateFrames)  // Could we do this?
-  //    return;
+  const bool growFrames = updateChannels || (_GetBufferNumFrames() < numFrames);
 
   if (updateChannels)
   {
@@ -781,19 +782,19 @@ void NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t nu
     mInputArray.resize(numChannels);
     mOutputArray.resize(numChannels);
   }
-  if (updateFrames)
+  if (growFrames)
   {
     for (auto c = 0; c < mInputArray.size(); c++)
-    {
       mInputArray[c].resize(numFrames);
-      std::fill(mInputArray[c].begin(), mInputArray[c].end(), 0.0);
-    }
     for (auto c = 0; c < mOutputArray.size(); c++)
-    {
       mOutputArray[c].resize(numFrames);
-      std::fill(mOutputArray[c].begin(), mOutputArray[c].end(), 0.0);
-    }
   }
+  // Always clear only the active frame range for this block.
+  for (auto c = 0; c < mInputArray.size(); c++)
+    std::fill_n(mInputArray[c].begin(), numFrames, 0.0);
+  for (auto c = 0; c < mOutputArray.size(); c++)
+    std::fill_n(mOutputArray[c].begin(), numFrames, 0.0);
+
   // Would these ever get changed by something?
   for (auto c = 0; c < mInputArray.size(); c++)
     mInputPointers[c] = mInputArray[c].data();
