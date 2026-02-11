@@ -11,3 +11,5 @@
 [submodule "AudioDSPTools"]
 	path = NeuralAmpModeler/AudioDSPTools
 	url = https://github.com/sdatkinson/AudioDSPTools.git
+[submodule "NeuralAmpModeler/AudioDSPTools"]
+	url = https://github.com/miandre/AudioDSPTools.git
