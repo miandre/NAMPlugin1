@@ -274,11 +274,15 @@ public:
     auto loadFileFunc = [&](IControl* pCaller) {
       WDL_String fileName;
       WDL_String path;
-      GetSelectedFileDirectory(path);
+      if (mLastDirectory.GetLength())
+        path.Set(mLastDirectory.Get());
+      else
+        GetSelectedFileDirectory(path);
 #ifdef NAM_PICK_DIRECTORY
       pCaller->GetUI()->PromptForDirectory(path, [&](const WDL_String& fileName, const WDL_String& path) {
         if (path.GetLength())
         {
+          mLastDirectory.Set(path.Get());
           ClearPathList();
           AddPath(path.Get(), "");
           SetupMenu();
@@ -291,6 +295,7 @@ public:
         fileName, path, EFileAction::Open, mExtension.Get(), [&](const WDL_String& fileName, const WDL_String& path) {
           if (fileName.GetLength())
           {
+            mLastDirectory.Set(path.Get());
             ClearPathList();
             AddPath(path.Get(), "");
             SetupMenu();
@@ -376,6 +381,7 @@ public:
         fileName.Set(reinterpret_cast<const char*>(pData));
         directory.Set(reinterpret_cast<const char*>(pData));
         directory.remove_filepart(true);
+        mLastDirectory.Set(directory.Get());
 
         ClearPathList();
         AddPath(directory.Get(), "");
@@ -399,6 +405,7 @@ private:
   }
 
   WDL_String mDefaultLabelStr;
+  WDL_String mLastDirectory;
   IFileDialogCompletionHandlerFunc mCompletionHandlerFunc;
   NAMFileNameControl* mFileNameControl = nullptr;
   IVStyle mStyle;
