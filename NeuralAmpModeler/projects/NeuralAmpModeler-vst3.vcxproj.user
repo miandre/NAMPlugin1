@@ -24,6 +24,7 @@
     <LocalDebuggerCommand>$(VST3_64_HOST_PATH)</LocalDebuggerCommand>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerCommandArguments>$(VST3_64_COMMAND_ARGS)</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArgumentsHistory>D:\Dev\NAMPlugin\NeuralAmpModeler\NeuralAmpModeler.RPP|</LocalDebuggerCommandArgumentsHistory>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Tracer|x64'">
     <LocalDebuggerCommand>$(VST3_64_HOST_PATH)</LocalDebuggerCommand>
