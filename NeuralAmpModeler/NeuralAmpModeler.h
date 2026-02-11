@@ -99,12 +99,6 @@ public:
   , mEncapsulated(std::move(encapsulated))
   , mResampler(GetNAMSampleRate(mEncapsulated))
   {
-    // Assign the encapsulated object's processing function  to this object's member so that the resampler can use it:
-    auto ProcessBlockFunc = [&](NAM_SAMPLE** input, NAM_SAMPLE** output, int numFrames) {
-      mEncapsulated->process(input[0], output[0], numFrames);
-    };
-    mBlockProcessFunc = ProcessBlockFunc;
-
     // Get the other information from the encapsulated NAM so that we can tell the outside world about what we're
     // holding.
     if (mEncapsulated->HasLoudness())
@@ -149,7 +143,9 @@ public:
     }
     else
     {
-      mResampler.ProcessBlock(&input, &output, num_frames, mBlockProcessFunc);
+      mResampler.ProcessBlock(&input, &output, num_frames, [&](NAM_SAMPLE** in, NAM_SAMPLE** out, int numFrames) {
+        mEncapsulated->process(in[0], out[0], numFrames);
+      });
     }
   };
 
@@ -181,9 +177,6 @@ private:
 
   // Used to check that we don't get too large a block to process.
   int mMaxExternalBlockSize = 0;
-
-  // This function is defined to conform to the interface expected by the iPlug2 resampler.
-  std::function<void(NAM_SAMPLE**, NAM_SAMPLE**, int)> mBlockProcessFunc;
 };
 
 class NeuralAmpModeler final : public iplug::Plugin
