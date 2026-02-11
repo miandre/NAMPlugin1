@@ -136,8 +136,12 @@ public:
   void process(NAM_SAMPLE* input, NAM_SAMPLE* output, const int num_frames) override
   {
     if (num_frames > mMaxExternalBlockSize)
-      // We can afford to be careful
-      throw std::runtime_error("More frames were provided than the max expected!");
+    {
+      // Fail safe instead of throwing in the real-time path.
+      for (int i = 0; i < num_frames; ++i)
+        output[i] = input[i];
+      return;
+    }
 
     if (!NeedToResample())
     {
