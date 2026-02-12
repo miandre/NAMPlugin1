@@ -154,6 +154,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto midKnobArea = knobsArea.GetGridCell(0, kToneMid, 1, numKnobs).GetPadded(-singleKnobPad);
     const auto trebleKnobArea = knobsArea.GetGridCell(0, kToneTreble, 1, numKnobs).GetPadded(-singleKnobPad);
     const auto outputKnobArea = knobsArea.GetGridCell(0, kOutputLevel, 1, numKnobs).GetPadded(-singleKnobPad);
+    const auto noiseGateLEDRect = noiseGateArea.GetFromBLHC(16.0f, 16.0f).GetTranslated(8.0f, -15.0f);
 
     const auto ngToggleArea =
       noiseGateArea.GetVShifted(noiseGateArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
@@ -235,6 +236,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       kCtrlTagIRFileBrowser);
     pGraphics->AttachControl(
       new NAMSwitchControl(ngToggleArea, kNoiseGateActive, "Noise Gate", style, switchHandleBitmap));
+    pGraphics->AttachControl(new NAMLEDControl(noiseGateLEDRect), kCtrlTagNoiseGateLED);
     pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap));
 
     // The knobs
@@ -316,6 +318,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     mNoiseGateTrigger.SetSampleRate(sampleRate);
     triggerOutput = mNoiseGateTrigger.Process(mInputPointers, numChannelsInternal, numFrames);
   }
+  mNoiseGateIsAttenuating.store(noiseGateActive && mNoiseGateTrigger.IsAttenuating(12.0), std::memory_order_relaxed);
 
   if (mModel != nullptr)
   {
@@ -384,6 +387,17 @@ void NeuralAmpModeler::OnIdle()
 {
   mInputSender.TransmitData(*this);
   mOutputSender.TransmitData(*this);
+
+  const bool noiseGateIsAttenuating = mNoiseGateIsAttenuating.load(std::memory_order_relaxed);
+  if (noiseGateIsAttenuating != mNoiseGateLEDState)
+  {
+    if (auto* pGraphics = GetUI())
+    {
+      if (auto* pNoiseGateLED = pGraphics->GetControlWithTag(kCtrlTagNoiseGateLED))
+        pNoiseGateLED->SetValueFromDelegate(noiseGateIsAttenuating ? 1.0 : 0.0, 0);
+    }
+    mNoiseGateLEDState = noiseGateIsAttenuating;
+  }
 
   if (mNewModelLoadedInDSP)
   {
