@@ -5,9 +5,9 @@
 [submodule "eigen"]
 	path = eigen
 	url = https://gitlab.com/libeigen/eigen.git
-[submodule "NeuralAmpModeler/NeuralAmpModelerCore"]
-	path = NeuralAmpModeler/NeuralAmpModelerCore
-	url = https://github.com/miandre/NeuralAmpModelerCore.git
-[submodule "NeuralAmpModeler/AudioDSPTools"]
-    path = NeuralAmpModeler/AudioDSPTools
+[submodule "AudioDSPTools"]
+	path = AudioDSPTools
 	url = https://github.com/miandre/AudioDSPTools.git
+[submodule "NeuralAmpModelerCore"]
+	path = NeuralAmpModelerCore
+	url = https://github.com/sdatkinson/NeuralAmpModelerCore.git

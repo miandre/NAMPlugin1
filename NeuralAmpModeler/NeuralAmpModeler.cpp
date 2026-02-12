@@ -5,8 +5,8 @@
 #include <utility>
 
 #include "Colors.h"
-#include "NeuralAmpModelerCore/NAM/activations.h"
-#include "NeuralAmpModelerCore/NAM/get_dsp.h"
+#include "../NeuralAmpModelerCore/NAM/activations.h"
+#include "../NeuralAmpModelerCore/NAM/get_dsp.h"
 // clang-format off
 // These includes need to happen in this order or else the latter won't know
 // a bunch of stuff.
@@ -122,6 +122,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     const auto gearSVG = pGraphics->LoadSVG(GEAR_FN);
     const auto fileSVG = pGraphics->LoadSVG(FILE_FN);
+    const auto globeSVG = pGraphics->LoadSVG(GLOBE_ICON_FN);
     const auto crossSVG = pGraphics->LoadSVG(CLOSE_BUTTON_FN);
     const auto rightArrowSVG = pGraphics->LoadSVG(RIGHT_ARROW_FN);
     const auto leftArrowSVG = pGraphics->LoadSVG(LEFT_ARROW_FN);
@@ -172,8 +173,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto ngToggleArea =
       noiseGateArea.GetVShifted(noiseGateArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
     const auto eqToggleArea = midKnobArea.GetVShifted(midKnobArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
-    const auto outNormToggleArea =
-      outputKnobArea.GetVShifted(midKnobArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
 
     // Areas for model and IR
     const auto fileWidth = 200.0f;
@@ -257,19 +256,23 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 #else
     const std::string defaultNamFileString = "Select model...";
 #endif
-    pGraphics->AttachControl(new NAMFileBrowserControl(modelArea, kMsgTagClearModel, defaultNamFileString.c_str(),
-                                                       "nam", loadModelCompletionHandler, style, fileSVG, crossSVG,
-                                                       leftArrowSVG, rightArrowSVG, fileBackgroundBitmap),
-                             kCtrlTagModelFileBrowser);
+    // Getting started page listing additional resources
+    const char* const getUrl = "https://www.neuralampmodeler.com/users#comp-marb84o5";
+    pGraphics->AttachControl(
+      new NAMFileBrowserControl(modelArea, kMsgTagClearModel, defaultNamFileString.c_str(), "nam",
+                                loadModelCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
+      kCtrlTagModelFileBrowser);
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle));
     pGraphics->AttachControl(new NAMFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Select cab IR L...", "wav",
                                                        loadIRLeftCompletionHandler, style, fileSVG, crossSVG,
-                                                       leftArrowSVG, rightArrowSVG, fileBackgroundBitmap),
+                                                       leftArrowSVG, rightArrowSVG, fileBackgroundBitmap, globeSVG,
+                                                       "Get IRs", getUrl),
                              kCtrlTagIRFileBrowserLeft);
     pGraphics->AttachControl(
       new NAMFileBrowserControl(irRightArea, kMsgTagClearIRRight, "Select cab IR R...", "wav",
-                                loadIRRightCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
-                                fileBackgroundBitmap),
+                                 loadIRRightCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                 fileBackgroundBitmap, globeSVG, "Get IRs", getUrl),
       kCtrlTagIRFileBrowserRight);
     pGraphics->AttachControl(new NAMKnobControl(cabBlendArea, kCabIRBlend, "", style, knobBackgroundBitmap));
     pGraphics->AttachControl(
@@ -373,7 +376,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     noiseGateActive ? mNoiseGateGain.Process(mOutputPointers, numChannelsInternal, numFrames) : mOutputPointers;
 
   sample** toneStackOutPointers = (toneStackActive && mToneStack != nullptr)
-                                    ? mToneStack->Process(gateGainOutput, numChannelsInternal, numFrames)
+                                    ? mToneStack->Process(gateGainOutput, numChannelsInternal, nFrames)
                                     : gateGainOutput;
 
   sample** irPointers = toneStackOutPointers;
