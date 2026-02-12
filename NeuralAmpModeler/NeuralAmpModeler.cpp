@@ -90,6 +90,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kEQActive)->InitBool("ToneStack", true);
   GetParam(kOutputMode)->InitEnum("OutputMode", 1, {"Raw", "Normalized", "Calibrated"}); // TODO DRY w/ control
   GetParam(kIRToggle)->InitBool("IRToggle", true);
+  GetParam(kUserHPFFrequency)->InitDouble("HPF", 20.0, 20.0, 500.0, 1.0, "Hz");
+  GetParam(kUserLPFFrequency)->InitDouble("LPF", 22000.0, 5000.0, 22000.0, 10.0, "Hz");
   GetParam(kCalibrateInput)->InitBool(kCalibrateInputParamName.c_str(), kDefaultCalibrateInput);
   GetParam(kInputCalibrationLevel)
     ->InitDouble(kInputCalibrationLevelParamName.c_str(), kDefaultInputCalibrationLevel, -60.0, 60.0, 0.1, "dBu");
@@ -148,12 +150,22 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                              .GetReducedFromLeft(knobsPad)
                              .GetReducedFromRight(knobsPad)
                              .GetVShifted(titleHeight + knobsExtraSpaceBelowTitle);
-    const auto inputKnobArea = knobsArea.GetGridCell(0, kInputLevel, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto noiseGateArea = knobsArea.GetGridCell(0, kNoiseGateThreshold, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto bassKnobArea = knobsArea.GetGridCell(0, kToneBass, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto midKnobArea = knobsArea.GetGridCell(0, kToneMid, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto trebleKnobArea = knobsArea.GetGridCell(0, kToneTreble, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto outputKnobArea = knobsArea.GetGridCell(0, kOutputLevel, 1, numKnobs).GetPadded(-singleKnobPad);
+    constexpr int kKnobColInput = 0;
+    constexpr int kKnobColGate = 1;
+    constexpr int kKnobColBass = 2;
+    constexpr int kKnobColMid = 3;
+    constexpr int kKnobColTreble = 4;
+    constexpr int kKnobColHPF = 5;
+    constexpr int kKnobColLPF = 6;
+    constexpr int kKnobColOutput = 7;
+    const auto inputKnobArea = knobsArea.GetGridCell(0, kKnobColInput, 1, numKnobs).GetPadded(-singleKnobPad);
+    const auto noiseGateArea = knobsArea.GetGridCell(0, kKnobColGate, 1, numKnobs).GetPadded(-singleKnobPad);
+    const auto bassKnobArea = knobsArea.GetGridCell(0, kKnobColBass, 1, numKnobs).GetPadded(-singleKnobPad);
+    const auto midKnobArea = knobsArea.GetGridCell(0, kKnobColMid, 1, numKnobs).GetPadded(-singleKnobPad);
+    const auto trebleKnobArea = knobsArea.GetGridCell(0, kKnobColTreble, 1, numKnobs).GetPadded(-singleKnobPad);
+    const auto hpfKnobArea = knobsArea.GetGridCell(0, kKnobColHPF, 1, numKnobs).GetPadded(-singleKnobPad);
+    const auto lpfKnobArea = knobsArea.GetGridCell(0, kKnobColLPF, 1, numKnobs).GetPadded(-singleKnobPad);
+    const auto outputKnobArea = knobsArea.GetGridCell(0, kKnobColOutput, 1, numKnobs).GetPadded(-singleKnobPad);
     const auto noiseGateLEDRect = noiseGateArea.GetFromBLHC(16.0f, 16.0f).GetTranslated(8.0f, -15.0f);
 
     const auto ngToggleArea =
@@ -248,6 +260,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       new NAMKnobControl(midKnobArea, kToneMid, "", style, knobBackgroundBitmap), -1, "EQ_KNOBS");
     pGraphics->AttachControl(
       new NAMKnobControl(trebleKnobArea, kToneTreble, "", style, knobBackgroundBitmap), -1, "EQ_KNOBS");
+    pGraphics->AttachControl(new NAMKnobControl(hpfKnobArea, kUserHPFFrequency, "", style, knobBackgroundBitmap));
+    pGraphics->AttachControl(new NAMKnobControl(lpfKnobArea, kUserLPFFrequency, "", style, knobBackgroundBitmap));
     pGraphics->AttachControl(new NAMKnobControl(outputKnobArea, kOutputLevel, "", style, knobBackgroundBitmap));
 
     // The meters
@@ -340,6 +354,21 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   if (mIR != nullptr && GetParam(kIRToggle)->Value())
     irPointers = mIR->Process(toneStackOutPointers, numChannelsInternal, numFrames);
 
+  // User post-cab filters. Cascade two 1-pole stages each for approx 12 dB/oct.
+  const double userHighPassCutoffFreq = GetParam(kUserHPFFrequency)->Value();
+  const recursive_linear_filter::HighPassParams userHighPassParams(sampleRate, userHighPassCutoffFreq);
+  mUserHighPass1.SetParams(userHighPassParams);
+  mUserHighPass2.SetParams(userHighPassParams);
+  sample** userHighPassPointers1 = mUserHighPass1.Process(irPointers, numChannelsInternal, numFrames);
+  sample** userHighPassPointers2 = mUserHighPass2.Process(userHighPassPointers1, numChannelsInternal, numFrames);
+
+  const double userLowPassCutoffFreq = GetParam(kUserLPFFrequency)->Value();
+  const recursive_linear_filter::LowPassParams userLowPassParams(sampleRate, userLowPassCutoffFreq);
+  mUserLowPass1.SetParams(userLowPassParams);
+  mUserLowPass2.SetParams(userLowPassParams);
+  sample** userLowPassPointers1 = mUserLowPass1.Process(userHighPassPointers2, numChannelsInternal, numFrames);
+  sample** userLowPassPointers2 = mUserLowPass2.Process(userLowPassPointers1, numChannelsInternal, numFrames);
+
   // And the HPF for DC offset (Issue 271)
   const double highPassCutoffFreq = kDCBlockerFrequency;
   // const double lowPassCutoffFreq = 20000.0;
@@ -347,7 +376,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   // const recursive_linear_filter::LowPassParams lowPassParams(sampleRate, lowPassCutoffFreq);
   mHighPass.SetParams(highPassParams);
   // mLowPass.SetParams(lowPassParams);
-  sample** hpfPointers = mHighPass.Process(irPointers, numChannelsInternal, numFrames);
+  sample** hpfPointers = mHighPass.Process(userLowPassPointers2, numChannelsInternal, numFrames);
   // sample** lpfPointers = mLowPass.Process(hpfPointers, numChannelsInternal, numFrames);
 
   // restore previous floating point state

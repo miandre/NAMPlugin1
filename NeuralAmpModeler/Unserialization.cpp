@@ -81,7 +81,10 @@ int _UnserializePathsAndExpectedKeys(const iplug::IByteChunk& chunk, int startPo
   for (auto it = paramNames.begin(); it != paramNames.end(); ++it)
   {
     double v = 0.0;
-    pos = chunk.Get(&v, pos);
+    const int newPos = chunk.Get(&v, pos);
+    if (newPos < 0)
+      break;
+    pos = newPos;
     config[*it] = v;
   }
   return pos;
@@ -117,7 +120,9 @@ int _GetConfigFrom_0_7_12(const iplug::IByteChunk& chunk, int startPos, nlohmann
                                       "IRToggle",
                                       "CalibrateInput",
                                       "InputCalibrationLevel",
-                                      "OutputMode"};
+                                      "OutputMode",
+                                      "HPF",
+                                      "LPF"};
 
   int pos = _UnserializePathsAndExpectedKeys(chunk, startPos, config, paramNames);
   // Then update:
