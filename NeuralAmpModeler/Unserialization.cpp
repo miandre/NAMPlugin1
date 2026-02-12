@@ -63,13 +63,25 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
   }
   if (mIRPath.GetLength())
   {
-    _StageIR(mIRPath);
+    _StageIRLeft(mIRPath);
+  }
+  auto irPathRightIt = config.find("IRPathRight");
+  if (irPathRightIt != config.end())
+  {
+    mIRPathRight.Set(irPathRightIt->get<std::string>().c_str());
+    if (mIRPathRight.GetLength())
+      _StageIRRight(mIRPathRight);
+  }
+  else
+  {
+    mIRPathRight.Set("");
+    mShouldRemoveIRRight = true;
   }
 }
 
 // Unserialize NAM Path, IR path, then named keys
 int _UnserializePathsAndExpectedKeys(const iplug::IByteChunk& chunk, int startPos, nlohmann::json& config,
-                                     std::vector<std::string>& paramNames)
+                                     std::vector<std::string>& paramNames, const bool includeRightIRPath = false)
 {
   int pos = startPos;
   WDL_String path;
@@ -77,6 +89,15 @@ int _UnserializePathsAndExpectedKeys(const iplug::IByteChunk& chunk, int startPo
   config["NAMPath"] = std::string(path.Get());
   pos = chunk.GetStr(path, pos);
   config["IRPath"] = std::string(path.Get());
+  if (includeRightIRPath)
+  {
+    pos = chunk.GetStr(path, pos);
+    config["IRPathRight"] = std::string(path.Get());
+  }
+  else
+  {
+    config["IRPathRight"] = "";
+  }
 
   for (auto it = paramNames.begin(); it != paramNames.end(); ++it)
   {
@@ -90,6 +111,36 @@ int _UnserializePathsAndExpectedKeys(const iplug::IByteChunk& chunk, int startPo
   return pos;
 }
 
+// v0.7.14
+
+void _UpdateConfigFrom_0_7_14(nlohmann::json& config)
+{
+  // Fill me in once something changes!
+}
+
+int _GetConfigFrom_0_7_14(const iplug::IByteChunk& chunk, int startPos, nlohmann::json& config)
+{
+  std::vector<std::string> paramNames{"Input",
+                                      "Threshold",
+                                      "Bass",
+                                      "Middle",
+                                      "Treble",
+                                      "Output",
+                                      "NoiseGateActive",
+                                      "ToneStack",
+                                      "IRToggle",
+                                      "CalibrateInput",
+                                      "InputCalibrationLevel",
+                                      "OutputMode",
+                                      "HPF",
+                                      "LPF",
+                                      "Cab Blend"};
+
+  int pos = _UnserializePathsAndExpectedKeys(chunk, startPos, config, paramNames, true);
+  _UpdateConfigFrom_0_7_14(config);
+  return pos;
+}
+
 void _RenameKeys(nlohmann::json& j, std::unordered_map<std::string, std::string> newNames)
 {
   // Assumes no aliasing!
@@ -100,7 +151,7 @@ void _RenameKeys(nlohmann::json& j, std::unordered_map<std::string, std::string>
   }
 }
 
-// v0.7.12
+// v0.7.12 - 0.7.13
 
 void _UpdateConfigFrom_0_7_12(nlohmann::json& config)
 {
@@ -122,9 +173,10 @@ int _GetConfigFrom_0_7_12(const iplug::IByteChunk& chunk, int startPos, nlohmann
                                       "InputCalibrationLevel",
                                       "OutputMode",
                                       "HPF",
-                                      "LPF"};
+                                      "LPF",
+                                      "Cab Blend"};
 
-  int pos = _UnserializePathsAndExpectedKeys(chunk, startPos, config, paramNames);
+  int pos = _UnserializePathsAndExpectedKeys(chunk, startPos, config, paramNames, false);
   // Then update:
   _UpdateConfigFrom_0_7_12(config);
   return pos;
@@ -148,7 +200,7 @@ int _GetConfigFrom_0_7_10(const iplug::IByteChunk& chunk, int startPos, nlohmann
 {
   std::vector<std::string> paramNames{
     "Input", "Threshold", "Bass", "Middle", "Treble", "Output", "NoiseGateActive", "ToneStack", "OutNorm", "IRToggle"};
-  int pos = _UnserializePathsAndExpectedKeys(chunk, startPos, config, paramNames);
+  int pos = _UnserializePathsAndExpectedKeys(chunk, startPos, config, paramNames, false);
   // Then update:
   _UpdateConfigFrom_0_7_10(config);
   return pos;
@@ -168,7 +220,7 @@ int _GetConfigFrom_Earlier(const iplug::IByteChunk& chunk, int startPos, nlohman
   std::vector<std::string> paramNames{
     "Input", "Gate", "Bass", "Middle", "Treble", "Output", "NoiseGateActive", "ToneStack", "OutNorm", "IRToggle"};
 
-  int pos = _UnserializePathsAndExpectedKeys(chunk, startPos, config, paramNames);
+  int pos = _UnserializePathsAndExpectedKeys(chunk, startPos, config, paramNames, false);
   // Then update:
   _UpdateConfigFrom_Earlier(config);
   return pos;
@@ -253,7 +305,11 @@ int NeuralAmpModeler::_UnserializeStateWithKnownVersion(const iplug::IByteChunk&
   _Version version(versionStr);
   // Act accordingly
   nlohmann::json config;
-  if (version >= _Version(0, 7, 12))
+  if (version >= _Version(0, 7, 14))
+  {
+    pos = _GetConfigFrom_0_7_14(chunk, pos, config);
+  }
+  else if (version >= _Version(0, 7, 12))
   {
     pos = _GetConfigFrom_0_7_12(chunk, pos, config);
   }
