@@ -90,6 +90,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kEQActive)->InitBool("ToneStack", true);
   GetParam(kOutputMode)->InitEnum("OutputMode", 1, {"Raw", "Normalized", "Calibrated"}); // TODO DRY w/ control
   GetParam(kIRToggle)->InitBool("IRToggle", true);
+  GetParam(kCabIRBlend)->InitDouble("Cab Blend", 50.0, 0.0, 100.0, 0.1, "%");
   GetParam(kUserHPFFrequency)->InitDouble("HPF", 20.0, 20.0, 500.0, 1.0, "Hz");
   GetParam(kUserLPFFrequency)->InitDouble("LPF", 22000.0, 5000.0, 22000.0, 10.0, "Hz");
   GetParam(kCalibrateInput)->InitBool(kCalibrateInputParamName.c_str(), kDefaultCalibrateInput);
@@ -177,12 +178,17 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Areas for model and IR
     const auto fileWidth = 200.0f;
     const auto fileHeight = 30.0f;
-    const auto irYOffset = 38.0f;
-    const auto modelArea =
-      contentArea.GetFromBottom((2.0f * fileHeight)).GetFromTop(fileHeight).GetMidHPadded(fileWidth).GetVShifted(-1);
+    const auto fileSpacing = 6.0f;
+    const auto fileRowsArea = contentArea.GetFromBottom(3.0f * fileHeight + 2.0f * fileSpacing + 2.0f);
+    const auto modelArea = fileRowsArea.SubRectVertical(3, 0).GetMidHPadded(fileWidth).GetVShifted(-1.0f);
     const auto modelIconArea = modelArea.GetFromLeft(30).GetTranslated(-40, 10);
-    const auto irArea = modelArea.GetVShifted(irYOffset);
-    const auto irSwitchArea = irArea.GetFromLeft(30.0f).GetHShifted(-40.0f).GetScaledAboutCentre(0.6f);
+    const auto irLeftArea = fileRowsArea.SubRectVertical(3, 1).GetMidHPadded(fileWidth).GetVShifted(2.0f);
+    const auto irRightArea = fileRowsArea.SubRectVertical(3, 2).GetMidHPadded(fileWidth).GetVShifted(5.0f);
+    const auto irSwitchArea = irLeftArea.GetFromLeft(30.0f).GetHShifted(-40.0f).GetScaledAboutCentre(0.6f);
+    const auto cabBlendArea = irLeftArea.GetFromRight(25.0f)
+                                 .GetVShifted((irRightArea.MH() - irLeftArea.MH()) * 0.5f)
+                                  .GetHShifted(55.0f)
+                                 .GetScaledAboutCentre(2.4f);
 
     // Areas for meters
     const auto inputMeterArea = contentArea.GetFromLeft(30).GetHShifted(-20).GetMidVPadded(100).GetVShifted(-25);
@@ -209,18 +215,34 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     };
 
     // IR loader button
-    auto loadIRCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
+    auto loadIRLeftCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
       if (fileName.GetLength())
       {
         mIRPath = fileName;
-        const dsp::wav::LoadReturnCode retCode = _StageIR(fileName);
+        const dsp::wav::LoadReturnCode retCode = _StageIRLeft(fileName);
         if (retCode != dsp::wav::LoadReturnCode::SUCCESS)
         {
           std::stringstream message;
-          message << "Failed to load IR file " << fileName.Get() << ":\n";
+          message << "Failed to load left IR file " << fileName.Get() << ":\n";
           message << dsp::wav::GetMsgForLoadReturnCode(retCode);
 
-          _ShowMessageBox(GetUI(), message.str().c_str(), "Failed to load IR!", kMB_OK);
+          _ShowMessageBox(GetUI(), message.str().c_str(), "Failed to load left IR!", kMB_OK);
+        }
+      }
+    };
+
+    auto loadIRRightCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
+      if (fileName.GetLength())
+      {
+        mIRPathRight = fileName;
+        const dsp::wav::LoadReturnCode retCode = _StageIRRight(fileName);
+        if (retCode != dsp::wav::LoadReturnCode::SUCCESS)
+        {
+          std::stringstream message;
+          message << "Failed to load right IR file " << fileName.Get() << ":\n";
+          message << dsp::wav::GetMsgForLoadReturnCode(retCode);
+
+          _ShowMessageBox(GetUI(), message.str().c_str(), "Failed to load right IR!", kMB_OK);
         }
       }
     };
@@ -232,20 +254,24 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
 #ifdef NAM_PICK_DIRECTORY
     const std::string defaultNamFileString = "Select model directory...";
-    const std::string defaultIRString = "Select IR directory...";
 #else
     const std::string defaultNamFileString = "Select model...";
-    const std::string defaultIRString = "Select IR...";
 #endif
     pGraphics->AttachControl(new NAMFileBrowserControl(modelArea, kMsgTagClearModel, defaultNamFileString.c_str(),
                                                        "nam", loadModelCompletionHandler, style, fileSVG, crossSVG,
                                                        leftArrowSVG, rightArrowSVG, fileBackgroundBitmap),
                              kCtrlTagModelFileBrowser);
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle));
+    pGraphics->AttachControl(new NAMFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Select cab IR L...", "wav",
+                                                       loadIRLeftCompletionHandler, style, fileSVG, crossSVG,
+                                                       leftArrowSVG, rightArrowSVG, fileBackgroundBitmap),
+                             kCtrlTagIRFileBrowserLeft);
     pGraphics->AttachControl(
-      new NAMFileBrowserControl(irArea, kMsgTagClearIR, defaultIRString.c_str(), "wav", loadIRCompletionHandler, style,
-                                fileSVG, crossSVG, leftArrowSVG, rightArrowSVG, fileBackgroundBitmap),
-      kCtrlTagIRFileBrowser);
+      new NAMFileBrowserControl(irRightArea, kMsgTagClearIRRight, "Select cab IR R...", "wav",
+                                loadIRRightCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap),
+      kCtrlTagIRFileBrowserRight);
+    pGraphics->AttachControl(new NAMKnobControl(cabBlendArea, kCabIRBlend, "", style, knobBackgroundBitmap));
     pGraphics->AttachControl(
       new NAMSwitchControl(ngToggleArea, kNoiseGateActive, "Noise Gate", style, switchHandleBitmap));
     pGraphics->AttachControl(new NAMLEDControl(noiseGateLEDRect), kCtrlTagNoiseGateLED);
@@ -351,8 +377,30 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
                                     : gateGainOutput;
 
   sample** irPointers = toneStackOutPointers;
-  if (mIR != nullptr && GetParam(kIRToggle)->Value())
-    irPointers = mIR->Process(toneStackOutPointers, numChannelsInternal, numFrames);
+  if (GetParam(kIRToggle)->Value())
+  {
+    const bool haveLeftIR = (mIR != nullptr);
+    const bool haveRightIR = (mIRRight != nullptr);
+    if (haveLeftIR && haveRightIR)
+    {
+      sample** irLeftPointers = mIR->Process(toneStackOutPointers, numChannelsInternal, numFrames);
+      sample** irRightPointers = mIRRight->Process(toneStackOutPointers, numChannelsInternal, numFrames);
+      const double blend = GetParam(kCabIRBlend)->Value() * 0.01;
+      const double leftGain = 1.0 - blend;
+      const double rightGain = blend;
+      for (size_t s = 0; s < numFrames; ++s)
+        mOutputArray[0][s] = leftGain * irLeftPointers[0][s] + rightGain * irRightPointers[0][s];
+      irPointers = mOutputPointers;
+    }
+    else if (haveLeftIR)
+    {
+      irPointers = mIR->Process(toneStackOutPointers, numChannelsInternal, numFrames);
+    }
+    else if (haveRightIR)
+    {
+      irPointers = mIRRight->Process(toneStackOutPointers, numChannelsInternal, numFrames);
+    }
+  }
 
   // User post-cab filters. Cascade two 1-pole stages each for approx 12 dB/oct.
   const double userHighPassCutoffFreq = GetParam(kUserHPFFrequency)->Value();
@@ -459,7 +507,8 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
   // Model directory (don't serialize the model itself; we'll just load it again
   // when we unserialize)
   chunk.PutStr(mNAMPath.Get());
-  chunk.PutStr(mIRPath.Get());
+  chunk.PutStr(mIRPath.Get()); // Left IR (legacy slot)
+  chunk.PutStr(mIRPathRight.Get());
   return SerializeParams(chunk);
 }
 
@@ -496,9 +545,16 @@ void NeuralAmpModeler::OnUIOpen()
 
   if (mIRPath.GetLength())
   {
-    SendControlMsgFromDelegate(kCtrlTagIRFileBrowser, kMsgTagLoadedIR, mIRPath.GetLength(), mIRPath.Get());
+    SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, mIRPath.GetLength(), mIRPath.Get());
     if (mIR == nullptr && mStagedIR == nullptr)
-      SendControlMsgFromDelegate(kCtrlTagIRFileBrowser, kMsgTagLoadFailed);
+      SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadFailed);
+  }
+  if (mIRPathRight.GetLength())
+  {
+    SendControlMsgFromDelegate(
+      kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, mIRPathRight.GetLength(), mIRPathRight.Get());
+    if (mIRRight == nullptr && mStagedIRRight == nullptr)
+      SendControlMsgFromDelegate(kCtrlTagIRFileBrowserRight, kMsgTagLoadFailed);
   }
 
   if (mModel != nullptr)
@@ -538,7 +594,11 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       case kEQActive:
         pGraphics->ForControlInGroup("EQ_KNOBS", [active](IControl* pControl) { pControl->SetDisabled(!active); });
         break;
-      case kIRToggle: pGraphics->GetControlWithTag(kCtrlTagIRFileBrowser)->SetDisabled(!active); break;
+      case kIRToggle:
+        pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserLeft)->SetDisabled(!active);
+        pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight)->SetDisabled(!active);
+        pGraphics->GetControlWithParamIdx(kCabIRBlend)->SetDisabled(!active);
+        break;
       default: break;
     }
   }
@@ -549,7 +609,8 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
   switch (msgTag)
   {
     case kMsgTagClearModel: mShouldRemoveModel = true; return true;
-    case kMsgTagClearIR: mShouldRemoveIR = true; return true;
+    case kMsgTagClearIRLeft: mShouldRemoveIRLeft = true; return true;
+    case kMsgTagClearIRRight: mShouldRemoveIRRight = true; return true;
     case kMsgTagHighlightColor:
     {
       mHighLightColor.Set((const char*)pData);
@@ -605,11 +666,17 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     _SetInputGain();
     _SetOutputGain();
   }
-  if (mShouldRemoveIR)
+  if (mShouldRemoveIRLeft)
   {
     mIR = nullptr;
     mIRPath.Set("");
-    mShouldRemoveIR = false;
+    mShouldRemoveIRLeft = false;
+  }
+  if (mShouldRemoveIRRight)
+  {
+    mIRRight = nullptr;
+    mIRPathRight.Set("");
+    mShouldRemoveIRRight = false;
   }
   // Move things from staged to live
   if (mStagedModel != nullptr)
@@ -625,6 +692,11 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   {
     mIR = std::move(mStagedIR);
     mStagedIR = nullptr;
+  }
+  if (mStagedIRRight != nullptr)
+  {
+    mIRRight = std::move(mStagedIRRight);
+    mStagedIRRight = nullptr;
   }
 }
 
@@ -683,6 +755,24 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
     {
       const auto irData = mIR->GetData();
       mStagedIR = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  if (mStagedIRRight != nullptr)
+  {
+    const double irSampleRate = mStagedIRRight->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mStagedIRRight->GetData();
+      mStagedIRRight = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  else if (mIRRight != nullptr)
+  {
+    const double irSampleRate = mIRRight->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mIRRight->GetData();
+      mStagedIRRight = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
     }
   }
 }
@@ -758,7 +848,7 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath)
   return "";
 }
 
-dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIR(const WDL_String& irPath)
+dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath)
 {
   // FIXME it'd be better for the path to be "staged" as well. Just in case the
   // path and the model got caught on opposite sides of the fence...
@@ -781,7 +871,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIR(const WDL_String& irPath)
   if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
   {
     mIRPath = irPath;
-    SendControlMsgFromDelegate(kCtrlTagIRFileBrowser, kMsgTagLoadedIR, mIRPath.GetLength(), mIRPath.Get());
+    SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, mIRPath.GetLength(), mIRPath.Get());
   }
   else
   {
@@ -790,7 +880,42 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIR(const WDL_String& irPath)
       mStagedIR = nullptr;
     }
     mIRPath = previousIRPath;
-    SendControlMsgFromDelegate(kCtrlTagIRFileBrowser, kMsgTagLoadFailed);
+    SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadFailed);
+  }
+
+  return wavState;
+}
+
+dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPath)
+{
+  WDL_String previousIRPath = mIRPathRight;
+  const double sampleRate = GetSampleRate();
+  dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
+  try
+  {
+    auto irPathU8 = std::filesystem::u8path(irPath.Get());
+    mStagedIRRight = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+    wavState = mStagedIRRight->GetWavState();
+  }
+  catch (std::runtime_error& e)
+  {
+    wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
+    std::cerr << "Caught unhandled exception while attempting to load right IR:" << std::endl;
+    std::cerr << e.what() << std::endl;
+  }
+
+  if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+  {
+    mIRPathRight = irPath;
+    SendControlMsgFromDelegate(
+      kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, mIRPathRight.GetLength(), mIRPathRight.Get());
+  }
+  else
+  {
+    if (mStagedIRRight != nullptr)
+      mStagedIRRight = nullptr;
+    mIRPathRight = previousIRPath;
+    SendControlMsgFromDelegate(kCtrlTagIRFileBrowserRight, kMsgTagLoadFailed);
   }
 
   return wavState;
