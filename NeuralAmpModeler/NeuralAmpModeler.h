@@ -54,6 +54,7 @@ enum ECtrlTags
 {
   kCtrlTagModelFileBrowser = 0,
   kCtrlTagIRFileBrowser,
+  kCtrlTagNoiseGateLED,
   kCtrlTagInputMeter,
   kCtrlTagOutputMeter,
   kCtrlTagSettingsBox,
@@ -291,6 +292,8 @@ private:
 
   std::atomic<bool> mNewModelLoadedInDSP = false;
   std::atomic<bool> mModelCleared = false;
+  std::atomic<bool> mNoiseGateIsAttenuating = false;
+  bool mNoiseGateLEDState = false;
 
   // Tone stack modules
   std::unique_ptr<dsp::tone_stack::AbstractToneStack> mToneStack;

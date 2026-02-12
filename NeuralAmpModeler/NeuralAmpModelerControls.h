@@ -54,10 +54,32 @@ public:
   }
 };
 
+class NAMLEDControl : public IControl
+{
+public:
+  NAMLEDControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const auto radius = static_cast<float>((mRECT.W() < mRECT.H() ? mRECT.W() : mRECT.H()) * 0.35);
+    const float cx = mRECT.MW();
+    const float cy = mRECT.MH();
+    const bool isOn = GetValue() > 0.5;
+    const IColor fillColor = isOn ? IColor(255, 96, 230, 120) : COLOR_BLACK.WithOpacity(0.85f);
+
+    g.FillCircle(fillColor, cx, cy, radius, &mBlend);
+    g.DrawCircle(COLOR_BLACK.WithOpacity(0.75f), cx, cy, radius, &mBlend, 1.0f);
+  }
+};
+
 class NAMKnobControl : public IVKnobControl, public IBitmapBase
 {
 public:
-  NAMKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, IBitmap bitmap)
+  NAMKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, const IBitmap& bitmap)
   : IVKnobControl(bounds, paramIdx, label, style, true)
   , IBitmapBase(bitmap)
   {
