@@ -365,7 +365,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
   if (mModel != nullptr)
   {
-    mModel->process(triggerOutput[0], mOutputPointers[0], nFrames);
+    mModel->process(triggerOutput, mOutputPointers, nFrames);
   }
   else
   {
