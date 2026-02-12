@@ -397,7 +397,8 @@ public:
         }
         break;
       case kMsgTagLoadedModel:
-      case kMsgTagLoadedIR:
+      case kMsgTagLoadedIRLeft:
+      case kMsgTagLoadedIRRight:
       {
         WDL_String fileName, directory;
         fileName.Set(reinterpret_cast<const char*>(pData));

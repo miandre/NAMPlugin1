@@ -47,6 +47,8 @@ enum EParams
   // Post-cab filters
   kUserHPFFrequency,
   kUserLPFFrequency,
+  // Cab IR blend (append-only to preserve old serialization order)
+  kCabIRBlend,
   kNumParams
 };
 
@@ -55,7 +57,8 @@ const int numKnobs = 8;
 enum ECtrlTags
 {
   kCtrlTagModelFileBrowser = 0,
-  kCtrlTagIRFileBrowser,
+  kCtrlTagIRFileBrowserLeft,
+  kCtrlTagIRFileBrowserRight,
   kCtrlTagNoiseGateLED,
   kCtrlTagInputMeter,
   kCtrlTagOutputMeter,
@@ -70,12 +73,14 @@ enum EMsgTags
 {
   // These tags are used from UI -> DSP
   kMsgTagClearModel = 0,
-  kMsgTagClearIR,
+  kMsgTagClearIRLeft,
+  kMsgTagClearIRRight,
   kMsgTagHighlightColor,
   // The following tags are from DSP -> UI
   kMsgTagLoadFailed,
   kMsgTagLoadedModel,
-  kMsgTagLoadedIR,
+  kMsgTagLoadedIRLeft,
+  kMsgTagLoadedIRRight,
   kNumMsgTags
 };
 
@@ -220,10 +225,12 @@ private:
   // Loads a NAM model and stores it to mStagedNAM
   // Returns an empty string on success, or an error message on failure.
   std::string _StageModel(const WDL_String& dspFile);
-  // Loads an IR and stores it to mStagedIR.
+  // Loads left cab IR and stores it to mStagedIR.
   // Return status code so that error messages can be relayed if
   // it wasn't successful.
-  dsp::wav::LoadReturnCode _StageIR(const WDL_String& irPath);
+  dsp::wav::LoadReturnCode _StageIRLeft(const WDL_String& irPath);
+  // Loads right cab IR and stores it to mStagedIRRight.
+  dsp::wav::LoadReturnCode _StageIRRight(const WDL_String& irPath);
 
   bool _HaveModel() const { return this->mModel != nullptr; };
   // Prepare the input & output buffers
@@ -285,12 +292,15 @@ private:
   std::unique_ptr<ResamplingNAM> mModel;
   // And the IR
   std::unique_ptr<dsp::ImpulseResponse> mIR;
+  std::unique_ptr<dsp::ImpulseResponse> mIRRight;
   // Manages switching what DSP is being used.
   std::unique_ptr<ResamplingNAM> mStagedModel;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIR;
+  std::unique_ptr<dsp::ImpulseResponse> mStagedIRRight;
   // Flags to take away the modules at a safe time.
   std::atomic<bool> mShouldRemoveModel = false;
-  std::atomic<bool> mShouldRemoveIR = false;
+  std::atomic<bool> mShouldRemoveIRLeft = false;
+  std::atomic<bool> mShouldRemoveIRRight = false;
 
   std::atomic<bool> mNewModelLoadedInDSP = false;
   std::atomic<bool> mModelCleared = false;
@@ -313,6 +323,7 @@ private:
   WDL_String mNAMPath;
   // Path to IR (.wav file)
   WDL_String mIRPath;
+  WDL_String mIRPathRight;
 
   WDL_String mHighLightColor{PluginColors::NAM_THEMECOLOR.ToColorCode()};
 
