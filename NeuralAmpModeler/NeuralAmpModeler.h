@@ -29,15 +29,14 @@ public:
 
 enum EParams
 {
-  // These need to be the first ones because I use their indices to place
-  // their rects in the GUI.
+  // Keep parameter ordering stable for serialization compatibility.
   kInputLevel = 0,
   kNoiseGateThreshold,
   kToneBass,
   kToneMid,
   kToneTreble,
   kOutputLevel,
-  // The rest is fine though.
+  // The rest can be appended.
   kNoiseGateActive,
   kEQActive,
   kIRToggle,
@@ -45,10 +44,13 @@ enum EParams
   kCalibrateInput,
   kInputCalibrationLevel,
   kOutputMode,
+  // Post-cab filters
+  kUserHPFFrequency,
+  kUserLPFFrequency,
   kNumParams
 };
 
-const int numKnobs = 6;
+const int numKnobs = 8;
 
 enum ECtrlTags
 {
@@ -299,6 +301,11 @@ private:
   std::unique_ptr<dsp::tone_stack::AbstractToneStack> mToneStack;
 
   // Post-IR filters
+  recursive_linear_filter::HighPass mUserHighPass1;
+  recursive_linear_filter::HighPass mUserHighPass2;
+  recursive_linear_filter::LowPass mUserLowPass1;
+  recursive_linear_filter::LowPass mUserLowPass2;
+  // Keep this as a dedicated DC blocker.
   recursive_linear_filter::HighPass mHighPass;
   //  recursive_linear_filter::LowPass mLowPass;
 
