@@ -82,36 +82,95 @@ public:
   }
 };
 
+class NAMBitmapToggleControl : public IControl
+{
+public:
+  NAMBitmapToggleControl(const IRECT& bounds, int paramIdx, const IBitmap& offBitmap, const IBitmap& onBitmap)
+  : IControl(bounds, paramIdx)
+  , mOffBitmap(offBitmap)
+  , mOnBitmap(onBitmap)
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    g.DrawFittedBitmap(GetValue() > 0.5 ? mOnBitmap : mOffBitmap, mRECT);
+  }
+
+  void OnMouseDown(float, float, const IMouseMod&) override
+  {
+    if (IsDisabled())
+      return;
+    SetValueFromUserInput(GetValue() > 0.5 ? 0.0 : 1.0);
+  }
+
+  void OnRescale() override
+  {
+    mOffBitmap = GetUI()->GetScaledBitmap(mOffBitmap);
+    mOnBitmap = GetUI()->GetScaledBitmap(mOnBitmap);
+  }
+
+private:
+  IBitmap mOffBitmap;
+  IBitmap mOnBitmap;
+};
+
 class NAMKnobControl : public IVKnobControl, public IBitmapBase
 {
 public:
-  NAMKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, const IBitmap& bitmap)
+  NAMKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, const IBitmap& bitmap,
+                 bool drawIndicatorTrack = true, bool useDarkIndicatorDot = false, float knobScale = 1.0f,
+                 float labelYOffset = 0.0f)
   : IVKnobControl(bounds, paramIdx, label, style, true)
   , IBitmapBase(bitmap)
+  , mDrawIndicatorTrack(drawIndicatorTrack)
+  , mUseDarkIndicatorDot(useDarkIndicatorDot)
+  , mKnobScale(knobScale)
+  , mLabelYOffset(labelYOffset)
   {
     mInnerPointerFrac = 0.55;
   }
 
   void OnRescale() override { mBitmap = GetUI()->GetScaledBitmap(mBitmap); }
+  void OnResize() override
+  {
+    IVKnobControl::OnResize();
+    if (mLabelYOffset != 0.0f)
+      mLabelBounds.Translate(0.0f, mLabelYOffset);
+  }
 
   void DrawWidget(IGraphics& g) override
   {
-    float widgetRadius = GetRadius() * 0.73;
-    auto knobRect = mWidgetBounds.GetCentredInside(mWidgetBounds.W(), mWidgetBounds.W());
+    auto knobRect = mWidgetBounds.GetCentredInside(mWidgetBounds.W(), mWidgetBounds.W()).GetScaledAboutCentre(mKnobScale);
+    const float widgetRadius = 0.73f * 0.5f * knobRect.W();
     const float cx = knobRect.MW(), cy = knobRect.MH();
     const float angle = mAngle1 + (static_cast<float>(GetValue()) * (mAngle2 - mAngle1));
-    DrawIndicatorTrack(g, angle, cx + 0.5, cy, widgetRadius);
+    if (mDrawIndicatorTrack)
+      DrawIndicatorTrack(g, angle, cx + 0.5, cy, widgetRadius);
     g.DrawFittedBitmap(mBitmap, knobRect);
     float data[2][2];
     RadialPoints(angle, cx, cy, mInnerPointerFrac * widgetRadius, mInnerPointerFrac * widgetRadius, 2, data);
-    g.PathCircle(data[1][0], data[1][1], 3);
-    g.PathFill(IPattern::CreateRadialGradient(data[1][0], data[1][1], 4.0f,
-                                              {{GetColor(mMouseIsOver ? kX3 : kX1), 0.f},
-                                               {GetColor(mMouseIsOver ? kX3 : kX1), 0.8f},
-                                               {COLOR_TRANSPARENT, 1.0f}}),
-               {}, &mBlend);
-    g.DrawCircle(COLOR_BLACK.WithOpacity(0.5f), data[1][0], data[1][1], 3, &mBlend);
+    if (mUseDarkIndicatorDot)
+    {
+      g.FillCircle(COLOR_BLACK.WithOpacity(0.95f), data[1][0], data[1][1], 3.0f, &mBlend);
+    }
+    else
+    {
+      g.PathCircle(data[1][0], data[1][1], 3);
+      g.PathFill(IPattern::CreateRadialGradient(data[1][0], data[1][1], 4.0f,
+                                                {{GetColor(mMouseIsOver ? kX3 : kX1), 0.f},
+                                                 {GetColor(mMouseIsOver ? kX3 : kX1), 0.8f},
+                                                 {COLOR_TRANSPARENT, 1.0f}}),
+                 {}, &mBlend);
+      g.DrawCircle(COLOR_BLACK.WithOpacity(0.5f), data[1][0], data[1][1], 3, &mBlend);
+    }
   }
+
+private:
+  bool mDrawIndicatorTrack = true;
+  bool mUseDarkIndicatorDot = false;
+  float mKnobScale = 1.0f;
+  float mLabelYOffset = 0.0f;
 };
 
 class NAMSwitchControl : public IVSlideSwitchControl, public IBitmapBase
@@ -197,6 +256,40 @@ public:
     }
 
     g.DrawBitmap(mBitmap, r, 0, 0, nullptr);
+  }
+};
+
+class NAMBlendSliderControl : public IVSliderControl
+{
+public:
+  NAMBlendSliderControl(const IRECT& bounds, int paramIdx, const IVStyle& style)
+  : IVSliderControl(bounds, paramIdx, "Cab Blend", style.WithShowValue(false), false, EDirection::Horizontal,
+                    DEFAULT_GEARING, 6.0f, 3.0f, true)
+  {
+  }
+
+  void OnResize() override
+  {
+    IVSliderControl::OnResize();
+    // Keep the label position unchanged, but lift slider track/handle slightly.
+    constexpr float kSliderYOffset = -9.0f;
+    mWidgetBounds.Translate(0.0f, kSliderYOffset);
+    mTrackBounds.Translate(0.0f, kSliderYOffset);
+  }
+
+  void DrawTrack(IGraphics& g, const IRECT& filledArea) override
+  {
+    const float cr = GetRoundedCornerRadius(mTrackBounds);
+
+    // Draw a neutral track only (no progress-fill region).
+    g.FillRoundRect(COLOR_BLACK.WithOpacity(0.65f), mTrackBounds, cr, &mBlend);
+    if (mStyle.drawFrame)
+      g.DrawRoundRect(GetColor(kFR), mTrackBounds, cr, &mBlend, mStyle.frameThickness);
+
+    // Visual center marker for the 50/50 blend point.
+    const float centerX = mTrackBounds.MW();
+    g.DrawLine(COLOR_WHITE.WithOpacity(0.75f), centerX, mTrackBounds.T - 3.0f, centerX, mTrackBounds.B + 3.0f,
+               &mBlend, 1.0f);
   }
 };
 
@@ -525,7 +618,12 @@ public:
     SetDirty(false);
   }
 
-  void DrawBackground(IGraphics& g, const IRECT& r) override { g.DrawFittedBitmap(mBitmap, r); }
+  void DrawBackground(IGraphics& g, const IRECT& r) override
+  {
+    g.DrawFittedBitmap(mBitmap, r);
+    // Subtle theme-colored frame to better define meter bounds.
+    g.DrawRect(GetColor(kX1).WithOpacity(0.8f), r.GetPadded(-0.5f), &mBlend, 1.0f);
+  }
 
   void DrawTrackHandle(IGraphics& g, const IRECT& r, int chIdx, bool aboveBaseValue) override
   {

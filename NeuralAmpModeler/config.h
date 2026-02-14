@@ -27,8 +27,8 @@
 #define PLUG_DOES_MPE 0
 #define PLUG_DOES_STATE_CHUNKS 0
 #define PLUG_HAS_UI 1
-#define PLUG_WIDTH 600
-#define PLUG_HEIGHT 400
+#define PLUG_WIDTH 1162
+#define PLUG_HEIGHT 612
 #define PLUG_FPS 60
 #define PLUG_SHARED_RESOURCES 0
 #define PLUG_HOST_RESIZE 0
@@ -75,6 +75,12 @@
 #define KNOBBACKGROUND_FN "KnobBackground.png"
 #define KNOBBACKGROUND2X_FN "KnobBackground@2x.png"
 #define KNOBBACKGROUND3X_FN "KnobBackground@3x.png"
+#define FLATKNOBBACKGROUND_FN "FlatKnobBackground.png"
+#define AP_KNOP_OFFSET 28.0f
+#define SWITCH_OFF_FN "Switch_OFF.png"
+#define SWITCH_OFF2X_FN "Switch_OFF@2x.png"
+#define SWITCH_ON_FN "Switch_ON.png"
+#define SWITCH_ON2X_FN "Switch_ON@2x.png"
 #define FILEBACKGROUND_FN "FileBackground.png"
 #define FILEBACKGROUND2X_FN "FileBackground@2x.png"
 #define FILEBACKGROUND3X_FN "FileBackground@3x.png"
