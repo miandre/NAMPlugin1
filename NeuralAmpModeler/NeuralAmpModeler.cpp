@@ -234,7 +234,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
           std::stringstream ss;
           ss << "Failed to load NAM model. Message:\n\n" << msg;
           _ShowMessageBox(GetUI(), ss.str().c_str(), "Failed to load model!", kMB_OK);
+          GetParam(kModelToggle)->Set(0.0);
         }
+        else
+          GetParam(kModelToggle)->Set(1.0);
+        SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
         std::cout << "Loaded: " << fileName.Get() << std::endl;
       }
     };
@@ -385,6 +389,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   _ApplyDSPStaging();
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
   const bool toneStackActive = GetParam(kEQActive)->Value();
+  const bool modelActive = GetParam(kModelToggle)->Bool();
 
   // Noise gate trigger
   sample** triggerOutput = mInputPointers;
@@ -403,7 +408,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   }
   mNoiseGateIsAttenuating.store(noiseGateActive && mNoiseGateTrigger.IsAttenuating(12.0), std::memory_order_relaxed);
 
-  if (mModel != nullptr)
+  if (modelActive && (mModel != nullptr))
   {
     mModel->process(triggerOutput, mOutputPointers, nFrames);
   }
@@ -534,6 +539,11 @@ void NeuralAmpModeler::OnIdle()
       // FIXME -- need to disable only the "normalized" model
       // pGraphics->GetControlWithTag(kCtrlTagOutputMode)->SetDisabled(false);
       static_cast<NAMSettingsPageControl*>(pGraphics->GetControlWithTag(kCtrlTagSettingsBox))->ClearModelInfo();
+      if (GetParam(kModelToggle)->Bool())
+      {
+        GetParam(kModelToggle)->Set(0.0);
+        SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+      }
       mModelCleared = false;
     }
   }
@@ -605,6 +615,12 @@ void NeuralAmpModeler::OnUIOpen()
     _UpdateControlsFromModel();
   }
 
+  // If no model is available, force model toggle to OFF.
+  if (mModel == nullptr && mStagedModel == nullptr && GetParam(kModelToggle)->Bool())
+  {
+    GetParam(kModelToggle)->Set(0.0);
+    SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+  }
 }
 
 void NeuralAmpModeler::OnParamChange(int paramIdx)
@@ -642,6 +658,39 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
         pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserLeft)->SetDisabled(!active);
         pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight)->SetDisabled(!active);
         pGraphics->GetControlWithParamIdx(kCabIRBlend)->SetDisabled(!active);
+        break;
+      case kModelToggle:
+        if (active && (mModel == nullptr) && (mStagedModel == nullptr))
+        {
+          WDL_String fileName;
+          WDL_String path;
+          if (mNAMPath.GetLength())
+          {
+            path.Set(mNAMPath.Get());
+            path.remove_filepart();
+          }
+          pGraphics->PromptForFile(
+            fileName, path, EFileAction::Open, "nam", [this](const WDL_String& chosenFileName, const WDL_String&) {
+              if (chosenFileName.GetLength())
+              {
+                const std::string msg = _StageModel(chosenFileName);
+                if (msg.size())
+                {
+                  std::stringstream ss;
+                  ss << "Failed to load NAM model. Message:\n\n" << msg;
+                  _ShowMessageBox(GetUI(), ss.str().c_str(), "Failed to load model!", kMB_OK);
+                  GetParam(kModelToggle)->Set(0.0);
+                }
+                else
+                  GetParam(kModelToggle)->Set(1.0);
+              }
+              else
+              {
+                GetParam(kModelToggle)->Set(0.0);
+              }
+              SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+            });
+        }
         break;
       default: break;
     }
