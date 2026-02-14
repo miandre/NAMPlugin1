@@ -49,6 +49,8 @@ enum EParams
   kUserLPFFrequency,
   // Cab IR blend (append-only to preserve old serialization order)
   kCabIRBlend,
+  // Model on/off (bypass model stage when off)
+  kModelToggle,
   kNumParams
 };
 

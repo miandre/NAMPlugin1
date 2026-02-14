@@ -50,8 +50,8 @@ const IVStyle style =
           DEFAULT_SHADOW_OFFSET,
           DEFAULT_WIDGET_FRAC,
           DEFAULT_WIDGET_ANGLE};
-const IVStyle titleStyle =
-  DEFAULT_STYLE.WithValueText(IText(30, COLOR_WHITE, "Michroma-Regular")).WithDrawFrame(false).WithShadowOffset(2.f);
+const IVStyle ampKnobStyle = style.WithShowValue(false).WithLabelText(
+  IText(DEFAULT_TEXT_SIZE + -4.f, COLOR_BLACK, "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle));
 const IVStyle radioButtonStyle =
   style
     .WithColor(EVColor::kON, PluginColors::NAM_THEMECOLOR) // Pressed buttons and their labels
@@ -90,6 +90,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kEQActive)->InitBool("ToneStack", true);
   GetParam(kOutputMode)->InitEnum("OutputMode", 1, {"Raw", "Normalized", "Calibrated"}); // TODO DRY w/ control
   GetParam(kIRToggle)->InitBool("IRToggle", true);
+  GetParam(kModelToggle)->InitBool("ModelToggle", false);
   GetParam(kCabIRBlend)->InitDouble("Cab Blend", 50.0, 0.0, 100.0, 0.1, "%");
   GetParam(kUserHPFFrequency)->InitDouble("HPF", 20.0, 20.0, 500.0, 1.0, "Hz");
   GetParam(kUserLPFFrequency)->InitDouble("LPF", 22000.0, 5000.0, 22000.0, 10.0, "Hz");
@@ -119,6 +120,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     pGraphics->LoadFont("Roboto-Regular", ROBOTO_FN);
     pGraphics->LoadFont("Michroma-Regular", MICHROMA_FN);
+    if (!pGraphics->LoadFont("ArialNarrow-Bold", "Arial Narrow", ETextStyle::Bold))
+      pGraphics->LoadFont("ArialNarrow-Bold", ROBOTO_FN);
 
     const auto gearSVG = pGraphics->LoadSVG(GEAR_FN);
     const auto fileSVG = pGraphics->LoadSVG(FILE_FN);
@@ -126,7 +129,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto crossSVG = pGraphics->LoadSVG(CLOSE_BUTTON_FN);
     const auto rightArrowSVG = pGraphics->LoadSVG(RIGHT_ARROW_FN);
     const auto leftArrowSVG = pGraphics->LoadSVG(LEFT_ARROW_FN);
-    const auto modelIconSVG = pGraphics->LoadSVG(MODEL_ICON_FN);
     const auto irIconOnSVG = pGraphics->LoadSVG(IR_ICON_ON_FN);
     const auto irIconOffSVG = pGraphics->LoadSVG(IR_ICON_OFF_FN);
 
@@ -134,64 +136,88 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto fileBackgroundBitmap = pGraphics->LoadBitmap(FILEBACKGROUND_FN);
     const auto inputLevelBackgroundBitmap = pGraphics->LoadBitmap(INPUTLEVELBACKGROUND_FN);
     const auto linesBitmap = pGraphics->LoadBitmap(LINES_FN);
-    const auto knobBackgroundBitmap = pGraphics->LoadBitmap(KNOBBACKGROUND_FN);
+    const auto ampKnobBackgroundBitmap = pGraphics->LoadBitmap(KNOBBACKGROUND_FN);
+    const auto outerKnobBackgroundBitmap = pGraphics->LoadBitmap(FLATKNOBBACKGROUND_FN);
+    const auto switchOffBitmap = pGraphics->LoadBitmap(SWITCH_OFF_FN);
+    const auto switchOnBitmap = pGraphics->LoadBitmap(SWITCH_ON_FN);
     const auto switchHandleBitmap = pGraphics->LoadBitmap(SLIDESWITCHHANDLE_FN);
     const auto meterBackgroundBitmap = pGraphics->LoadBitmap(METERBACKGROUND_FN);
 
     const auto b = pGraphics->GetBounds();
     const auto mainArea = b.GetPadded(-20);
     const auto contentArea = mainArea.GetPadded(-10);
-    const auto titleHeight = 50.0f;
-    const auto titleArea = contentArea.GetFromTop(titleHeight);
 
     // Areas for knobs
-    const auto knobsPad = 20.0f;
-    const auto knobsExtraSpaceBelowTitle = 25.0f;
-    const auto singleKnobPad = -2.0f;
-    const auto knobsArea = contentArea.GetFromTop(NAM_KNOB_HEIGHT)
-                             .GetReducedFromLeft(knobsPad)
-                             .GetReducedFromRight(knobsPad)
-                             .GetVShifted(titleHeight + knobsExtraSpaceBelowTitle);
-    constexpr int kKnobColInput = 0;
-    constexpr int kKnobColGate = 1;
-    constexpr int kKnobColBass = 2;
-    constexpr int kKnobColMid = 3;
-    constexpr int kKnobColTreble = 4;
-    constexpr int kKnobColHPF = 5;
-    constexpr int kKnobColLPF = 6;
-    constexpr int kKnobColOutput = 7;
-    const auto inputKnobArea = knobsArea.GetGridCell(0, kKnobColInput, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto noiseGateArea = knobsArea.GetGridCell(0, kKnobColGate, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto bassKnobArea = knobsArea.GetGridCell(0, kKnobColBass, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto midKnobArea = knobsArea.GetGridCell(0, kKnobColMid, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto trebleKnobArea = knobsArea.GetGridCell(0, kKnobColTreble, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto hpfKnobArea = knobsArea.GetGridCell(0, kKnobColHPF, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto lpfKnobArea = knobsArea.GetGridCell(0, kKnobColLPF, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto outputKnobArea = knobsArea.GetGridCell(0, kKnobColOutput, 1, numKnobs).GetPadded(-singleKnobPad);
-    const auto noiseGateLEDRect = noiseGateArea.GetFromBLHC(16.0f, 16.0f).GetTranslated(8.0f, -15.0f);
+    // Keep these as explicit anchors so each group can be tuned independently.
+    const float knobWidth = 80.0f;
+    auto makeKnobArea = [&](const float centerX, const float topY) {
+      return IRECT(centerX - knobWidth * 0.5f, topY, centerX + knobWidth * 0.5f, topY + NAM_KNOB_HEIGHT);
+    };
 
+    // Top corner controls (independent group)
+    const float topCornerKnobCenterX = 55.0f;
+    const float topCornerKnobTop = 66.0f;
+    const auto inputKnobArea = makeKnobArea(topCornerKnobCenterX, topCornerKnobTop);
+    const auto outputKnobArea = makeKnobArea(b.W() - topCornerKnobCenterX, topCornerKnobTop);
+
+    // Amp-face controls (independent group)
+    const float frontKnobVerticalOffset = 0.5f;
+    const float frontKnobTop =
+      std::min(b.H() - NAM_KNOB_HEIGHT - 28.0f, 228.0f + 0.75f * NAM_KNOB_HEIGHT) + frontKnobVerticalOffset;
+    const float frontRowCenterX = b.MW();
+    const float frontKnobSpacing = 160.0f;
+    const auto noiseGateArea = makeKnobArea(frontRowCenterX - 1.5f * frontKnobSpacing, frontKnobTop);
+    const auto bassKnobArea = makeKnobArea(frontRowCenterX - 0.5f * frontKnobSpacing, frontKnobTop);
+    const auto midKnobArea = makeKnobArea(frontRowCenterX + 0.5f * frontKnobSpacing, frontKnobTop);
+    const auto trebleKnobArea = makeKnobArea(frontRowCenterX + 1.5f * frontKnobSpacing, frontKnobTop);
+    const auto noiseGateLEDRect = noiseGateArea.GetFromBLHC(14.0f, 14.0f).GetTranslated(3.0f, -25.0f);
+    const float modelSwitchScale = 0.20f;
+    const float modelSwitchWidth = switchOffBitmap.W() * modelSwitchScale;
+    const float modelSwitchHeight = switchOffBitmap.H() * modelSwitchScale;
+    const float modelSwitchCenterX = std::min(b.W() - 120.0f, trebleKnobArea.MW() + 185.0f)-25.0f;
+    const float modelSwitchCenterY = noiseGateArea.MH();
+    const auto modelToggleArea = IRECT(modelSwitchCenterX - 0.5f * modelSwitchWidth,
+                                       modelSwitchCenterY - 0.5f * modelSwitchHeight,
+                                       modelSwitchCenterX + 0.5f * modelSwitchWidth,
+                                       modelSwitchCenterY + 0.5f * modelSwitchHeight);
+
+    // Gate/EQ toggle row (independent group)
+    const float toggleTop = frontKnobTop + 86.0f;
     const auto ngToggleArea =
-      noiseGateArea.GetVShifted(noiseGateArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
-    const auto eqToggleArea = midKnobArea.GetVShifted(midKnobArea.H()).SubRectVertical(2, 0).GetReducedFromTop(10.0f);
+      IRECT(noiseGateArea.MW() - 17.0f, toggleTop, noiseGateArea.MW() + 17.0f, toggleTop + 24.0f);
+    const auto eqToggleArea = IRECT(midKnobArea.MW() - 17.0f, toggleTop, midKnobArea.MW() + 17.0f, toggleTop + 24.0f);
+
+    // Amp-side controls (independent group)
+    // Keep HPF/LPF vertically aligned with input/output and just below the front row.
+    const float sideKnobTop = frontKnobTop + 22.0f;
+    const auto hpfKnobArea = makeKnobArea(topCornerKnobCenterX, sideKnobTop);
+    const auto lpfKnobArea = makeKnobArea(b.W() - topCornerKnobCenterX, sideKnobTop);
 
     // Areas for model and IR
-    const auto fileWidth = 200.0f;
-    const auto fileHeight = 30.0f;
-    const auto fileSpacing = 6.0f;
-    const auto fileRowsArea = contentArea.GetFromBottom(3.0f * fileHeight + 2.0f * fileSpacing + 2.0f);
-    const auto modelArea = fileRowsArea.SubRectVertical(3, 0).GetMidHPadded(fileWidth).GetVShifted(-1.0f);
-    const auto modelIconArea = modelArea.GetFromLeft(30).GetTranslated(-40, 10);
-    const auto irLeftArea = fileRowsArea.SubRectVertical(3, 1).GetMidHPadded(fileWidth).GetVShifted(2.0f);
-    const auto irRightArea = fileRowsArea.SubRectVertical(3, 2).GetMidHPadded(fileWidth).GetVShifted(5.0f);
+    const auto modelArea = IRECT(b.MW() - 125.0f, 150.0f, b.MW() + 125.0f, 180.0f);
+    const float irRowTop = 537.0f;
+    const float irRowHeight = 30.0f;
+    const float irPickerWidth = 300.0f;
+    const float irCenterGap = 140.0f;
+    const float leftIRRight = b.MW() - 0.5f * irCenterGap;
+    const float rightIRLeft = b.MW() + 0.5f * irCenterGap;
+    const auto irLeftArea = IRECT(leftIRRight - irPickerWidth, irRowTop, leftIRRight, irRowTop + irRowHeight);
+    const auto irRightArea = IRECT(rightIRLeft, irRowTop, rightIRLeft + irPickerWidth, irRowTop + irRowHeight);
     const auto irSwitchArea = irLeftArea.GetFromLeft(30.0f).GetHShifted(-40.0f).GetScaledAboutCentre(0.6f);
-    const auto cabBlendArea = irLeftArea.GetFromRight(25.0f)
-                                 .GetVShifted((irRightArea.MH() - irLeftArea.MH()) * 0.5f)
-                                  .GetHShifted(55.0f)
-                                 .GetScaledAboutCentre(2.4f);
+    const float blendSliderWidth = 130.0f;
+    const float blendSliderHeight = 60.0f;
+    const float blendSliderTop = irRowTop - 10.0f;
+    const auto cabBlendArea = IRECT(b.MW() - 0.5f * blendSliderWidth, blendSliderTop, b.MW() + 0.5f * blendSliderWidth,
+                                    blendSliderTop + blendSliderHeight);
 
-    // Areas for meters
-    const auto inputMeterArea = contentArea.GetFromLeft(30).GetHShifted(-20).GetMidVPadded(100).GetVShifted(-25);
-    const auto outputMeterArea = contentArea.GetFromRight(30).GetHShifted(20).GetMidVPadded(100).GetVShifted(-25);
+    // Areas for meters (aligned under input/output knobs, and low enough to avoid overlap)
+    const float meterWidth = 15.0f;
+    const float meterHeight = 100.0f;
+    const float meterTop = topCornerKnobTop + NAM_KNOB_HEIGHT + 10.0f;
+    const auto inputMeterArea =
+      IRECT(inputKnobArea.MW() - 0.5f * meterWidth, meterTop, inputKnobArea.MW() + 0.5f * meterWidth, meterTop + meterHeight);
+    const auto outputMeterArea = IRECT(
+      outputKnobArea.MW() - 0.5f * meterWidth, meterTop, outputKnobArea.MW() + 0.5f * meterWidth, meterTop + meterHeight);
 
     // Misc Areas
     const auto settingsButtonArea = CornerButtonArea(b);
@@ -248,8 +274,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     pGraphics->AttachBackground(BACKGROUND_FN);
     pGraphics->AttachControl(new IBitmapControl(b, linesBitmap));
-    pGraphics->AttachControl(new IVLabelControl(titleArea, "NEURAL AMP MODELER", titleStyle));
-    pGraphics->AttachControl(new ISVGControl(modelIconArea, modelIconSVG));
 
 #ifdef NAM_PICK_DIRECTORY
     const std::string defaultNamFileString = "Select model directory...";
@@ -263,6 +287,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                 loadModelCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
                                 fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
       kCtrlTagModelFileBrowser);
+    pGraphics->AttachControl(new NAMBitmapToggleControl(modelToggleArea, kModelToggle, switchOffBitmap, switchOnBitmap))
+      ->SetTooltip("Model On/Off");
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle));
     pGraphics->AttachControl(new NAMFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Select cab IR L...", "wav",
                                                        loadIRLeftCompletionHandler, style, fileSVG, crossSVG,
@@ -274,24 +300,38 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                  loadIRRightCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
                                  fileBackgroundBitmap, globeSVG, "Get IRs", getUrl),
       kCtrlTagIRFileBrowserRight);
-    pGraphics->AttachControl(new NAMKnobControl(cabBlendArea, kCabIRBlend, "", style, knobBackgroundBitmap));
-    pGraphics->AttachControl(
-      new NAMSwitchControl(ngToggleArea, kNoiseGateActive, "Noise Gate", style, switchHandleBitmap));
+    pGraphics->AttachControl(new NAMBlendSliderControl(cabBlendArea, kCabIRBlend, style));
+    pGraphics->AttachControl(new NAMSwitchControl(ngToggleArea, kNoiseGateActive, "Noise Gate", style, switchHandleBitmap))
+      ->Hide(true);
     pGraphics->AttachControl(new NAMLEDControl(noiseGateLEDRect), kCtrlTagNoiseGateLED);
-    pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap));
+    pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap))->Hide(true);
 
     // The knobs
-    pGraphics->AttachControl(new NAMKnobControl(inputKnobArea, kInputLevel, "", style, knobBackgroundBitmap));
-    pGraphics->AttachControl(new NAMKnobControl(noiseGateArea, kNoiseGateThreshold, "", style, knobBackgroundBitmap));
     pGraphics->AttachControl(
-      new NAMKnobControl(bassKnobArea, kToneBass, "", style, knobBackgroundBitmap), -1, "EQ_KNOBS");
+      new NAMKnobControl(inputKnobArea, kInputLevel, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
+    pGraphics->AttachControl(new NAMKnobControl(noiseGateArea, kNoiseGateThreshold, "GATE", ampKnobStyle,
+                                                ampKnobBackgroundBitmap, false, true, 0.75f, AP_KNOP_OFFSET));
     pGraphics->AttachControl(
-      new NAMKnobControl(midKnobArea, kToneMid, "", style, knobBackgroundBitmap), -1, "EQ_KNOBS");
+      new NAMKnobControl(bassKnobArea, kToneBass, "BASS", ampKnobStyle, ampKnobBackgroundBitmap, false, true, 0.7f,
+                         AP_KNOP_OFFSET),
+      -1,
+      "EQ_KNOBS");
     pGraphics->AttachControl(
-      new NAMKnobControl(trebleKnobArea, kToneTreble, "", style, knobBackgroundBitmap), -1, "EQ_KNOBS");
-    pGraphics->AttachControl(new NAMKnobControl(hpfKnobArea, kUserHPFFrequency, "", style, knobBackgroundBitmap));
-    pGraphics->AttachControl(new NAMKnobControl(lpfKnobArea, kUserLPFFrequency, "", style, knobBackgroundBitmap));
-    pGraphics->AttachControl(new NAMKnobControl(outputKnobArea, kOutputLevel, "", style, knobBackgroundBitmap));
+      new NAMKnobControl(midKnobArea, kToneMid, "MIDDLE", ampKnobStyle, ampKnobBackgroundBitmap, false, true, 0.7f,
+                         AP_KNOP_OFFSET),
+      -1,
+      "EQ_KNOBS");
+    pGraphics->AttachControl(
+      new NAMKnobControl(
+        trebleKnobArea, kToneTreble, "TREBLE", ampKnobStyle, ampKnobBackgroundBitmap, false, true, 0.7f,
+        AP_KNOP_OFFSET),
+      -1, "EQ_KNOBS");
+    pGraphics->AttachControl(new NAMKnobControl(
+      hpfKnobArea, kUserHPFFrequency, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
+    pGraphics->AttachControl(new NAMKnobControl(
+      lpfKnobArea, kUserLPFFrequency, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
+    pGraphics->AttachControl(new NAMKnobControl(
+      outputKnobArea, kOutputLevel, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
 
     // The meters
     pGraphics->AttachControl(new NAMMeterControl(inputMeterArea, meterBackgroundBitmap, style), kCtrlTagInputMeter);
@@ -564,6 +604,7 @@ void NeuralAmpModeler::OnUIOpen()
   {
     _UpdateControlsFromModel();
   }
+
 }
 
 void NeuralAmpModeler::OnParamChange(int paramIdx)
