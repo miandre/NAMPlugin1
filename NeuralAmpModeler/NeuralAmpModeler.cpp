@@ -22,6 +22,59 @@ using namespace igraphics;
 
 const double kDCBlockerFrequency = 5.0;
 
+namespace
+{
+struct AsymmetricPreGainShape : public IParam::Shape
+{
+  IParam::Shape* Clone() const override { return new AsymmetricPreGainShape(*this); }
+  IParam::EDisplayType GetDisplayType() const override { return IParam::kDisplayLinear; }
+
+  double NormalizedToValue(double normalizedValue, const IParam& param) const override
+  {
+    const double minVal = param.GetMin();
+    const double maxVal = param.GetMax();
+    constexpr double pivotNorm = 0.5;
+    constexpr double pivotValue = 0.0;
+    const double n = std::clamp(normalizedValue, 0.0, 1.0);
+
+    if (minVal >= pivotValue || maxVal <= pivotValue)
+      return minVal + n * (maxVal - minVal);
+
+    if (n <= pivotNorm)
+    {
+      const double t = n / pivotNorm;
+      return minVal + t * (pivotValue - minVal);
+    }
+
+    const double t = (n - pivotNorm) / (1.0 - pivotNorm);
+    return pivotValue + t * (maxVal - pivotValue);
+  }
+
+  double ValueToNormalized(double nonNormalizedValue, const IParam& param) const override
+  {
+    const double minVal = param.GetMin();
+    const double maxVal = param.GetMax();
+    constexpr double pivotNorm = 0.5;
+    constexpr double pivotValue = 0.0;
+    const double v = std::clamp(nonNormalizedValue, minVal, maxVal);
+
+    if (minVal >= pivotValue || maxVal <= pivotValue)
+      return (v - minVal) / (maxVal - minVal);
+
+    if (v <= pivotValue)
+    {
+      const double denom = (pivotValue - minVal);
+      const double t = (denom > 0.0) ? ((v - minVal) / denom) : 0.0;
+      return t * pivotNorm;
+    }
+
+    const double denom = (maxVal - pivotValue);
+    const double t = (denom > 0.0) ? ((v - pivotValue) / denom) : 0.0;
+    return pivotNorm + t * (1.0 - pivotNorm);
+  }
+};
+} // namespace
+
 // Styles
 const IVColorSpec colorSpec{
   DEFAULT_BGCOLOR, // Background
@@ -81,7 +134,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   _InitToneStack();
   nam::activations::Activation::enable_fast_tanh();
   GetParam(kInputLevel)->InitGain("Input", 0.0, -20.0, 20.0, 0.1);
-  GetParam(kPreModelGain)->InitGain("Pre Gain", 0.0, -40.0, 20.0, 0.1);
+  GetParam(kPreModelGain)->InitDouble(
+    "Pre Gain", 0.0, -40.0, 20.0, 0.1, "dB", 0, "", AsymmetricPreGainShape(), IParam::kUnitDB);
   GetParam(kToneBass)->InitDouble("Bass", 5.0, 0.0, 10.0, 0.1);
   GetParam(kToneMid)->InitDouble("Middle", 5.0, 0.0, 10.0, 0.1);
   GetParam(kToneTreble)->InitDouble("Treble", 5.0, 0.0, 10.0, 0.1);
