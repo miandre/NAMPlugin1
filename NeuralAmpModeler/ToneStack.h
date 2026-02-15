@@ -39,6 +39,8 @@ public:
     SetParam("bass", 5.0);
     SetParam("middle", 5.0);
     SetParam("treble", 5.0);
+    SetParam("presence", 5.0);
+    SetParam("depth", 5.0);
   };
   ~BasicNamToneStack() = default;
 
@@ -51,11 +53,15 @@ protected:
   recursive_linear_filter::LowShelf mToneBass;
   recursive_linear_filter::Peaking mToneMid;
   recursive_linear_filter::HighShelf mToneTreble;
+  recursive_linear_filter::HighShelf mTonePresence;
+  recursive_linear_filter::Peaking mToneDepth;
 
   // HACK not DRY w knob defs
   double mBassVal = 5.0;
   double mMiddleVal = 5.0;
   double mTrebleVal = 5.0;
+  double mPresenceVal = 5.0;
+  double mDepthVal = 5.0;
 };
 }; // namespace tone_stack
 }; // namespace dsp

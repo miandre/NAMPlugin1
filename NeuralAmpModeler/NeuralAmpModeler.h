@@ -53,6 +53,9 @@ enum EParams
   kModelToggle,
   // Gain trim directly before the model stage
   kPreModelGain,
+  // Additional amp-style tone controls
+  kTonePresence,
+  kToneDepth,
   kNumParams
 };
 

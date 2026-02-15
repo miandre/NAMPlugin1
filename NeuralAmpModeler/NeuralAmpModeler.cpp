@@ -139,6 +139,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kToneBass)->InitDouble("Bass", 5.0, 0.0, 10.0, 0.1);
   GetParam(kToneMid)->InitDouble("Middle", 5.0, 0.0, 10.0, 0.1);
   GetParam(kToneTreble)->InitDouble("Treble", 5.0, 0.0, 10.0, 0.1);
+  GetParam(kTonePresence)->InitDouble("Presence", 5.0, 0.0, 10.0, 0.1);
+  GetParam(kToneDepth)->InitDouble("Depth", 5.0, 0.0, 10.0, 0.1);
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
   GetParam(kNoiseGateThreshold)->InitGain("Threshold", -80.0, -100.0, 0.0, 0.1);
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
@@ -220,17 +222,19 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float frontKnobTop =
       std::min(b.H() - NAM_KNOB_HEIGHT - 28.0f, 228.0f + 0.75f * NAM_KNOB_HEIGHT) + frontKnobVerticalOffset;
     const float frontRowCenterX = b.MW();
-    const float frontKnobSpacing = 120.0f;
-    const auto noiseGateArea = makeKnobArea(frontRowCenterX - 2.0f * frontKnobSpacing, frontKnobTop);
-    const auto preModelGainArea = makeKnobArea(frontRowCenterX - 1.0f * frontKnobSpacing, frontKnobTop);
-    const auto bassKnobArea = makeKnobArea(frontRowCenterX, frontKnobTop);
-    const auto midKnobArea = makeKnobArea(frontRowCenterX + 1.0f * frontKnobSpacing, frontKnobTop);
-    const auto trebleKnobArea = makeKnobArea(frontRowCenterX + 2.0f * frontKnobSpacing, frontKnobTop);
+    const float frontKnobSpacing = 95.0f;
+    const auto noiseGateArea = makeKnobArea(frontRowCenterX - 3.0f * frontKnobSpacing, frontKnobTop);
+    const auto preModelGainArea = makeKnobArea(frontRowCenterX - 2.0f * frontKnobSpacing, frontKnobTop);
+    const auto bassKnobArea = makeKnobArea(frontRowCenterX - 1.0f * frontKnobSpacing, frontKnobTop);
+    const auto midKnobArea = makeKnobArea(frontRowCenterX, frontKnobTop);
+    const auto trebleKnobArea = makeKnobArea(frontRowCenterX + 1.0f * frontKnobSpacing, frontKnobTop);
+    const auto presenceKnobArea = makeKnobArea(frontRowCenterX + 2.0f * frontKnobSpacing, frontKnobTop);
+    const auto depthKnobArea = makeKnobArea(frontRowCenterX + 3.0f * frontKnobSpacing, frontKnobTop);
     const auto noiseGateLEDRect = noiseGateArea.GetFromBLHC(14.0f, 14.0f).GetTranslated(3.0f, -25.0f);
     const float modelSwitchScale = 0.20f;
     const float modelSwitchWidth = switchOffBitmap.W() * modelSwitchScale;
     const float modelSwitchHeight = switchOffBitmap.H() * modelSwitchScale;
-    const float modelSwitchCenterX = std::min(b.W() - 120.0f, trebleKnobArea.MW() + 185.0f)-25.0f;
+    const float modelSwitchCenterX = std::min(b.W() - 120.0f, depthKnobArea.MW() + 130.0f);
     const float modelSwitchCenterY = noiseGateArea.MH();
     const auto modelToggleArea = IRECT(modelSwitchCenterX - 0.5f * modelSwitchWidth,
                                        modelSwitchCenterY - 0.5f * modelSwitchHeight,
@@ -388,6 +392,16 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         trebleKnobArea, kToneTreble, "TREBLE", ampKnobStyle, ampKnobBackgroundBitmap, false, true, 0.7f,
         AP_KNOP_OFFSET),
       -1, "EQ_KNOBS");
+    pGraphics->AttachControl(
+      new NAMKnobControl(presenceKnobArea, kTonePresence, "PRESENCE", ampKnobStyle, ampKnobBackgroundBitmap, false, true,
+                         0.7f, AP_KNOP_OFFSET),
+      -1,
+      "EQ_KNOBS");
+    pGraphics->AttachControl(
+      new NAMKnobControl(depthKnobArea, kToneDepth, "DEPTH", ampKnobStyle, ampKnobBackgroundBitmap, false, true, 0.7f,
+                         AP_KNOP_OFFSET),
+      -1,
+      "EQ_KNOBS");
     pGraphics->AttachControl(new NAMKnobControl(
       hpfKnobArea, kUserHPFFrequency, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
     pGraphics->AttachControl(new NAMKnobControl(
@@ -703,6 +717,8 @@ void NeuralAmpModeler::OnParamChange(int paramIdx)
     case kToneBass: mToneStack->SetParam("bass", GetParam(paramIdx)->Value()); break;
     case kToneMid: mToneStack->SetParam("middle", GetParam(paramIdx)->Value()); break;
     case kToneTreble: mToneStack->SetParam("treble", GetParam(paramIdx)->Value()); break;
+    case kTonePresence: mToneStack->SetParam("presence", GetParam(paramIdx)->Value()); break;
+    case kToneDepth: mToneStack->SetParam("depth", GetParam(paramIdx)->Value()); break;
     default: break;
   }
 }

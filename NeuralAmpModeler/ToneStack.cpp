@@ -6,7 +6,9 @@ DSP_SAMPLE** dsp::tone_stack::BasicNamToneStack::Process(DSP_SAMPLE** inputs, co
   DSP_SAMPLE** bassPointers = mToneBass.Process(inputs, numChannels, numFrames);
   DSP_SAMPLE** midPointers = mToneMid.Process(bassPointers, numChannels, numFrames);
   DSP_SAMPLE** treblePointers = mToneTreble.Process(midPointers, numChannels, numFrames);
-  return treblePointers;
+  DSP_SAMPLE** presencePointers = mTonePresence.Process(treblePointers, numChannels, numFrames);
+  DSP_SAMPLE** depthPointers = mToneDepth.Process(presencePointers, numChannels, numFrames);
+  return depthPointers;
 }
 
 void dsp::tone_stack::BasicNamToneStack::Reset(const double sampleRate, const int maxBlockSize)
@@ -17,6 +19,8 @@ void dsp::tone_stack::BasicNamToneStack::Reset(const double sampleRate, const in
   SetParam("bass", mBassVal);
   SetParam("middle", mMiddleVal);
   SetParam("treble", mTrebleVal);
+  SetParam("presence", mPresenceVal);
+  SetParam("depth", mDepthVal);
 }
 
 void dsp::tone_stack::BasicNamToneStack::SetParam(const std::string name, const double val)
@@ -57,5 +61,28 @@ void dsp::tone_stack::BasicNamToneStack::SetParam(const std::string name, const 
     const double trebleQuality = 0.707;
     recursive_linear_filter::BiquadParams trebleParams(sampleRate, trebleFrequency, trebleQuality, trebleGainDB);
     mToneTreble.SetParams(trebleParams);
+  }
+  else if (name == "presence")
+  {
+    // HACK: Store for refresh
+    mPresenceVal = val;
+    const double sampleRate = GetSampleRate();
+    const double presenceGainDB = 2.0 * (val - 5.0); // +/- 10
+    const double presenceFrequency = 4500.0;
+    const double presenceQuality = 0.707;
+    recursive_linear_filter::BiquadParams presenceParams(
+      sampleRate, presenceFrequency, presenceQuality, presenceGainDB);
+    mTonePresence.SetParams(presenceParams);
+  }
+  else if (name == "depth")
+  {
+    // HACK: Store for refresh
+    mDepthVal = val;
+    const double sampleRate = GetSampleRate();
+    const double depthGainDB = 2.4 * (val - 5.0); // +/- 12
+    const double depthFrequency = 110.0;
+    const double depthQuality = 0.9;
+    recursive_linear_filter::BiquadParams depthParams(sampleRate, depthFrequency, depthQuality, depthGainDB);
+    mToneDepth.SetParams(depthParams);
   }
 }
