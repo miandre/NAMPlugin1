@@ -51,6 +51,8 @@ enum EParams
   kCabIRBlend,
   // Model on/off (bypass model stage when off)
   kModelToggle,
+  // Gain trim directly before the model stage
+  kPreModelGain,
   kNumParams
 };
 
