@@ -56,6 +56,8 @@ enum EParams
   // Additional amp-style tone controls
   kTonePresence,
   kToneDepth,
+  // Master volume before IR section
+  kMasterVolume,
   kNumParams
 };
 
@@ -258,6 +260,7 @@ private:
 
   void _SetInputGain();
   void _SetOutputGain();
+  void _SetMasterGain();
 
   // See: Unserialization.cpp
   void _UnserializeApplyConfig(nlohmann::json& config);
@@ -291,6 +294,7 @@ private:
   // Input and output gain
   double mInputGain = 1.0;
   double mOutputGain = 1.0;
+  double mMasterGain = 1.0;
 
   // Noise gates
   dsp::noise_gate::Trigger mNoiseGateTrigger;

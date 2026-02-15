@@ -141,6 +141,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kToneTreble)->InitDouble("Treble", 5.0, 0.0, 10.0, 0.1);
   GetParam(kTonePresence)->InitDouble("Presence", 5.0, 0.0, 10.0, 0.1);
   GetParam(kToneDepth)->InitDouble("Depth", 5.0, 0.0, 10.0, 0.1);
+  GetParam(kMasterVolume)->InitDouble("Master", 5.0, 0.0, 10.0, 0.1);
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
   GetParam(kNoiseGateThreshold)->InitGain("Threshold", -80.0, -100.0, 0.0, 0.1);
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
@@ -154,6 +155,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kCalibrateInput)->InitBool(kCalibrateInputParamName.c_str(), kDefaultCalibrateInput);
   GetParam(kInputCalibrationLevel)
     ->InitDouble(kInputCalibrationLevelParamName.c_str(), kDefaultInputCalibrationLevel, -60.0, 60.0, 0.1, "dBu");
+  _SetMasterGain();
 
   mNoiseGateTrigger.AddListener(&mNoiseGateGain);
 
@@ -221,8 +223,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float frontKnobVerticalOffset = 0.5f;
     const float frontKnobTop =
       std::min(b.H() - NAM_KNOB_HEIGHT - 28.0f, 228.0f + 0.75f * NAM_KNOB_HEIGHT) + frontKnobVerticalOffset;
-    const float frontRowCenterX = b.MW();
-    const float frontKnobSpacing = 95.0f;
+    const float frontRowCenterX = b.MW()-55.0f;
+    const float frontKnobSpacing = 80.0f;
     const auto noiseGateArea = makeKnobArea(frontRowCenterX - 3.0f * frontKnobSpacing, frontKnobTop);
     const auto preModelGainArea = makeKnobArea(frontRowCenterX - 2.0f * frontKnobSpacing, frontKnobTop);
     const auto bassKnobArea = makeKnobArea(frontRowCenterX - 1.0f * frontKnobSpacing, frontKnobTop);
@@ -230,11 +232,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto trebleKnobArea = makeKnobArea(frontRowCenterX + 1.0f * frontKnobSpacing, frontKnobTop);
     const auto presenceKnobArea = makeKnobArea(frontRowCenterX + 2.0f * frontKnobSpacing, frontKnobTop);
     const auto depthKnobArea = makeKnobArea(frontRowCenterX + 3.0f * frontKnobSpacing, frontKnobTop);
+    const auto masterKnobArea = makeKnobArea(frontRowCenterX + 4.0f * frontKnobSpacing, frontKnobTop);
     const auto noiseGateLEDRect = noiseGateArea.GetFromBLHC(14.0f, 14.0f).GetTranslated(3.0f, -25.0f);
     const float modelSwitchScale = 0.20f;
     const float modelSwitchWidth = switchOffBitmap.W() * modelSwitchScale;
     const float modelSwitchHeight = switchOffBitmap.H() * modelSwitchScale;
-    const float modelSwitchCenterX = std::min(b.W() - 120.0f, depthKnobArea.MW() + 130.0f);
+    const float modelSwitchCenterX = std::min(b.W() - 120.0f, masterKnobArea.MW() + 130.0f);
     const float modelSwitchCenterY = noiseGateArea.MH();
     const auto modelToggleArea = IRECT(modelSwitchCenterX - 0.5f * modelSwitchWidth,
                                        modelSwitchCenterY - 0.5f * modelSwitchHeight,
@@ -402,6 +405,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                          AP_KNOP_OFFSET),
       -1,
       "EQ_KNOBS");
+    pGraphics->AttachControl(
+      new NAMKnobControl(masterKnobArea, kMasterVolume, "MASTER", ampKnobStyle, ampKnobBackgroundBitmap, false, true,
+                         0.7f, AP_KNOP_OFFSET));
     pGraphics->AttachControl(new NAMKnobControl(
       hpfKnobArea, kUserHPFFrequency, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
     pGraphics->AttachControl(new NAMKnobControl(
@@ -502,6 +508,12 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** toneStackOutPointers = (toneStackActive && mToneStack != nullptr)
                                     ? mToneStack->Process(gateGainOutput, numChannelsInternal, nFrames)
                                     : gateGainOutput;
+  if (mMasterGain != 1.0)
+  {
+    for (size_t c = 0; c < numChannelsInternal; ++c)
+      for (size_t s = 0; s < numFrames; ++s)
+        toneStackOutPointers[c][s] *= mMasterGain;
+  }
 
   sample** irPointers = toneStackOutPointers;
   if (GetParam(kIRToggle)->Value())
@@ -713,6 +725,7 @@ void NeuralAmpModeler::OnParamChange(int paramIdx)
     // Changes to the output gain
     case kOutputLevel:
     case kOutputMode: _SetOutputGain(); break;
+    case kMasterVolume: _SetMasterGain(); break;
     // Tone stack:
     case kToneBass: mToneStack->SetParam("bass", GetParam(paramIdx)->Value()); break;
     case kToneMid: mToneStack->SetParam("middle", GetParam(paramIdx)->Value()); break;
@@ -991,6 +1004,13 @@ void NeuralAmpModeler::_SetOutputGain()
     }
   }
   mOutputGain = DBToAmp(gainDB);
+}
+
+void NeuralAmpModeler::_SetMasterGain()
+{
+  const double value = GetParam(kMasterVolume)->Value();
+  const double masterGainDB = (value <= 5.0) ? (-40.0 + (value / 5.0) * 40.0) : (((value - 5.0) / 5.0) * 12.0);
+  mMasterGain = DBToAmp(masterGainDB);
 }
 
 std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath)
