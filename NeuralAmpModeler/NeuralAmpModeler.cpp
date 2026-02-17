@@ -1,5 +1,6 @@
 #include <algorithm> // std::clamp, std::min
 #include <cmath> // pow
+#include <cstring> // strcmp
 #include <filesystem>
 #include <iostream>
 #include <utility>
@@ -142,6 +143,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kTonePresence)->InitDouble("Presence", 5.0, 0.0, 10.0, 0.1);
   GetParam(kToneDepth)->InitDouble("Depth", 5.0, 0.0, 10.0, 0.1);
   GetParam(kMasterVolume)->InitDouble("Master", 5.0, 0.0, 10.0, 0.1);
+  GetParam(kTunerActive)->InitBool("Tuner", false);
+  GetParam(kTunerMonitorMode)->InitEnum("Tuner Monitor", 1, {"Mute", "Bypass", "Full"});
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
   GetParam(kNoiseGateThreshold)->InitGain("Threshold", -80.0, -100.0, 0.0, 0.1);
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
@@ -199,6 +202,18 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto outerKnobBackgroundBitmap = pGraphics->LoadBitmap(FLATKNOBBACKGROUND_FN);
     const auto switchOffBitmap = pGraphics->LoadBitmap(SWITCH_OFF_FN);
     const auto switchOnBitmap = pGraphics->LoadBitmap(SWITCH_ON_FN);
+    const auto ampOnBitmap = pGraphics->LoadBitmap(AMP_ON_FN);
+    const auto ampActiveBitmap = pGraphics->LoadBitmap(AMP_ACTIVE_FN);
+    const auto ampOffBitmap = pGraphics->LoadBitmap(AMP_OFF_FN);
+    const auto stompOnBitmap = pGraphics->LoadBitmap(STOMP_ON_FN);
+    const auto stompActiveBitmap = pGraphics->LoadBitmap(STOMP_ACTIVE_FN);
+    const auto stompOffBitmap = pGraphics->LoadBitmap(STOMP_OFF_FN);
+    const auto fxOnBitmap = pGraphics->LoadBitmap(FX_ON_FN);
+    const auto fxActiveBitmap = pGraphics->LoadBitmap(FX_ACTIVE_FN);
+    const auto fxOffBitmap = pGraphics->LoadBitmap(FX_OFF_FN);
+    const auto tunerOnBitmap = pGraphics->LoadBitmap(TUNER_ON_FN);
+    const auto tunerActiveBitmap = pGraphics->LoadBitmap(TUNER_ACTIVE_FN);
+    const auto tunerOffBitmap = pGraphics->LoadBitmap(TUNER_OFF_FN);
     const auto switchHandleBitmap = pGraphics->LoadBitmap(SLIDESWITCHHANDLE_FN);
     const auto meterBackgroundBitmap = pGraphics->LoadBitmap(METERBACKGROUND_FN);
 
@@ -258,6 +273,38 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     // Areas for model and IR
     const auto modelArea = IRECT(b.MW() - 125.0f, 150.0f, b.MW() + 125.0f, 180.0f);
+    const float tunerPanelWidth = 700.0f;
+    const float tunerPanelHeight = 150.0f;
+    const float tunerPanelTop = 180.0f;
+    const auto tunerReadoutArea =
+      IRECT(b.MW() - 0.5f * tunerPanelWidth, tunerPanelTop, b.MW() + 0.5f * tunerPanelWidth, tunerPanelTop + tunerPanelHeight);
+    const float tunerMonitorTop = tunerReadoutArea.T + 10.0f;
+    const auto tunerMonitorArea =
+      IRECT(tunerReadoutArea.L + 12.0f, tunerMonitorTop, tunerReadoutArea.L + 134.0f, tunerMonitorTop + 22.0f);
+    const auto tunerCloseArea = tunerReadoutArea.GetFromTRHC(18.0f, 18.0f).GetTranslated(-10.0f, 10.0f);
+    const auto settingsButtonArea = CornerButtonArea(b);
+    const float topNavIconScale = 0.24f;
+    const float topNavIconHeight = ampOnBitmap.H() * topNavIconScale;
+    const float topNavIconGap = 40.0f;
+    const auto scaledWidthForHeight = [&](const IBitmap& bitmap) {
+      return (bitmap.H() > 0) ? (bitmap.W() * (topNavIconHeight / bitmap.H())) : topNavIconHeight;
+    };
+    const float topNavTunerWidth = scaledWidthForHeight(tunerOnBitmap);
+    const float topNavStompWidth = scaledWidthForHeight(stompOnBitmap);
+    const float topNavAmpWidth = scaledWidthForHeight(ampOnBitmap);
+    const float topNavFxWidth = scaledWidthForHeight(fxOnBitmap);
+    const float topNavRowWidth = topNavTunerWidth + topNavStompWidth + topNavAmpWidth + topNavFxWidth + 3.0f * topNavIconGap;
+    // Keep icons on the same header strip as the settings cog, but centered as a group.
+    const float topNavLeft = b.MW() - 0.5f * topNavRowWidth;
+    const float topNavTop = settingsButtonArea.MH() - 0.5f * topNavIconHeight;
+    // Visual order: Tuner -> Stomp -> Amp -> FX
+    const auto topNavTunerArea = IRECT(topNavLeft, topNavTop, topNavLeft + topNavTunerWidth, topNavTop + topNavIconHeight);
+    const auto topNavStompArea = IRECT(topNavTunerArea.R + topNavIconGap, topNavTop,
+                                       topNavTunerArea.R + topNavIconGap + topNavStompWidth, topNavTop + topNavIconHeight);
+    const auto topNavAmpArea = IRECT(topNavStompArea.R + topNavIconGap, topNavTop,
+                                     topNavStompArea.R + topNavIconGap + topNavAmpWidth, topNavTop + topNavIconHeight);
+    const auto topNavFxArea = IRECT(topNavAmpArea.R + topNavIconGap, topNavTop,
+                                    topNavAmpArea.R + topNavIconGap + topNavFxWidth, topNavTop + topNavIconHeight);
     const float irRowTop = 537.0f;
     const float irRowHeight = 30.0f;
     const float irPickerWidth = 300.0f;
@@ -281,9 +328,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       IRECT(inputKnobArea.MW() - 0.5f * meterWidth, meterTop, inputKnobArea.MW() + 0.5f * meterWidth, meterTop + meterHeight);
     const auto outputMeterArea = IRECT(
       outputKnobArea.MW() - 0.5f * meterWidth, meterTop, outputKnobArea.MW() + 0.5f * meterWidth, meterTop + meterHeight);
-
-    // Misc Areas
-    const auto settingsButtonArea = CornerButtonArea(b);
 
     // Model loader button
     auto loadModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
@@ -354,6 +398,67 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                 loadModelCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
                                 fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
       kCtrlTagModelFileBrowser);
+    pGraphics->AttachControl(new NAMTunerDisplayControl(tunerReadoutArea), kCtrlTagTunerReadout);
+    pGraphics->AttachControl(
+      new NAMTunerMonitorControl(tunerMonitorArea, kTunerMonitorMode, style),
+                              kCtrlTagTunerMute)
+      ->SetTooltip("Tuner monitor mode: Mute / Bypass / Full");
+    pGraphics->AttachControl(new NAMSquareButtonControl(
+                               tunerCloseArea,
+                               [this](IControl*) {
+                                 const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
+                                 if (tunerIdx < mTopNavBypassed.size())
+                                 {
+                                   mTopNavBypassed[tunerIdx] = true;
+                                   _SyncTunerParamToTopNav();
+                                   _RefreshTopNavControls();
+                                 }
+                               },
+                               crossSVG),
+                             kCtrlTagTunerClose)
+      ->SetTooltip("Close tuner");
+    pGraphics->AttachControl(
+      new NAMTopIconControl(topNavAmpArea, ampOnBitmap, ampActiveBitmap, ampOffBitmap,
+                            [this]() { _SetTopNavActiveSection(TopNavSection::Amp); },
+                            [this]() { _ToggleTopNavSectionBypass(TopNavSection::Amp); }),
+      kCtrlTagTopNavAmp)
+      ->SetTooltip("Amp");
+    pGraphics->AttachControl(
+      new NAMTopIconControl(topNavStompArea, stompOnBitmap, stompActiveBitmap, stompOffBitmap,
+                            [this]() { _SetTopNavActiveSection(TopNavSection::Stomp); },
+                            [this]() { _ToggleTopNavSectionBypass(TopNavSection::Stomp); }),
+      kCtrlTagTopNavStomp)
+      ->SetTooltip("Stomp");
+    pGraphics->AttachControl(
+      new NAMTopIconControl(topNavFxArea, fxOnBitmap, fxActiveBitmap, fxOffBitmap,
+                            [this]() { _SetTopNavActiveSection(TopNavSection::Fx); },
+                            [this]() { _ToggleTopNavSectionBypass(TopNavSection::Fx); }),
+      kCtrlTagTopNavFx)
+      ->SetTooltip("FX");
+    pGraphics->AttachControl(
+      new NAMTopIconControl(topNavTunerArea, tunerOnBitmap, tunerActiveBitmap, tunerOffBitmap,
+                            [this]() {
+                              const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
+                              if (tunerIdx < mTopNavBypassed.size())
+                              {
+                                // Tuner behaves as a regular on/off toggle on normal click.
+                                mTopNavBypassed[tunerIdx] = !mTopNavBypassed[tunerIdx];
+                                _SyncTunerParamToTopNav();
+                                _RefreshTopNavControls();
+                              }
+                            },
+                            [this]() {
+                              const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
+                              if (tunerIdx < mTopNavBypassed.size())
+                              {
+                                // Keep Ctrl/Right-click behavior consistent with left-click toggle.
+                                mTopNavBypassed[tunerIdx] = !mTopNavBypassed[tunerIdx];
+                                _SyncTunerParamToTopNav();
+                                _RefreshTopNavControls();
+                              }
+                            }),
+      kCtrlTagTopNavTuner)
+      ->SetTooltip("Tuner");
     pGraphics->AttachControl(new NAMBitmapToggleControl(modelToggleArea, kModelToggle, switchOffBitmap, switchOnBitmap))
       ->SetTooltip("Model On/Off");
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle));
@@ -438,6 +543,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       pControl->SetMouseOverWhenDisabled(true);
     });
 
+    mTopNavActiveSection = TopNavSection::Amp;
+    mTopNavBypassed[static_cast<size_t>(TopNavSection::Tuner)] = !GetParam(kTunerActive)->Bool();
+    _RefreshTopNavControls();
+    _SyncTunerParamToTopNav();
+
     // pGraphics->GetControlWithTag(kCtrlTagOutNorm)->SetMouseEventsWhenDisabled(false);
     // pGraphics->GetControlWithTag(kCtrlTagCalibrateInput)->SetMouseEventsWhenDisabled(false);
   };
@@ -468,7 +578,35 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
   const bool toneStackActive = GetParam(kEQActive)->Value();
   const bool modelActive = GetParam(kModelToggle)->Bool();
+  const bool tunerActive = GetParam(kTunerActive)->Bool();
   const double preModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+
+  if (tunerActive)
+  {
+    // Capture post-input-gain mono for tuner analysis on UI thread.
+    mTunerAnalyzer.PushInputMono(mInputPointers[0], numFrames);
+
+    // 3-way tuner monitor mode while tuner is active:
+    // 0 = Mute, 1 = Bypass (clean), 2 = Full processing.
+    const int tunerMonitorMode = GetParam(kTunerMonitorMode)->Int();
+    if (tunerMonitorMode == 0)
+    {
+      for (size_t c = 0; c < numChannelsExternalOut; ++c)
+        std::fill(outputs[c], outputs[c] + numFrames, 0.0f);
+      std::feupdateenv(&fe_state);
+      _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
+      return;
+    }
+    if (tunerMonitorMode == 1)
+    {
+      // Clean bypass while tuning, using post-input-gain mono signal.
+      std::feupdateenv(&fe_state);
+      _ProcessOutput(mInputPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
+      _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
+      return;
+    }
+    // tunerMonitorMode == 2 -> fall through to full processing path.
+  }
 
   // Noise gate trigger
   sample** triggerOutput = mInputPointers;
@@ -604,6 +742,21 @@ void NeuralAmpModeler::OnIdle()
   mInputSender.TransmitData(*this);
   mOutputSender.TransmitData(*this);
 
+  if (auto* pGraphics = GetUI())
+  {
+    const bool tunerActive = GetParam(kTunerActive)->Bool();
+    if (tunerActive)
+      mTunerAnalyzer.Update(GetSampleRate());
+
+    if (auto* pTunerDisplay = dynamic_cast<NAMTunerDisplayControl*>(pGraphics->GetControlWithTag(kCtrlTagTunerReadout)))
+    {
+      const bool hasPitch = tunerActive && mTunerAnalyzer.HasPitch();
+      const int midi = hasPitch ? mTunerAnalyzer.MidiNote() : 0;
+      const float cents = hasPitch ? mTunerAnalyzer.Cents() : 0.0f;
+      pTunerDisplay->SetTunerState(tunerActive, hasPitch, midi, cents);
+    }
+  }
+
   const bool noiseGateIsAttenuating = mNoiseGateIsAttenuating.load(std::memory_order_relaxed);
   if (noiseGateIsAttenuating != mNoiseGateLEDState)
   {
@@ -712,6 +865,13 @@ void NeuralAmpModeler::OnUIOpen()
     GetParam(kModelToggle)->Set(0.0);
     SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
   }
+
+  if (GetParam(kTunerActive)->Bool())
+  {
+    mTopNavBypassed[static_cast<size_t>(TopNavSection::Tuner)] = false;
+  }
+
+  _RefreshTopNavControls();
 }
 
 void NeuralAmpModeler::OnParamChange(int paramIdx)
@@ -726,6 +886,7 @@ void NeuralAmpModeler::OnParamChange(int paramIdx)
     case kOutputLevel:
     case kOutputMode: _SetOutputGain(); break;
     case kMasterVolume: _SetMasterGain(); break;
+    case kTunerActive: mTunerAnalyzer.Reset(); break;
     // Tone stack:
     case kToneBass: mToneStack->SetParam("bass", GetParam(paramIdx)->Value()); break;
     case kToneMid: mToneStack->SetParam("middle", GetParam(paramIdx)->Value()); break;
@@ -786,6 +947,13 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
             });
         }
         break;
+      case kTunerActive:
+      {
+        const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
+        mTopNavBypassed[tunerIdx] = !active;
+        _RefreshTopNavControls();
+        break;
+      }
       default: break;
     }
   }
@@ -825,6 +993,85 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
 }
 
 // Private methods ============================================================
+
+void NeuralAmpModeler::_SetTopNavActiveSection(const TopNavSection section)
+{
+  const auto idx = static_cast<size_t>(section);
+  if (idx >= mTopNavBypassed.size())
+    return;
+
+  if (section == TopNavSection::Tuner)
+  {
+    mTopNavBypassed[idx] = false;
+    _SyncTunerParamToTopNav();
+    _RefreshTopNavControls();
+    return;
+  }
+
+  // A disabled section should not reactivate on normal click.
+  if (mTopNavBypassed[idx])
+    return;
+
+  mTopNavActiveSection = section;
+  _SyncTunerParamToTopNav();
+  _RefreshTopNavControls();
+}
+
+void NeuralAmpModeler::_ToggleTopNavSectionBypass(const TopNavSection section)
+{
+  const auto idx = static_cast<size_t>(section);
+  if (idx >= mTopNavBypassed.size())
+    return;
+
+  mTopNavBypassed[idx] = !mTopNavBypassed[idx];
+
+  _SyncTunerParamToTopNav();
+  _RefreshTopNavControls();
+}
+
+void NeuralAmpModeler::_RefreshTopNavControls()
+{
+  if (auto* pGraphics = GetUI())
+  {
+    const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
+    const bool tunerActive = !mTopNavBypassed[tunerIdx];
+    const auto updateIcon = [&](const int tag, const TopNavSection section) {
+      if (auto* pIcon = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
+      {
+        const auto idx = static_cast<size_t>(section);
+        if (section == TopNavSection::Tuner)
+          pIcon->SetVisualState(tunerActive, !tunerActive);
+        else
+          pIcon->SetVisualState((mTopNavActiveSection == section) && !mTopNavBypassed[idx], mTopNavBypassed[idx]);
+      }
+    };
+
+    updateIcon(kCtrlTagTopNavAmp, TopNavSection::Amp);
+    updateIcon(kCtrlTagTopNavStomp, TopNavSection::Stomp);
+    updateIcon(kCtrlTagTopNavFx, TopNavSection::Fx);
+    updateIcon(kCtrlTagTopNavTuner, TopNavSection::Tuner);
+
+    const bool showTunerReadout = tunerActive;
+    if (auto* pTunerReadout = pGraphics->GetControlWithTag(kCtrlTagTunerReadout))
+      pTunerReadout->Hide(!showTunerReadout);
+    if (auto* pTunerMute = pGraphics->GetControlWithTag(kCtrlTagTunerMute))
+      pTunerMute->Hide(!showTunerReadout);
+    if (auto* pTunerClose = pGraphics->GetControlWithTag(kCtrlTagTunerClose))
+      pTunerClose->Hide(!showTunerReadout);
+  }
+}
+
+void NeuralAmpModeler::_SyncTunerParamToTopNav()
+{
+  const bool shouldTunerBeActive = !mTopNavBypassed[static_cast<size_t>(TopNavSection::Tuner)];
+
+  if (GetParam(kTunerActive)->Bool() != shouldTunerBeActive)
+  {
+    GetParam(kTunerActive)->Set(shouldTunerBeActive ? 1.0 : 0.0);
+    SendParameterValueFromDelegate(kTunerActive, GetParam(kTunerActive)->GetNormalized(), true);
+    OnParamChange(kTunerActive);
+  }
+}
 
 void NeuralAmpModeler::_AllocateIOPointers(const size_t nChans)
 {

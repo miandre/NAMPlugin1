@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <atomic>
+#include <cstdint>
 #include "../AudioDSPTools/dsp/ImpulseResponse.h"
 #include "../AudioDSPTools/dsp/NoiseGate.h"
 #include "../AudioDSPTools/dsp/dsp.h"
@@ -8,6 +11,7 @@
 #include "../NeuralAmpModelerCore/NAM/dsp.h"
 
 #include "Colors.h"
+#include "TunerAnalyzer.h"
 #include "ToneStack.h"
 
 #include "IPlug_include_in_plug_hdr.h"
@@ -58,6 +62,10 @@ enum EParams
   kToneDepth,
   // Master volume before IR section
   kMasterVolume,
+  // Tuner mode (bypass amp/cab path when active)
+  kTunerActive,
+  // Tuner monitor mode while active: Mute / Bypass / Full
+  kTunerMonitorMode,
   kNumParams
 };
 
@@ -75,6 +83,13 @@ enum ECtrlTags
   kCtrlTagOutputMode,
   kCtrlTagCalibrateInput,
   kCtrlTagInputCalibrationLevel,
+  kCtrlTagTunerReadout,
+  kCtrlTagTunerMute,
+  kCtrlTagTunerClose,
+  kCtrlTagTopNavAmp,
+  kCtrlTagTopNavStomp,
+  kCtrlTagTopNavFx,
+  kCtrlTagTopNavTuner,
   kNumCtrlTags
 };
 
@@ -216,6 +231,15 @@ public:
   bool OnMessage(int msgTag, int ctrlTag, int dataSize, const void* pData) override;
 
 private:
+  enum class TopNavSection : int
+  {
+    Amp = 0,
+    Stomp,
+    Fx,
+    Tuner,
+    Count
+  };
+
   // Allocates mInputPointers and mOutputPointers
   void _AllocateIOPointers(const size_t nChans);
   // Moves DSP modules from staging area to the main area.
@@ -271,6 +295,11 @@ private:
 
   // Update all controls that depend on a model
   void _UpdateControlsFromModel();
+  // Top icon-strip state handling
+  void _SetTopNavActiveSection(TopNavSection section);
+  void _ToggleTopNavSectionBypass(TopNavSection section);
+  void _RefreshTopNavControls();
+  void _SyncTunerParamToTopNav();
 
   // Make sure that the latency is reported correctly.
   void _UpdateLatency();
@@ -317,6 +346,9 @@ private:
   std::atomic<bool> mModelCleared = false;
   std::atomic<bool> mNoiseGateIsAttenuating = false;
   bool mNoiseGateLEDState = false;
+  TopNavSection mTopNavActiveSection = TopNavSection::Amp;
+  std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false};
+  TunerAnalyzer mTunerAnalyzer;
 
   // Tone stack modules
   std::unique_ptr<dsp::tone_stack::AbstractToneStack> mToneStack;

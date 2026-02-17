@@ -309,6 +309,7 @@
     <ClInclude Include="..\dsp\wav.h" />
     <ClInclude Include="..\dsp\wavenet.h" />
     <ClInclude Include="..\NeuralAmpModeler.h" />
+    <ClInclude Include="..\TunerAnalyzer.h" />
     <ClInclude Include="..\resources\resource.h" />
   </ItemGroup>
   <ItemGroup>
@@ -354,6 +355,7 @@
     <ClCompile Include="..\dsp\wav.cpp" />
     <ClCompile Include="..\dsp\wavenet.cpp" />
     <ClCompile Include="..\NeuralAmpModeler.cpp" />
+    <ClCompile Include="..\TunerAnalyzer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\resources\main.rc" />

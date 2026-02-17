@@ -1,8 +1,11 @@
 #pragma once
 
+#include <algorithm> // std::clamp
 #include <cmath> // std::round
+#include <functional>
 #include <sstream> // std::stringstream
 #include <unordered_map> // std::unordered_map
+#include <utility>
 #include "IControls.h"
 
 #define PLUG() static_cast<PLUG_CLASS_NAME*>(GetDelegate())
@@ -113,6 +116,88 @@ public:
 private:
   IBitmap mOffBitmap;
   IBitmap mOnBitmap;
+};
+
+class NAMTopIconControl : public IControl
+{
+public:
+  using Action = std::function<void()>;
+
+  NAMTopIconControl(const IRECT& bounds, const IBitmap& onBitmap, const IBitmap& activeBitmap, const IBitmap& offBitmap,
+                    Action onActivate, Action onToggleBypass)
+  : IControl(bounds)
+  , mOnBitmap(onBitmap)
+  , mActiveBitmap(activeBitmap)
+  , mOffBitmap(offBitmap)
+  , mOnActivate(std::move(onActivate))
+  , mOnToggleBypass(std::move(onToggleBypass))
+  {
+  }
+
+  void SetVisualState(const bool isActive, const bool isBypassed)
+  {
+    if (mIsActive == isActive && mIsBypassed == isBypassed)
+      return;
+    mIsActive = isActive;
+    mIsBypassed = isBypassed;
+    SetDirty(false);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const IBitmap& bitmap = mIsActive ? mActiveBitmap : (mIsBypassed ? mOffBitmap : mOnBitmap);
+    if (bitmap.W() <= 0 || bitmap.H() <= 0)
+      return;
+    const float bitmapAspect = static_cast<float>(bitmap.W()) / static_cast<float>(bitmap.H());
+    const float rectAspect = mRECT.W() / mRECT.H();
+    IRECT drawRect = mRECT;
+    if (bitmapAspect > rectAspect)
+    {
+      const float drawHeight = mRECT.W() / bitmapAspect;
+      drawRect = mRECT.GetCentredInside(mRECT.W(), drawHeight);
+    }
+    else
+    {
+      const float drawWidth = mRECT.H() * bitmapAspect;
+      drawRect = mRECT.GetCentredInside(drawWidth, mRECT.H());
+    }
+    g.DrawFittedBitmap(bitmap, drawRect);
+  }
+
+  void OnMouseDown(float, float, const IMouseMod& mod) override
+  {
+    if (IsDisabled())
+      return;
+    if (mod.C || mod.R)
+    {
+      if (mOnToggleBypass)
+        mOnToggleBypass();
+      return;
+    }
+    if (mOnActivate)
+      mOnActivate();
+  }
+
+  void OnMouseDblClick(float, float, const IMouseMod&) override
+  {
+    // Deactivation is handled via Ctrl+Click or Right-Click.
+  }
+
+  void OnRescale() override
+  {
+    mOnBitmap = GetUI()->GetScaledBitmap(mOnBitmap);
+    mActiveBitmap = GetUI()->GetScaledBitmap(mActiveBitmap);
+    mOffBitmap = GetUI()->GetScaledBitmap(mOffBitmap);
+  }
+
+private:
+  IBitmap mOnBitmap;
+  IBitmap mActiveBitmap;
+  IBitmap mOffBitmap;
+  Action mOnActivate;
+  Action mOnToggleBypass;
+  bool mIsActive = false;
+  bool mIsBypassed = false;
 };
 
 class NAMKnobControl : public IVKnobControl, public IBitmapBase
@@ -291,6 +376,212 @@ public:
     g.DrawLine(COLOR_WHITE.WithOpacity(0.75f), centerX, mTrackBounds.T - 3.0f, centerX, mTrackBounds.B + 3.0f,
                &mBlend, 1.0f);
   }
+};
+
+class NAMTunerMonitorControl : public IVTabSwitchControl
+{
+public:
+  NAMTunerMonitorControl(const IRECT& bounds, int paramIdx, const IVStyle& style)
+  : IVTabSwitchControl(bounds, paramIdx, {"MUTE", "BYP", "FULL"}, "",
+                       style.WithShowLabel(false)
+                         .WithShowValue(false)
+                         .WithDrawShadows(false)
+                         .WithDrawFrame(false)
+                         .WithEmboss(false)
+                         .WithRoundness(0.30f),
+                       EVShape::Rectangle, EDirection::Horizontal)
+  {
+  }
+
+  void DrawWidget(IGraphics& g) override
+  {
+    const int selected = GetSelectedIdx();
+    static const char* kLabels[3] = {"MUTE", "BYP", "ON"};
+
+    for (int i = 0; i < mNumStates; ++i)
+    {
+      IRECT tabBounds = mButtons.Get()[i].GetPadded(-0.5f);
+      const bool pressed = (i == selected);
+      const bool disabled = IsDisabled() || GetStateDisabled(i);
+      const bool mouseOver = (mMouseOverButton == i);
+
+      IColor fillColor = pressed ? _GetActiveColor(i) : COLOR_BLACK.WithOpacity(0.84f);
+      if (disabled)
+        fillColor = fillColor.WithOpacity(0.45f);
+
+      g.FillRoundRect(fillColor, tabBounds, 4.0f, &mBlend);
+      g.DrawRoundRect(COLOR_WHITE.WithOpacity(0.45f), tabBounds, 4.0f, &mBlend, 1.0f);
+
+      if (!pressed && mouseOver)
+        g.FillRoundRect(COLOR_WHITE.WithOpacity(0.08f), tabBounds, 4.0f, &mBlend);
+
+      const IColor textColor = pressed ? COLOR_BLACK.WithOpacity(0.92f) : COLOR_WHITE.WithOpacity(0.92f);
+      const IText tabText(15.0f, textColor, "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+      const char* label = (i >= 0 && i < 3) ? kLabels[i] : "";
+      g.DrawText(tabText, label, tabBounds, &mBlend);
+    }
+  }
+
+private:
+  static IColor _GetActiveColor(const int idx)
+  {
+    switch (idx)
+    {
+      case 0: return {220, 220, 64, 64}; // MUTE: red, translucent
+      case 1: return {220, 210, 170, 48}; // BYP: yellow, translucent
+      case 2: return {220, 72, 190, 88}; // FULL: green, translucent
+      default: return PluginColors::NAM_THEMECOLOR.WithOpacity(0.8f);
+    }
+  }
+};
+
+class NAMTunerDisplayControl : public IControl
+{
+public:
+  NAMTunerDisplayControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void SetTunerState(const bool active, const bool hasPitch, const int midiNote, const float cents)
+  {
+    const float clampedCents = static_cast<float>(std::clamp(static_cast<double>(cents), -50.0, 50.0));
+    mActive = active;
+    mHasPitch = hasPitch;
+    if (!mActive || !mHasPitch)
+    {
+      mDisplayedMidiNote = -1;
+      mPendingMidiNote = -1;
+      mPendingMidiCount = 0;
+      mNeedleHoldFrames = 0;
+      mTargetCents = 0.0f;
+      mDisplayCents = 0.0f;
+      SetDirty(false);
+      return;
+    }
+
+    // Only accept a new note after a few consistent updates, to ignore pluck transients.
+    if (mDisplayedMidiNote < 0)
+    {
+      mDisplayedMidiNote = midiNote;
+      mPendingMidiNote = -1;
+      mPendingMidiCount = 0;
+      mNeedleHoldFrames = 2;
+    }
+    else if (midiNote != mDisplayedMidiNote)
+    {
+      if (mPendingMidiNote == midiNote)
+        ++mPendingMidiCount;
+      else
+      {
+        mPendingMidiNote = midiNote;
+        mPendingMidiCount = 1;
+      }
+
+      if (mPendingMidiCount >= 3)
+      {
+        mDisplayedMidiNote = midiNote;
+        mPendingMidiNote = -1;
+        mPendingMidiCount = 0;
+        mNeedleHoldFrames = 3;
+      }
+      else
+      {
+        // Keep current display until the new note has settled.
+        mNeedleHoldFrames = std::max(mNeedleHoldFrames, 2);
+      }
+    }
+    else
+    {
+      mPendingMidiNote = -1;
+      mPendingMidiCount = 0;
+    }
+
+    mTargetCents = clampedCents;
+    if (mNeedleHoldFrames > 0)
+    {
+      --mNeedleHoldFrames;
+    }
+    else
+    {
+      const float delta = mTargetCents - mDisplayCents;
+      const float alpha = std::fabs(delta) > 14.0f ? 0.50f : 0.24f;
+      mDisplayCents += alpha * delta;
+    }
+
+    SetDirty(false);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const IRECT panel = mRECT.GetPadded(-1.0f);
+    g.FillRoundRect(COLOR_BLACK.WithOpacity(0.86f), panel, 8.0f, &mBlend);
+    g.DrawRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.75f), panel, 8.0f, &mBlend, 1.0f);
+
+    const float sidePad = std::max(20.0f, panel.W() * 0.07f);
+    const float lineY = panel.B - std::max(22.0f, panel.H() * 0.23f);
+    const float lineL = panel.L + sidePad;
+    const float lineR = panel.R - sidePad;
+    const float centerX = 0.5f * (lineL + lineR);
+    const float xRange = 0.5f * (lineR - lineL);
+    const float baselineThickness = 2.6f;
+
+    // Baseline + "in tune" zone for quick readability.
+    g.DrawLine(COLOR_WHITE.WithOpacity(0.42f), lineL, lineY, lineR, lineY, &mBlend, baselineThickness);
+    const float inTuneHalfWidth = (5.0f / 50.0f) * xRange;
+    g.DrawLine(IColor(220, 100, 220, 130), centerX - inTuneHalfWidth, lineY, centerX + inTuneHalfWidth, lineY, &mBlend,
+               baselineThickness + 1.2f);
+
+    // Readable ticks at -50, -25, 0, +25, +50 cents.
+    const float tickNorms[] = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
+    for (const float norm : tickNorms)
+    {
+      const float x = centerX + norm * xRange;
+      const float tickHalfHeight = (norm == 0.0f) ? 13.0f : 9.0f;
+      const IColor tickColor =
+        (norm == 0.0f) ? PluginColors::NAM_THEMECOLOR.WithOpacity(0.95f) : COLOR_WHITE.WithOpacity(0.38f);
+      g.DrawLine(tickColor, x, lineY - tickHalfHeight, x, lineY + tickHalfHeight, &mBlend, (norm == 0.0f) ? 2.0f : 1.2f);
+    }
+
+    const float noteFontSize = std::max(30.0f, panel.H() * 0.40f);
+    IText primaryText(noteFontSize, COLOR_WHITE, "Michroma-Regular", EAlign::Center, EVAlign::Middle);
+    IText secondaryText(12.0f, COLOR_WHITE.WithOpacity(0.85f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    if (!mActive)
+    {
+      g.DrawText(secondaryText, "TUNER OFF", panel.GetFromTop(30.0f));
+      return;
+    }
+    if (!mHasPitch)
+    {
+      return;
+    }
+
+    g.DrawText(primaryText, _GetNoteNameNoOctave(mDisplayedMidiNote), panel.GetFromTop(std::max(44.0f, panel.H() * 0.46f)));
+
+    const float needleX = centerX + (mDisplayCents / 50.0f) * xRange;
+    const IColor needleColor =
+      (std::fabs(mDisplayCents) <= 4.0f) ? IColor(255, 96, 230, 120) : PluginColors::NAM_THEMECOLOR;
+    g.DrawLine(needleColor, needleX, lineY - 18.0f, needleX, lineY + 8.0f, &mBlend, 3.2f);
+    g.FillCircle(needleColor.WithOpacity(0.9f), needleX, lineY, 3.6f, &mBlend);
+  }
+
+private:
+  static const char* _GetNoteNameNoOctave(const int midiNote)
+  {
+    static const char* kNoteNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    const int idx = ((midiNote % 12) + 12) % 12;
+    return kNoteNames[idx];
+  }
+
+  bool mActive = false;
+  bool mHasPitch = false;
+  int mDisplayedMidiNote = -1;
+  int mPendingMidiNote = -1;
+  int mPendingMidiCount = 0;
+  int mNeedleHoldFrames = 0;
+  float mTargetCents = 0.0f;
+  float mDisplayCents = 0.0f;
 };
 
 class NAMFileNameControl : public IVButtonControl
