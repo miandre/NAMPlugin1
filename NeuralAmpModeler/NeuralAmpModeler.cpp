@@ -383,7 +383,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       }
     };
 
-    pGraphics->AttachBackground(BACKGROUND_FN);
+    pGraphics->AttachControl(new NAMBackgroundBitmapControl(b, BACKGROUND_FN, backgroundBitmap));
     pGraphics->AttachControl(new IBitmapControl(b, linesBitmap));
 
 #ifdef NAM_PICK_DIRECTORY

@@ -63,6 +63,26 @@ public:
   }
 };
 
+class NAMBackgroundBitmapControl : public IBitmapControl
+{
+public:
+  NAMBackgroundBitmapControl(const IRECT& bounds, const char* resourceName, const IBitmap& bitmap)
+  : IBitmapControl(bounds, bitmap)
+  , mResourceName(resourceName)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void OnRescale() override
+  {
+    const int targetScale = Clip(static_cast<int>(std::ceil(GetUI()->GetTotalScale())), 1, 3);
+    mBitmap = GetUI()->LoadBitmap(mResourceName.c_str(), 1, false, targetScale);
+  }
+
+private:
+  std::string mResourceName;
+};
+
 class NAMLEDControl : public IControl
 {
 public:
