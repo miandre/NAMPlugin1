@@ -22,6 +22,13 @@
 
 void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
 {
+  auto getStringOrEmpty = [&](const char* key) -> std::string {
+    auto it = config.find(key);
+    if (it != config.end() && it->is_string())
+      return it->get<std::string>();
+    return "";
+  };
+
   auto getParamByName = [&](std::string& name) {
     // Could use a map but eh
     for (int i = 0; i < kNumParams; i++)
@@ -54,8 +61,8 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
   OnParamReset(iplug::EParamSource::kPresetRecall);
   LEAVE_PARAMS_MUTEX
 
-  mNAMPath.Set(static_cast<std::string>(config["NAMPath"]).c_str());
-  mIRPath.Set(static_cast<std::string>(config["IRPath"]).c_str());
+  mNAMPath.Set(getStringOrEmpty("NAMPath").c_str());
+  mIRPath.Set(getStringOrEmpty("IRPath").c_str());
 
   if (mNAMPath.GetLength())
   {
@@ -66,7 +73,7 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
     _StageIRLeft(mIRPath);
   }
   auto irPathRightIt = config.find("IRPathRight");
-  if (irPathRightIt != config.end())
+  if (irPathRightIt != config.end() && irPathRightIt->is_string())
   {
     mIRPathRight.Set(irPathRightIt->get<std::string>().c_str());
     if (mIRPathRight.GetLength())
@@ -305,7 +312,8 @@ int NeuralAmpModeler::_UnserializeStateWithKnownVersion(const iplug::IByteChunk&
   _Version version(versionStr);
   // Act accordingly
   nlohmann::json config;
-  if (version >= _Version(0, 7, 14))
+  // Headered states in this fork (e.g. 0.0.x) use the current schema as well.
+  if (version >= _Version(0, 7, 14) || !(version >= _Version(0, 7, 9)))
   {
     pos = _GetConfigFrom_0_7_14(chunk, pos, config);
   }
@@ -323,8 +331,8 @@ int NeuralAmpModeler::_UnserializeStateWithKnownVersion(const iplug::IByteChunk&
   }
   else
   {
-    // You shouldn't be here...
-    assert(false);
+    // Fallback: apply current schema parser rather than crashing on unknown newer/older version tags.
+    pos = _GetConfigFrom_0_7_14(chunk, pos, config);
   }
   _UnserializeApplyConfig(config);
   return pos;

@@ -27,8 +27,8 @@
 #define PLUG_DOES_MPE 0
 #define PLUG_DOES_STATE_CHUNKS 0
 #define PLUG_HAS_UI 1
-#define PLUG_WIDTH 1162
-#define PLUG_HEIGHT 612
+#define PLUG_WIDTH 1039
+#define PLUG_HEIGHT 666
 #define PLUG_FPS 60
 #define PLUG_SHARED_RESOURCES 0
 #define PLUG_HOST_RESIZE 0
@@ -75,7 +75,7 @@
 #define KNOBBACKGROUND_FN "KnobBackground.png"
 #define KNOBBACKGROUND2X_FN "KnobBackground@2x.png"
 #define KNOBBACKGROUND3X_FN "KnobBackground@3x.png"
-#define FLATKNOBBACKGROUND_FN "FlatKnobBackground.png"
+#define FLATKNOBBACKGROUND_SVG_FN "FlatKnobBackground.svg"
 #define AP_KNOP_OFFSET 28.0f
 #define SWITCH_OFF_FN "Switch_OFF.png"
 #define SWITCH_OFF2X_FN "Switch_OFF@2x.png"
@@ -97,17 +97,12 @@
 #define METERBACKGROUND_FN "MeterBackground.png"
 #define METERBACKGROUND2X_FN "MeterBackground@2x.png"
 #define METERBACKGROUND3X_FN "MeterBackground@3x.png"
-#define AMP_ON_FN "Amp_ON.png"
-#define AMP_ACTIVE_FN "Amp_ACTIVE.png"
-#define AMP_OFF_FN "Amp_OFF.png"
-#define STOMP_ON_FN "Stomp_ON.png"
-#define STOMP_ACTIVE_FN "Stomp_ACTIVE.png"
-#define STOMP_OFF_FN "Stomp_OFF.png"
-#define FX_ON_FN "Fx_ON.png"
-#define FX_ACTIVE_FN "Fx_ACTIVE.png"
-#define FX_OFF_FN "Fx_OFF.png"
+#define AMP_ACTIVE_SVG_FN "Amp_ACTIVE.svg"
+#define STOMP_ACTIVE_SVG_FN "Stomp_ACTIVE.svg"
+#define FX_ACTIVE_SVG_FN "Fx_ACTIVE.svg"
+#define CAB_ACTIVE_SVG_FN "Cab_ACTIVE.svg"
 #define TUNER_ON_FN "Tuner_ON.png"
-#define TUNER_ACTIVE_FN "Tuner_ACTIVE.png"
+#define TUNER_ACTIVE_SVG_FN "Tuner_ACTIVE.svg"
 #define TUNER_OFF_FN "Tuner_OFF.png"
 
 // Issue 291

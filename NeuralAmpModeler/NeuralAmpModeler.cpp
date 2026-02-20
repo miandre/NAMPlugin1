@@ -104,6 +104,13 @@ const IVStyle style =
           DEFAULT_SHADOW_OFFSET,
           DEFAULT_WIDGET_FRAC,
           DEFAULT_WIDGET_ANGLE};
+const IVStyle utilityStyle = style.WithLabelText(
+  IText(DEFAULT_TEXT_SIZE + 1.f, PluginColors::NAM_THEMEFONTCOLOR, "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle))
+                                .WithValueText(IText(DEFAULT_TEXT_SIZE + 0.f,
+                                                     PluginColors::NAM_THEMEFONTCOLOR.WithOpacity(0.9f),
+                                                     "ArialNarrow-Bold",
+                                                     EAlign::Center,
+                                                     EVAlign::Bottom));
 const IVStyle ampKnobStyle = style.WithShowValue(false).WithLabelText(
   IText(DEFAULT_TEXT_SIZE + -4.f, COLOR_BLACK, "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle));
 const IVStyle radioButtonStyle =
@@ -193,33 +200,47 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto leftArrowSVG = pGraphics->LoadSVG(LEFT_ARROW_FN);
     const auto irIconOnSVG = pGraphics->LoadSVG(IR_ICON_ON_FN);
     const auto irIconOffSVG = pGraphics->LoadSVG(IR_ICON_OFF_FN);
+    const auto ampActiveSVG = pGraphics->LoadSVG(AMP_ACTIVE_SVG_FN);
+    const auto stompActiveSVG = pGraphics->LoadSVG(STOMP_ACTIVE_SVG_FN);
+    const auto cabActiveSVG = pGraphics->LoadSVG(CAB_ACTIVE_SVG_FN);
+    const auto fxActiveSVG = pGraphics->LoadSVG(FX_ACTIVE_SVG_FN);
+    const auto tunerActiveSVG = pGraphics->LoadSVG(TUNER_ACTIVE_SVG_FN);
+    const auto outerKnobBackgroundSVG = pGraphics->LoadSVG(FLATKNOBBACKGROUND_SVG_FN);
 
     const auto backgroundBitmap = pGraphics->LoadBitmap(BACKGROUND_FN);
     const auto fileBackgroundBitmap = pGraphics->LoadBitmap(FILEBACKGROUND_FN);
     const auto inputLevelBackgroundBitmap = pGraphics->LoadBitmap(INPUTLEVELBACKGROUND_FN);
     const auto linesBitmap = pGraphics->LoadBitmap(LINES_FN);
     const auto ampKnobBackgroundBitmap = pGraphics->LoadBitmap(KNOBBACKGROUND_FN);
-    const auto outerKnobBackgroundBitmap = pGraphics->LoadBitmap(FLATKNOBBACKGROUND_FN);
     const auto switchOffBitmap = pGraphics->LoadBitmap(SWITCH_OFF_FN);
     const auto switchOnBitmap = pGraphics->LoadBitmap(SWITCH_ON_FN);
-    const auto ampOnBitmap = pGraphics->LoadBitmap(AMP_ON_FN);
-    const auto ampActiveBitmap = pGraphics->LoadBitmap(AMP_ACTIVE_FN);
-    const auto ampOffBitmap = pGraphics->LoadBitmap(AMP_OFF_FN);
-    const auto stompOnBitmap = pGraphics->LoadBitmap(STOMP_ON_FN);
-    const auto stompActiveBitmap = pGraphics->LoadBitmap(STOMP_ACTIVE_FN);
-    const auto stompOffBitmap = pGraphics->LoadBitmap(STOMP_OFF_FN);
-    const auto fxOnBitmap = pGraphics->LoadBitmap(FX_ON_FN);
-    const auto fxActiveBitmap = pGraphics->LoadBitmap(FX_ACTIVE_FN);
-    const auto fxOffBitmap = pGraphics->LoadBitmap(FX_OFF_FN);
-    const auto tunerOnBitmap = pGraphics->LoadBitmap(TUNER_ON_FN);
-    const auto tunerActiveBitmap = pGraphics->LoadBitmap(TUNER_ACTIVE_FN);
-    const auto tunerOffBitmap = pGraphics->LoadBitmap(TUNER_OFF_FN);
     const auto switchHandleBitmap = pGraphics->LoadBitmap(SLIDESWITCHHANDLE_FN);
     const auto meterBackgroundBitmap = pGraphics->LoadBitmap(METERBACKGROUND_FN);
 
+    // Top/section icons are SVG-only now.
+
     const auto b = pGraphics->GetBounds();
-    const auto mainArea = b.GetPadded(-20);
-    const auto contentArea = mainArea.GetPadded(-10);
+    // Global layout tokens for consistent spacing and sectioning.
+    constexpr float kOuterPad = 20.0f;
+    constexpr float kInnerPad = 10.0f;
+    constexpr float kTopBarHeight = 162.0f;
+    constexpr float kBottomBarHeight = 62.0f;
+    const auto mainArea = b.GetPadded(-kOuterPad);
+    const auto contentArea = mainArea.GetPadded(-kInnerPad);
+    const auto topBarArea = IRECT(contentArea.L, contentArea.T, contentArea.R, contentArea.T + kTopBarHeight);
+    const auto bottomBarArea = IRECT(contentArea.L, contentArea.B - kBottomBarHeight, contentArea.R, contentArea.B);
+    const auto heroArea = IRECT(contentArea.L, topBarArea.B, contentArea.R, bottomBarArea.T);
+    // Dedicated amp-face anchor region. Front-panel controls reference this instead of top bar sizing.
+    const auto ampFaceArea = IRECT(contentArea.L + 66.0f, contentArea.T + 215.0f, contentArea.R - 66.0f, contentArea.T + 496.0f);
+    // Phase 1 top layout: primary section row + compact utility row.
+    constexpr float kTopRowOuterPad = -2.0f;
+    constexpr float kTopRowsGap = 8.0f;
+    constexpr float kTopMainRowHeight = 60.0f;
+    constexpr float kTopUtilityRowHeight = 40.0f;
+    const auto topMainRowArea =
+      IRECT(topBarArea.L, topBarArea.T + kTopRowOuterPad, topBarArea.R, topBarArea.T + kTopRowOuterPad + kTopMainRowHeight);
+    const auto topUtilityRowArea = IRECT(
+      topBarArea.L, topMainRowArea.B + kTopRowsGap, topBarArea.R, topMainRowArea.B + kTopRowsGap + kTopUtilityRowHeight);
 
     // Areas for knobs
     // Keep these as explicit anchors so each group can be tuned independently.
@@ -227,18 +248,27 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     auto makeKnobArea = [&](const float centerX, const float topY) {
       return IRECT(centerX - knobWidth * 0.5f, topY, centerX + knobWidth * 0.5f, topY + NAM_KNOB_HEIGHT);
     };
+    // Top-bar side I/O group (left/right mirrored).
+    const float topSideKnobTop = topMainRowArea.MH() - 0.5f * NAM_KNOB_HEIGHT - 8.0f;
+    // SVG flat knob art has tighter bounds than the old PNG, so compensate to match visual size.
+    const float topSideKnobScale = 0.70f;
+    const float topSideMeterWidth = 10.0f;
+    const float topSideMeterHeight = 60.0f;
+    const float topSideMeterTop = topMainRowArea.MH() - 0.5f * topSideMeterHeight + -6.0f;
+    const float topSideMeterCenterInset = 8.0f;
+    const float topSideKnobCenterInset = 56.0f;
+    const float topSideFilterGapX = 82.0f;
+    const float leftInputCenterX = contentArea.L + topSideKnobCenterInset;
+    const float rightOutputCenterX = contentArea.R - topSideKnobCenterInset;
+    const float leftFilterCenterX = leftInputCenterX + topSideFilterGapX;
+    const float rightFilterCenterX = rightOutputCenterX - topSideFilterGapX;
 
-    // Top corner controls (independent group)
-    const float topCornerKnobCenterX = 55.0f;
-    const float topCornerKnobTop = 66.0f;
-    const auto inputKnobArea = makeKnobArea(topCornerKnobCenterX, topCornerKnobTop);
-    const auto outputKnobArea = makeKnobArea(b.W() - topCornerKnobCenterX, topCornerKnobTop);
+    const auto inputKnobArea = makeKnobArea(leftInputCenterX, topSideKnobTop);
+    const auto outputKnobArea = makeKnobArea(rightOutputCenterX, topSideKnobTop);
 
     // Amp-face controls (independent group)
-    const float frontKnobVerticalOffset = 0.5f;
-    const float frontKnobTop =
-      std::min(b.H() - NAM_KNOB_HEIGHT - 28.0f, 228.0f + 0.75f * NAM_KNOB_HEIGHT) + frontKnobVerticalOffset;
-    const float frontRowCenterX = b.MW()-55.0f;
+    const float frontKnobTop = ampFaceArea.T + 150.0f;
+    const float frontRowCenterX = ampFaceArea.MW() - 55.0f;
     const float frontKnobSpacing = 80.0f;
     const auto noiseGateArea = makeKnobArea(frontRowCenterX - 3.0f * frontKnobSpacing, frontKnobTop);
     const auto preModelGainArea = makeKnobArea(frontRowCenterX - 2.0f * frontKnobSpacing, frontKnobTop);
@@ -265,69 +295,132 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       IRECT(noiseGateArea.MW() - 17.0f, toggleTop, noiseGateArea.MW() + 17.0f, toggleTop + 24.0f);
     const auto eqToggleArea = IRECT(midKnobArea.MW() - 17.0f, toggleTop, midKnobArea.MW() + 17.0f, toggleTop + 24.0f);
 
-    // Amp-side controls (independent group)
-    // Keep HPF/LPF vertically aligned with input/output and just below the front row.
-    const float sideKnobTop = frontKnobTop + 22.0f;
-    const auto hpfKnobArea = makeKnobArea(topCornerKnobCenterX, sideKnobTop);
-    const auto lpfKnobArea = makeKnobArea(b.W() - topCornerKnobCenterX, sideKnobTop);
+    // Top-bar filter controls live with input/output controls.
+    const auto hpfKnobArea = makeKnobArea(leftFilterCenterX, topSideKnobTop);
+    const auto lpfKnobArea = makeKnobArea(rightFilterCenterX, topSideKnobTop);
 
+    constexpr float kSettingsIconHeight = 24.0f;
+    constexpr float kSettingsRightPad = 8.0f;
+    const float topUtilityIconCenterY = topUtilityRowArea.MH();
+    const auto settingsButtonArea =
+      IRECT(topBarArea.R - kSettingsRightPad - kSettingsIconHeight,
+            topUtilityIconCenterY - 0.5f * kSettingsIconHeight,
+            topBarArea.R - kSettingsRightPad,
+            topUtilityIconCenterY + 0.5f * kSettingsIconHeight);
+    // Top nav uses fixed icon height; width follows each bitmap aspect ratio.
+    constexpr float topNavIconHeight = 60.0f;
+    constexpr float kTunerToolIconHeight = 43.0f;
+    constexpr float kTopNavRowYOffset = -6.0f;
+    const float topNavIconGap = 38.0f;
     // Areas for model and IR
-    const auto modelArea = IRECT(b.MW() - 125.0f, 150.0f, b.MW() + 125.0f, 180.0f);
+    // Top bar has two visual rows: icon row + primary control row.
+    const float topBarIconRowTop = topMainRowArea.MH() - 0.5f * topNavIconHeight + kTopNavRowYOffset;
+    const float topBarControlRowTopBase = topUtilityRowArea.T;
+    constexpr float kModelPickerWidth = 320.0f;
+    constexpr float kModelPickerHeight = 30.0f;
+    // Temporary model picker placement near the bottom of the amp body.
+    const float modelPickerTop = ampFaceArea.B + 25.0f;
+    const auto modelArea = IRECT(heroArea.MW() - 0.5f * kModelPickerWidth,
+                                 modelPickerTop,
+                                 heroArea.MW() + 0.5f * kModelPickerWidth,
+                                 modelPickerTop + kModelPickerHeight);
     const float tunerPanelWidth = 700.0f;
     const float tunerPanelHeight = 150.0f;
-    const float tunerPanelTop = 180.0f;
+    const float tunerPanelTop = topUtilityRowArea.B + 90.0f;
     const auto tunerReadoutArea =
-      IRECT(b.MW() - 0.5f * tunerPanelWidth, tunerPanelTop, b.MW() + 0.5f * tunerPanelWidth, tunerPanelTop + tunerPanelHeight);
+      IRECT(heroArea.MW() - 0.5f * tunerPanelWidth, tunerPanelTop, heroArea.MW() + 0.5f * tunerPanelWidth, tunerPanelTop + tunerPanelHeight);
     const float tunerMonitorTop = tunerReadoutArea.T + 10.0f;
     const auto tunerMonitorArea =
       IRECT(tunerReadoutArea.L + 12.0f, tunerMonitorTop, tunerReadoutArea.L + 134.0f, tunerMonitorTop + 22.0f);
     const auto tunerCloseArea = tunerReadoutArea.GetFromTRHC(18.0f, 18.0f).GetTranslated(-10.0f, 10.0f);
-    const auto settingsButtonArea = CornerButtonArea(b);
-    const float topNavIconScale = 0.24f;
-    const float topNavIconHeight = ampOnBitmap.H() * topNavIconScale;
-    const float topNavIconGap = 40.0f;
-    const auto scaledWidthForHeight = [&](const IBitmap& bitmap) {
-      return (bitmap.H() > 0) ? (bitmap.W() * (topNavIconHeight / bitmap.H())) : topNavIconHeight;
+    const auto scaledWidthForHeightSVG = [&](const ISVG& svg, const float targetHeight) {
+      return (svg.IsValid() && svg.H() > 0.0f) ? (svg.W() * (targetHeight / svg.H())) : targetHeight;
     };
-    const float topNavTunerWidth = scaledWidthForHeight(tunerOnBitmap);
-    const float topNavStompWidth = scaledWidthForHeight(stompOnBitmap);
-    const float topNavAmpWidth = scaledWidthForHeight(ampOnBitmap);
-    const float topNavFxWidth = scaledWidthForHeight(fxOnBitmap);
-    const float topNavRowWidth = topNavTunerWidth + topNavStompWidth + topNavAmpWidth + topNavFxWidth + 3.0f * topNavIconGap;
-    // Keep icons on the same header strip as the settings cog, but centered as a group.
-    const float topNavLeft = b.MW() - 0.5f * topNavRowWidth;
-    const float topNavTop = settingsButtonArea.MH() - 0.5f * topNavIconHeight;
-    // Visual order: Tuner -> Stomp -> Amp -> FX
-    const auto topNavTunerArea = IRECT(topNavLeft, topNavTop, topNavLeft + topNavTunerWidth, topNavTop + topNavIconHeight);
-    const auto topNavStompArea = IRECT(topNavTunerArea.R + topNavIconGap, topNavTop,
-                                       topNavTunerArea.R + topNavIconGap + topNavStompWidth, topNavTop + topNavIconHeight);
+    const float topNavTunerWidth = scaledWidthForHeightSVG(tunerActiveSVG, kTunerToolIconHeight);
+    const float topNavStompWidth = scaledWidthForHeightSVG(stompActiveSVG, topNavIconHeight);
+    const float topNavAmpWidth = scaledWidthForHeightSVG(ampActiveSVG, topNavIconHeight);
+    const float topNavCabWidth = scaledWidthForHeightSVG(cabActiveSVG, topNavIconHeight);
+    const float topNavFxWidth = scaledWidthForHeightSVG(fxActiveSVG, topNavIconHeight);
+    const float topNavRowWidth = topNavStompWidth + topNavAmpWidth + topNavCabWidth + topNavFxWidth + 3.0f * topNavIconGap;
+    // Keep section icons on the same header strip as the settings cog, centered as a group.
+    const float topNavLeft = topBarArea.MW() - 0.5f * topNavRowWidth;
+    const float topNavTop = topBarIconRowTop;
+    // Visual order: Stomp -> Amp -> Cab -> FX
+    const auto topNavStompArea = IRECT(topNavLeft, topNavTop, topNavLeft + topNavStompWidth, topNavTop + topNavIconHeight);
     const auto topNavAmpArea = IRECT(topNavStompArea.R + topNavIconGap, topNavTop,
                                      topNavStompArea.R + topNavIconGap + topNavAmpWidth, topNavTop + topNavIconHeight);
-    const auto topNavFxArea = IRECT(topNavAmpArea.R + topNavIconGap, topNavTop,
-                                    topNavAmpArea.R + topNavIconGap + topNavFxWidth, topNavTop + topNavIconHeight);
-    const float irRowTop = 537.0f;
+    const auto topNavCabArea = IRECT(topNavAmpArea.R + topNavIconGap, topNavTop,
+                                     topNavAmpArea.R + topNavIconGap + topNavCabWidth, topNavTop + topNavIconHeight);
+    const auto topNavFxArea = IRECT(topNavCabArea.R + topNavIconGap, topNavTop,
+                                    topNavCabArea.R + topNavIconGap + topNavFxWidth, topNavTop + topNavIconHeight);
+    // Tuner is a tool icon, placed to the left of settings rather than in the section strip.
+    constexpr float kTunerToolGap = 20.0f;
+    const float tunerToolRight = settingsButtonArea.L - kTunerToolGap;
+    const float tunerToolLeft = std::max(contentArea.L, tunerToolRight - topNavTunerWidth);
+    const float topToolRowTop = topUtilityIconCenterY - 0.5f * kTunerToolIconHeight;
+    const auto topNavTunerArea =
+      IRECT(
+        tunerToolLeft, topToolRowTop, tunerToolLeft + topNavTunerWidth, topToolRowTop + kTunerToolIconHeight);
+    // Preset strip in utility row (centered), with previous/next buttons and current preset text.
+    constexpr float kPresetStripWidth = 340.0f;
+    constexpr float kPresetStripHeight = 25.0f;
+    constexpr float kPresetButtonSize = 22.0f;
+    const float presetStripLeft = topUtilityRowArea.MW() - 0.5f * kPresetStripWidth;
+    const float presetStripTop = topUtilityRowArea.MH() - 0.5f * kPresetStripHeight;
+    const auto presetStripArea = IRECT(
+      presetStripLeft, presetStripTop, presetStripLeft + kPresetStripWidth, presetStripTop + kPresetStripHeight);
+    const auto presetPrevArea = presetStripArea.GetFromLeft(kPresetButtonSize);
+    const auto presetNextArea = presetStripArea.GetFromRight(kPresetButtonSize);
+    const auto presetLabelArea = IRECT(presetPrevArea.R + 10.0f,
+                                       presetStripArea.T,
+                                       presetNextArea.L - 10.0f,
+                                       presetStripArea.B);
+    // Footer IR strip: align both pickers and blend control on one visual baseline.
     const float irRowHeight = 30.0f;
-    const float irPickerWidth = 300.0f;
-    const float irCenterGap = 140.0f;
+    const float irRowTop = bottomBarArea.MH() - 0.5f * irRowHeight + 17.0f;
+    const float irPickerWidth = 292.0f;
+    const float irCenterGap = 132.0f;
     const float leftIRRight = b.MW() - 0.5f * irCenterGap;
     const float rightIRLeft = b.MW() + 0.5f * irCenterGap;
     const auto irLeftArea = IRECT(leftIRRight - irPickerWidth, irRowTop, leftIRRight, irRowTop + irRowHeight);
     const auto irRightArea = IRECT(rightIRLeft, irRowTop, rightIRLeft + irPickerWidth, irRowTop + irRowHeight);
-    const auto irSwitchArea = irLeftArea.GetFromLeft(30.0f).GetHShifted(-40.0f).GetScaledAboutCentre(0.6f);
+    const auto irSwitchArea = irLeftArea.GetFromLeft(30.0f).GetHShifted(-36.0f).GetVShifted(-1.0f).GetScaledAboutCentre(0.6f);
     const float blendSliderWidth = 130.0f;
     const float blendSliderHeight = 60.0f;
-    const float blendSliderTop = irRowTop - 10.0f;
-    const auto cabBlendArea = IRECT(b.MW() - 0.5f * blendSliderWidth, blendSliderTop, b.MW() + 0.5f * blendSliderWidth,
+    const float blendSliderTop = irRowTop - 12.0f;
+    const auto cabBlendArea = IRECT(heroArea.MW() - 0.5f * blendSliderWidth, blendSliderTop, heroArea.MW() + 0.5f * blendSliderWidth,
                                     blendSliderTop + blendSliderHeight);
+    // Footer placeholder amp selector strip (uses existing amp icon assets).
+    const float footerAmpIconHeight = 43.0f;
+    const float footerAmpIconWidth =
+      (ampActiveSVG.IsValid() && ampActiveSVG.H() > 0.0f) ? (ampActiveSVG.W() * (footerAmpIconHeight / ampActiveSVG.H()))
+                                                           : footerAmpIconHeight;
+    const float footerAmpIconGap = 36.0f;
+    const float footerAmpRowWidth = 3.0f * footerAmpIconWidth + 2.0f * footerAmpIconGap;
+    const float footerAmpRowLeft = bottomBarArea.MW() - 0.5f * footerAmpRowWidth;
+    const float footerAmpRowTop = irRowTop - 4.0f;
+    const auto footerAmpSlot1Area =
+      IRECT(footerAmpRowLeft, footerAmpRowTop, footerAmpRowLeft + footerAmpIconWidth, footerAmpRowTop + footerAmpIconHeight);
+    const auto footerAmpSlot2Area = IRECT(footerAmpSlot1Area.R + footerAmpIconGap,
+                                          footerAmpRowTop,
+                                          footerAmpSlot1Area.R + footerAmpIconGap + footerAmpIconWidth,
+                                          footerAmpRowTop + footerAmpIconHeight);
+    const auto footerAmpSlot3Area = IRECT(footerAmpSlot2Area.R + footerAmpIconGap,
+                                          footerAmpRowTop,
+                                          footerAmpSlot2Area.R + footerAmpIconGap + footerAmpIconWidth,
+                                          footerAmpRowTop + footerAmpIconHeight);
 
     // Areas for meters (aligned under input/output knobs, and low enough to avoid overlap)
-    const float meterWidth = 15.0f;
-    const float meterHeight = 100.0f;
-    const float meterTop = topCornerKnobTop + NAM_KNOB_HEIGHT + 10.0f;
     const auto inputMeterArea =
-      IRECT(inputKnobArea.MW() - 0.5f * meterWidth, meterTop, inputKnobArea.MW() + 0.5f * meterWidth, meterTop + meterHeight);
+      IRECT(contentArea.L + topSideMeterCenterInset - 0.5f * topSideMeterWidth,
+            topSideMeterTop,
+            contentArea.L + topSideMeterCenterInset + 0.5f * topSideMeterWidth,
+            topSideMeterTop + topSideMeterHeight);
     const auto outputMeterArea = IRECT(
-      outputKnobArea.MW() - 0.5f * meterWidth, meterTop, outputKnobArea.MW() + 0.5f * meterWidth, meterTop + meterHeight);
+      contentArea.R - topSideMeterCenterInset - 0.5f * topSideMeterWidth,
+      topSideMeterTop,
+      contentArea.R - topSideMeterCenterInset + 0.5f * topSideMeterWidth,
+      topSideMeterTop + topSideMeterHeight);
 
     // Model loader button
     auto loadModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
@@ -385,6 +478,19 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     pGraphics->AttachControl(new NAMBackgroundBitmapControl(b, BACKGROUND_FN, backgroundBitmap));
     pGraphics->AttachControl(new IBitmapControl(b, linesBitmap));
+    // Subtle utility-zone overlays to anchor top and footer controls visually.
+    const IColor topBarOverlayColor = IColor(72, 6, 6, 8);
+    const IColor bottomBarOverlayColor = IColor(82, 6, 6, 8);
+    pGraphics->AttachControl(new IPanelControl(topBarArea, topBarOverlayColor));
+    pGraphics->AttachControl(new IPanelControl(bottomBarArea, bottomBarOverlayColor));
+    // Single subtle top separator (kept above amp image); no footer separator.
+    const IColor separatorColor = IColor(70, 255, 255, 255);
+    const float topSeparatorY = topBarControlRowTopBase - 2.0f;
+    const auto topSeparatorArea = IRECT(contentArea.L, topSeparatorY, contentArea.R, topSeparatorY + 1.0f);
+    pGraphics->AttachControl(new IPanelControl(topSeparatorArea, separatorColor));
+    // Utility row lower boundary.
+    const auto topUtilityBottomSeparatorArea = IRECT(contentArea.L, topUtilityRowArea.B, contentArea.R, topUtilityRowArea.B + 1.0f);
+    pGraphics->AttachControl(new IPanelControl(topUtilityBottomSeparatorArea, separatorColor));
 
 #ifdef NAM_PICK_DIRECTORY
     const std::string defaultNamFileString = "Select model directory...";
@@ -395,14 +501,64 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const char* const getUrl = "https://www.neuralampmodeler.com/users#comp-marb84o5";
     pGraphics->AttachControl(
       new NAMFileBrowserControl(modelArea, kMsgTagClearModel, defaultNamFileString.c_str(), "nam",
-                                loadModelCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                loadModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
                                 fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
       kCtrlTagModelFileBrowser);
     pGraphics->AttachControl(new NAMTunerDisplayControl(tunerReadoutArea), kCtrlTagTunerReadout);
     pGraphics->AttachControl(
-      new NAMTunerMonitorControl(tunerMonitorArea, kTunerMonitorMode, style),
+      new NAMTunerMonitorControl(tunerMonitorArea, kTunerMonitorMode, utilityStyle),
                               kCtrlTagTunerMute)
       ->SetTooltip("Tuner monitor mode: Mute / Bypass / Full");
+    auto updatePresetLabel = [this](IGraphics* pG) {
+      if (auto* pText = dynamic_cast<ITextControl*>(pG->GetControlWithTag(kCtrlTagPresetLabel)))
+      {
+        if (NPresets() <= 0)
+        {
+          pText->SetStr("No Presets");
+          pText->SetDirty(false);
+          return;
+        }
+
+        const int presetIdx = std::clamp(GetCurrentPresetIdx(), 0, NPresets() - 1);
+        const char* presetName = GetPresetName(presetIdx);
+        WDL_String label;
+        if (presetName && std::strlen(presetName) > 0)
+          label.SetFormatted(256, "%d. %s", presetIdx + 1, presetName);
+        else
+          label.SetFormatted(64, "Preset %d", presetIdx + 1);
+        pText->SetStr(label.Get());
+        pText->SetDirty(false);
+      }
+    };
+    pGraphics->AttachControl(new IPanelControl(presetStripArea, IColor(40, 255, 255, 255).WithOpacity(0.10f)));
+    pGraphics->AttachControl(new NAMSquareButtonControl(presetPrevArea, [this, updatePresetLabel](IControl*) {
+      if (NPresets() <= 0)
+        return;
+      const int count = NPresets();
+      int idx = GetCurrentPresetIdx();
+      if (idx < 0 || idx >= count)
+        idx = 0;
+      idx = (idx - 1 + count) % count;
+      RestorePreset(idx);
+      if (auto* pG = GetUI())
+        updatePresetLabel(pG);
+    }, leftArrowSVG));
+    pGraphics->AttachControl(new NAMSquareButtonControl(presetNextArea, [this, updatePresetLabel](IControl*) {
+      if (NPresets() <= 0)
+        return;
+      const int count = NPresets();
+      int idx = GetCurrentPresetIdx();
+      if (idx < 0 || idx >= count)
+        idx = 0;
+      idx = (idx + 1) % count;
+      RestorePreset(idx);
+      if (auto* pG = GetUI())
+        updatePresetLabel(pG);
+    }, rightArrowSVG));
+    pGraphics->AttachControl(new ITextControl(
+      presetLabelArea, "Preset", IText(13.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle)),
+                             kCtrlTagPresetLabel);
+    updatePresetLabel(pGraphics);
     pGraphics->AttachControl(new NAMSquareButtonControl(
                                tunerCloseArea,
                                [this](IControl*) {
@@ -417,26 +573,27 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                crossSVG),
                              kCtrlTagTunerClose)
       ->SetTooltip("Close tuner");
+    IControl* pAmpTopIcon = new NAMTopIconControl(topNavAmpArea, ampActiveSVG, ampActiveSVG, ampActiveSVG,
+                                                  [this]() { _SetTopNavActiveSection(TopNavSection::Amp); },
+                                                  [this]() { _ToggleTopNavSectionBypass(TopNavSection::Amp); });
+    pGraphics->AttachControl(pAmpTopIcon, kCtrlTagTopNavAmp)->SetTooltip("Amp");
+
+    IControl* pStompTopIcon = new NAMTopIconControl(topNavStompArea, stompActiveSVG, stompActiveSVG, stompActiveSVG,
+                                                    [this]() { _SetTopNavActiveSection(TopNavSection::Stomp); },
+                                                    [this]() { _ToggleTopNavSectionBypass(TopNavSection::Stomp); });
+    pGraphics->AttachControl(pStompTopIcon, kCtrlTagTopNavStomp)->SetTooltip("Stomp");
+
+    IControl* pCabTopIcon = new NAMTopIconControl(topNavCabArea, cabActiveSVG, cabActiveSVG, cabActiveSVG,
+                                                  [this]() { _SetTopNavActiveSection(TopNavSection::Cab); },
+                                                  [this]() { _ToggleTopNavSectionBypass(TopNavSection::Cab); });
+    pGraphics->AttachControl(pCabTopIcon, kCtrlTagTopNavCab)->SetTooltip("Cab");
+
+    IControl* pFxTopIcon = new NAMTopIconControl(topNavFxArea, fxActiveSVG, fxActiveSVG, fxActiveSVG,
+                                                 [this]() { _SetTopNavActiveSection(TopNavSection::Fx); },
+                                                 [this]() { _ToggleTopNavSectionBypass(TopNavSection::Fx); });
+    pGraphics->AttachControl(pFxTopIcon, kCtrlTagTopNavFx)->SetTooltip("FX");
     pGraphics->AttachControl(
-      new NAMTopIconControl(topNavAmpArea, ampOnBitmap, ampActiveBitmap, ampOffBitmap,
-                            [this]() { _SetTopNavActiveSection(TopNavSection::Amp); },
-                            [this]() { _ToggleTopNavSectionBypass(TopNavSection::Amp); }),
-      kCtrlTagTopNavAmp)
-      ->SetTooltip("Amp");
-    pGraphics->AttachControl(
-      new NAMTopIconControl(topNavStompArea, stompOnBitmap, stompActiveBitmap, stompOffBitmap,
-                            [this]() { _SetTopNavActiveSection(TopNavSection::Stomp); },
-                            [this]() { _ToggleTopNavSectionBypass(TopNavSection::Stomp); }),
-      kCtrlTagTopNavStomp)
-      ->SetTooltip("Stomp");
-    pGraphics->AttachControl(
-      new NAMTopIconControl(topNavFxArea, fxOnBitmap, fxActiveBitmap, fxOffBitmap,
-                            [this]() { _SetTopNavActiveSection(TopNavSection::Fx); },
-                            [this]() { _ToggleTopNavSectionBypass(TopNavSection::Fx); }),
-      kCtrlTagTopNavFx)
-      ->SetTooltip("FX");
-    pGraphics->AttachControl(
-      new NAMTopIconControl(topNavTunerArea, tunerOnBitmap, tunerActiveBitmap, tunerOffBitmap,
+      new NAMTopIconControl(topNavTunerArea, tunerActiveSVG, tunerActiveSVG, tunerActiveSVG,
                             [this]() {
                               const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
                               if (tunerIdx < mTopNavBypassed.size())
@@ -456,31 +613,59 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                 _SyncTunerParamToTopNav();
                                 _RefreshTopNavControls();
                               }
-                            }),
+                            },
+                            false),
       kCtrlTagTopNavTuner)
       ->SetTooltip("Tuner");
     pGraphics->AttachControl(new NAMBitmapToggleControl(modelToggleArea, kModelToggle, switchOffBitmap, switchOnBitmap))
       ->SetTooltip("Model On/Off");
-    pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle));
+    pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle), kCtrlTagIRToggle);
     pGraphics->AttachControl(new NAMFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Select cab IR L...", "wav",
-                                                       loadIRLeftCompletionHandler, style, fileSVG, crossSVG,
+                                                       loadIRLeftCompletionHandler, utilityStyle, fileSVG, crossSVG,
                                                        leftArrowSVG, rightArrowSVG, fileBackgroundBitmap, globeSVG,
                                                        "Get IRs", getUrl),
                              kCtrlTagIRFileBrowserLeft);
     pGraphics->AttachControl(
       new NAMFileBrowserControl(irRightArea, kMsgTagClearIRRight, "Select cab IR R...", "wav",
-                                 loadIRRightCompletionHandler, style, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                 loadIRRightCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
                                  fileBackgroundBitmap, globeSVG, "Get IRs", getUrl),
       kCtrlTagIRFileBrowserRight);
-    pGraphics->AttachControl(new NAMBlendSliderControl(cabBlendArea, kCabIRBlend, style));
+    pGraphics->AttachControl(new NAMBlendSliderControl(cabBlendArea, kCabIRBlend, utilityStyle));
+    pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot1Area, ampActiveSVG, ampActiveSVG, ampActiveSVG,
+                                                   [this]() {
+                                                     mAmpSelectorIndex = 0;
+                                                     _RefreshTopNavControls();
+                                                   },
+                                                   {}),
+                             kCtrlTagAmpSlot1)
+      ->SetTooltip("Amp Slot 1");
+    pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot2Area, ampActiveSVG, ampActiveSVG, ampActiveSVG,
+                                                   [this]() {
+                                                     mAmpSelectorIndex = 1;
+                                                     _RefreshTopNavControls();
+                                                   },
+                                                   {}),
+                             kCtrlTagAmpSlot2)
+      ->SetTooltip("Amp Slot 2");
+    pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot3Area, ampActiveSVG, ampActiveSVG, ampActiveSVG,
+                                                   [this]() {
+                                                     mAmpSelectorIndex = 2;
+                                                     _RefreshTopNavControls();
+                                                   },
+                                                   {}),
+                             kCtrlTagAmpSlot3)
+      ->SetTooltip("Amp Slot 3");
     pGraphics->AttachControl(new NAMSwitchControl(ngToggleArea, kNoiseGateActive, "Noise Gate", style, switchHandleBitmap))
       ->Hide(true);
     pGraphics->AttachControl(new NAMLEDControl(noiseGateLEDRect), kCtrlTagNoiseGateLED);
     pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap))->Hide(true);
 
     // The knobs
-    pGraphics->AttachControl(
-      new NAMKnobControl(inputKnobArea, kInputLevel, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
+    constexpr float kSideLabelYOffset = 18.0f;
+    constexpr float kSideValueYOffset = -24.0f;
+    pGraphics->AttachControl(new NAMKnobControl(
+      inputKnobArea, kInputLevel, "INPUT", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale, kSideLabelYOffset,
+      kSideValueYOffset));
     pGraphics->AttachControl(new NAMKnobControl(noiseGateArea, kNoiseGateThreshold, "GATE", ampKnobStyle,
                                                 ampKnobBackgroundBitmap, false, true, 0.75f, AP_KNOP_OFFSET));
     pGraphics->AttachControl(new NAMKnobControl(preModelGainArea, kPreModelGain, "PRE GAIN", ampKnobStyle,
@@ -514,11 +699,17 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       new NAMKnobControl(masterKnobArea, kMasterVolume, "MASTER", ampKnobStyle, ampKnobBackgroundBitmap, false, true,
                          0.7f, AP_KNOP_OFFSET));
     pGraphics->AttachControl(new NAMKnobControl(
-      hpfKnobArea, kUserHPFFrequency, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
+      hpfKnobArea, kUserHPFFrequency, "HPF", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale,
+      kSideLabelYOffset,
+      kSideValueYOffset));
     pGraphics->AttachControl(new NAMKnobControl(
-      lpfKnobArea, kUserLPFFrequency, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
+      lpfKnobArea, kUserLPFFrequency, "LPF", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale,
+      kSideLabelYOffset,
+      kSideValueYOffset));
     pGraphics->AttachControl(new NAMKnobControl(
-      outputKnobArea, kOutputLevel, "", style, outerKnobBackgroundBitmap, true, false, 1.0f, 0.0f));
+      outputKnobArea, kOutputLevel, "OUTPUT", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale,
+      kSideLabelYOffset,
+      kSideValueYOffset));
 
     // The meters
     pGraphics->AttachControl(new NAMMeterControl(inputMeterArea, meterBackgroundBitmap, style), kCtrlTagInputMeter);
@@ -1008,10 +1199,6 @@ void NeuralAmpModeler::_SetTopNavActiveSection(const TopNavSection section)
     return;
   }
 
-  // A disabled section should not reactivate on normal click.
-  if (mTopNavBypassed[idx])
-    return;
-
   mTopNavActiveSection = section;
   _SyncTunerParamToTopNav();
   _RefreshTopNavControls();
@@ -1034,20 +1221,25 @@ void NeuralAmpModeler::_RefreshTopNavControls()
   if (auto* pGraphics = GetUI())
   {
     const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
+    const auto ampIdx = static_cast<size_t>(TopNavSection::Amp);
+    const auto cabIdx = static_cast<size_t>(TopNavSection::Cab);
     const bool tunerActive = !mTopNavBypassed[tunerIdx];
+    const bool showAmpSection = (mTopNavActiveSection == TopNavSection::Amp);
+    const bool showCabSection = (mTopNavActiveSection == TopNavSection::Cab);
     const auto updateIcon = [&](const int tag, const TopNavSection section) {
       if (auto* pIcon = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
       {
         const auto idx = static_cast<size_t>(section);
         if (section == TopNavSection::Tuner)
-          pIcon->SetVisualState(tunerActive, !tunerActive);
+          pIcon->SetVisualState(tunerActive, false);
         else
-          pIcon->SetVisualState((mTopNavActiveSection == section) && !mTopNavBypassed[idx], mTopNavBypassed[idx]);
+          pIcon->SetVisualState(mTopNavActiveSection == section, mTopNavBypassed[idx]);
       }
     };
 
     updateIcon(kCtrlTagTopNavAmp, TopNavSection::Amp);
     updateIcon(kCtrlTagTopNavStomp, TopNavSection::Stomp);
+    updateIcon(kCtrlTagTopNavCab, TopNavSection::Cab);
     updateIcon(kCtrlTagTopNavFx, TopNavSection::Fx);
     updateIcon(kCtrlTagTopNavTuner, TopNavSection::Tuner);
 
@@ -1058,6 +1250,28 @@ void NeuralAmpModeler::_RefreshTopNavControls()
       pTunerMute->Hide(!showTunerReadout);
     if (auto* pTunerClose = pGraphics->GetControlWithTag(kCtrlTagTunerClose))
       pTunerClose->Hide(!showTunerReadout);
+
+    if (auto* pIRToggle = pGraphics->GetControlWithTag(kCtrlTagIRToggle))
+      pIRToggle->Hide(!showCabSection);
+    if (auto* pIRLeft = pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserLeft))
+      pIRLeft->Hide(!showCabSection);
+    if (auto* pIRRight = pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight))
+      pIRRight->Hide(!showCabSection);
+    if (auto* pCabBlend = pGraphics->GetControlWithParamIdx(kCabIRBlend))
+      pCabBlend->Hide(!showCabSection);
+
+    const auto updateAmpSlot = [&](const int tag, const int slotIndex) {
+      if (auto* pAmpSlot = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
+      {
+        pAmpSlot->Hide(!showAmpSection);
+        const bool isSelected = showAmpSection && (mAmpSelectorIndex == slotIndex);
+        const bool dimUnselected = showAmpSection && (mAmpSelectorIndex != slotIndex);
+        pAmpSlot->SetVisualState(isSelected, dimUnselected);
+      }
+    };
+    updateAmpSlot(kCtrlTagAmpSlot1, 0);
+    updateAmpSlot(kCtrlTagAmpSlot2, 1);
+    updateAmpSlot(kCtrlTagAmpSlot3, 2);
   }
 }
 

@@ -3,6 +3,7 @@
 #include <algorithm> // std::clamp
 #include <cmath> // std::round
 #include <functional>
+#include <memory>
 #include <sstream> // std::stringstream
 #include <unordered_map> // std::unordered_map
 #include <utility>
@@ -57,7 +58,12 @@ public:
   void Draw(IGraphics& g) override
   {
     if (mMouseIsOver)
-      g.FillEllipse(PluginColors::MOUSEOVER, mRECT);
+    {
+      // Match top-nav hover feel with a clearer "pop" around the cog.
+      const auto hoverRect = mRECT.GetScaledAboutCentre(1.08f);
+      g.FillEllipse(PluginColors::MOUSEOVER.WithOpacity(0.1f), hoverRect);
+      g.DrawEllipse(PluginColors::NAM_THEMECOLOR.WithOpacity(0.3f), hoverRect, &mBlend, 1.2f);
+    }
 
     ISVGButtonControl::Draw(g);
   }
@@ -144,13 +150,26 @@ public:
   using Action = std::function<void()>;
 
   NAMTopIconControl(const IRECT& bounds, const IBitmap& onBitmap, const IBitmap& activeBitmap, const IBitmap& offBitmap,
-                    Action onActivate, Action onToggleBypass)
+                    Action onActivate, Action onToggleBypass, bool drawActiveUnderline = true)
   : IControl(bounds)
   , mOnBitmap(onBitmap)
   , mActiveBitmap(activeBitmap)
   , mOffBitmap(offBitmap)
   , mOnActivate(std::move(onActivate))
   , mOnToggleBypass(std::move(onToggleBypass))
+  , mDrawActiveUnderline(drawActiveUnderline)
+  {
+  }
+
+  NAMTopIconControl(const IRECT& bounds, const ISVG& onSVG, const ISVG& activeSVG, const ISVG& offSVG, Action onActivate,
+                    Action onToggleBypass, bool drawActiveUnderline = true)
+  : IControl(bounds)
+  , mOnSVG(std::make_unique<ISVG>(onSVG))
+  , mActiveSVG(std::make_unique<ISVG>(activeSVG))
+  , mOffSVG(std::make_unique<ISVG>(offSVG))
+  , mOnActivate(std::move(onActivate))
+  , mOnToggleBypass(std::move(onToggleBypass))
+  , mDrawActiveUnderline(drawActiveUnderline)
   {
   }
 
@@ -165,23 +184,67 @@ public:
 
   void Draw(IGraphics& g) override
   {
-    const IBitmap& bitmap = mIsActive ? mActiveBitmap : (mIsBypassed ? mOffBitmap : mOnBitmap);
-    if (bitmap.W() <= 0 || bitmap.H() <= 0)
-      return;
-    const float bitmapAspect = static_cast<float>(bitmap.W()) / static_cast<float>(bitmap.H());
-    const float rectAspect = mRECT.W() / mRECT.H();
-    IRECT drawRect = mRECT;
-    if (bitmapAspect > rectAspect)
+    const bool drawSVG = (mOnSVG && mActiveSVG && mOffSVG);
+    const ISVG* pSVG = nullptr;
+    const IBitmap* pBitmap = nullptr;
+    float iconAspect = 1.0f;
+
+    if (drawSVG)
     {
-      const float drawHeight = mRECT.W() / bitmapAspect;
-      drawRect = mRECT.GetCentredInside(mRECT.W(), drawHeight);
+      pSVG = mIsActive ? mActiveSVG.get() : (mIsBypassed ? mOffSVG.get() : mOnSVG.get());
+      if (pSVG == nullptr || !pSVG->IsValid())
+        return;
+      const float svgW = pSVG->W();
+      const float svgH = pSVG->H();
+      iconAspect = (svgW > 0.0f && svgH > 0.0f) ? (svgW / svgH) : 1.0f;
     }
     else
     {
-      const float drawWidth = mRECT.H() * bitmapAspect;
-      drawRect = mRECT.GetCentredInside(drawWidth, mRECT.H());
+      pBitmap = &(mIsActive ? mActiveBitmap : (mIsBypassed ? mOffBitmap : mOnBitmap));
+      if (pBitmap->W() <= 0 || pBitmap->H() <= 0)
+        return;
+      iconAspect = static_cast<float>(pBitmap->W()) / static_cast<float>(pBitmap->H());
     }
-    g.DrawFittedBitmap(bitmap, drawRect);
+
+    // Keep a consistent icon height across all top icons; width follows aspect ratio.
+    // Reserve inner padding so hover-pop and underline stay inside the slot.
+    constexpr float kIconPadX = 2.0f;
+    constexpr float kIconPadTop = 4.0f;
+    constexpr float kIconPadBottom = 7.0f;
+    const IRECT iconSlot(mRECT.L + kIconPadX, mRECT.T + kIconPadTop, mRECT.R - kIconPadX, mRECT.B - kIconPadBottom);
+    IRECT drawRect = iconSlot.GetCentredInside(iconSlot.H() * iconAspect, iconSlot.H());
+    const IRECT baseIconRect = drawRect;
+    if (mMouseIsOver)
+    {
+      // Subtle "pop" on hover.
+      drawRect = drawRect.GetScaledAboutCentre(1.05f).GetVShifted(-0.5f);
+    }
+    const float alpha = mIsBypassed ? 0.45f : 1.0f;
+    IBlend iconBlend(EBlend::Default, alpha);
+    if (drawSVG)
+    {
+      // Keep top-nav SVG icons visible/consistent against the dark header.
+      const IColor svgTint = COLOR_WHITE;
+      g.DrawSVG(*pSVG, drawRect, &iconBlend, &svgTint, &svgTint);
+    }
+    else
+      g.DrawFittedBitmap(*pBitmap, drawRect, &iconBlend);
+
+    if (mDrawActiveUnderline && mIsActive)
+    {
+      // Current visible view: fixed-width underline (consistent for all icons), tight to icon.
+      constexpr float kFixedUnderlineWidth = 34.0f; // tuned to match stomp icon width visually
+      const float underlineWidth = std::min(kFixedUnderlineWidth, baseIconRect.W() - 4.0f);
+      const float lineHalfW = 0.5f * underlineWidth;
+      const float lineY = iconSlot.B + 7.0f;
+      g.DrawLine(COLOR_WHITE.WithOpacity(0.95f),
+                 baseIconRect.MW() - lineHalfW,
+                 lineY,
+                 baseIconRect.MW() + lineHalfW,
+                 lineY,
+                 &mBlend,
+                 1.8f);
+    }
   }
 
   void OnMouseDown(float, float, const IMouseMod& mod) override
@@ -203,8 +266,14 @@ public:
     // Deactivation is handled via Ctrl+Click or Right-Click.
   }
 
+  void OnMouseOver(float x, float y, const IMouseMod& mod) override { IControl::OnMouseOver(x, y, mod); }
+
+  void OnMouseOut() override { IControl::OnMouseOut(); }
+
   void OnRescale() override
   {
+    if (mOnSVG && mActiveSVG && mOffSVG)
+      return;
     mOnBitmap = GetUI()->GetScaledBitmap(mOnBitmap);
     mActiveBitmap = GetUI()->GetScaledBitmap(mActiveBitmap);
     mOffBitmap = GetUI()->GetScaledBitmap(mOffBitmap);
@@ -214,34 +283,61 @@ private:
   IBitmap mOnBitmap;
   IBitmap mActiveBitmap;
   IBitmap mOffBitmap;
+  std::unique_ptr<ISVG> mOnSVG;
+  std::unique_ptr<ISVG> mActiveSVG;
+  std::unique_ptr<ISVG> mOffSVG;
   Action mOnActivate;
   Action mOnToggleBypass;
   bool mIsActive = false;
   bool mIsBypassed = false;
+  bool mDrawActiveUnderline = true;
 };
 
-class NAMKnobControl : public IVKnobControl, public IBitmapBase
+class NAMKnobControl : public IVKnobControl
 {
 public:
   NAMKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, const IBitmap& bitmap,
                  bool drawIndicatorTrack = true, bool useDarkIndicatorDot = false, float knobScale = 1.0f,
-                 float labelYOffset = 0.0f)
+                 float labelYOffset = 0.0f, float valueYOffset = 0.0f)
   : IVKnobControl(bounds, paramIdx, label, style, true)
-  , IBitmapBase(bitmap)
+  , mBitmap(bitmap)
+  , mUseSVG(false)
   , mDrawIndicatorTrack(drawIndicatorTrack)
   , mUseDarkIndicatorDot(useDarkIndicatorDot)
   , mKnobScale(knobScale)
   , mLabelYOffset(labelYOffset)
+  , mValueYOffset(valueYOffset)
   {
     mInnerPointerFrac = 0.55;
   }
 
-  void OnRescale() override { mBitmap = GetUI()->GetScaledBitmap(mBitmap); }
+  NAMKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, const ISVG& svg,
+                 bool drawIndicatorTrack = true, bool useDarkIndicatorDot = false, float knobScale = 1.0f,
+                 float labelYOffset = 0.0f, float valueYOffset = 0.0f)
+  : IVKnobControl(bounds, paramIdx, label, style, true)
+  , mSVG(std::make_unique<ISVG>(svg))
+  , mUseSVG(true)
+  , mDrawIndicatorTrack(drawIndicatorTrack)
+  , mUseDarkIndicatorDot(useDarkIndicatorDot)
+  , mKnobScale(knobScale)
+  , mLabelYOffset(labelYOffset)
+  , mValueYOffset(valueYOffset)
+  {
+    mInnerPointerFrac = 0.55;
+  }
+
+  void OnRescale() override
+  {
+    if (mBitmap.W() > 0 && mBitmap.H() > 0)
+      mBitmap = GetUI()->GetScaledBitmap(mBitmap);
+  }
   void OnResize() override
   {
     IVKnobControl::OnResize();
     if (mLabelYOffset != 0.0f)
       mLabelBounds.Translate(0.0f, mLabelYOffset);
+    if (mValueYOffset != 0.0f)
+      mValueBounds.Translate(0.0f, mValueYOffset);
   }
 
   void DrawWidget(IGraphics& g) override
@@ -252,7 +348,10 @@ public:
     const float angle = mAngle1 + (static_cast<float>(GetValue()) * (mAngle2 - mAngle1));
     if (mDrawIndicatorTrack)
       DrawIndicatorTrack(g, angle, cx + 0.5, cy, widgetRadius);
-    g.DrawFittedBitmap(mBitmap, knobRect);
+    if (mUseSVG && mSVG && mSVG->IsValid())
+      g.DrawSVG(*mSVG, knobRect, &mBlend);
+    else if (mBitmap.W() > 0 && mBitmap.H() > 0)
+      g.DrawFittedBitmap(mBitmap, knobRect);
     float data[2][2];
     RadialPoints(angle, cx, cy, mInnerPointerFrac * widgetRadius, mInnerPointerFrac * widgetRadius, 2, data);
     if (mUseDarkIndicatorDot)
@@ -272,10 +371,14 @@ public:
   }
 
 private:
+  IBitmap mBitmap;
+  std::unique_ptr<ISVG> mSVG;
+  bool mUseSVG = false;
   bool mDrawIndicatorTrack = true;
   bool mUseDarkIndicatorDot = false;
   float mKnobScale = 1.0f;
   float mLabelYOffset = 0.0f;
+  float mValueYOffset = 0.0f;
 };
 
 class NAMSwitchControl : public IVSlideSwitchControl, public IBitmapBase
@@ -368,7 +471,7 @@ class NAMBlendSliderControl : public IVSliderControl
 {
 public:
   NAMBlendSliderControl(const IRECT& bounds, int paramIdx, const IVStyle& style)
-  : IVSliderControl(bounds, paramIdx, "Cab Blend", style.WithShowValue(false), false, EDirection::Horizontal,
+  : IVSliderControl(bounds, paramIdx, "CAB BLEND", style.WithShowValue(false), false, EDirection::Horizontal,
                     DEFAULT_GEARING, 6.0f, 3.0f, true)
   {
   }

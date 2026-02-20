@@ -76,6 +76,7 @@ enum ECtrlTags
   kCtrlTagModelFileBrowser = 0,
   kCtrlTagIRFileBrowserLeft,
   kCtrlTagIRFileBrowserRight,
+  kCtrlTagIRToggle,
   kCtrlTagNoiseGateLED,
   kCtrlTagInputMeter,
   kCtrlTagOutputMeter,
@@ -88,8 +89,13 @@ enum ECtrlTags
   kCtrlTagTunerClose,
   kCtrlTagTopNavAmp,
   kCtrlTagTopNavStomp,
+  kCtrlTagTopNavCab,
   kCtrlTagTopNavFx,
   kCtrlTagTopNavTuner,
+  kCtrlTagAmpSlot1,
+  kCtrlTagAmpSlot2,
+  kCtrlTagAmpSlot3,
+  kCtrlTagPresetLabel,
   kNumCtrlTags
 };
 
@@ -235,6 +241,7 @@ private:
   {
     Amp = 0,
     Stomp,
+    Cab,
     Fx,
     Tuner,
     Count
@@ -347,7 +354,8 @@ private:
   std::atomic<bool> mNoiseGateIsAttenuating = false;
   bool mNoiseGateLEDState = false;
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
-  std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false};
+  std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false};
+  int mAmpSelectorIndex = 0;
   TunerAnalyzer mTunerAnalyzer;
 
   // Tone stack modules
