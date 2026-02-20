@@ -208,6 +208,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto outerKnobBackgroundSVG = pGraphics->LoadSVG(FLATKNOBBACKGROUND_SVG_FN);
 
     const auto backgroundBitmap = pGraphics->LoadBitmap(BACKGROUND_FN);
+    const auto settingsBackgroundBitmap = pGraphics->LoadBitmap(SETTINGSBACKGROUND_FN);
     const auto fileBackgroundBitmap = pGraphics->LoadBitmap(FILEBACKGROUND_FN);
     const auto inputLevelBackgroundBitmap = pGraphics->LoadBitmap(INPUTLEVELBACKGROUND_FN);
     const auto linesBitmap = pGraphics->LoadBitmap(LINES_FN);
@@ -476,7 +477,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       }
     };
 
-    pGraphics->AttachControl(new NAMBackgroundBitmapControl(b, BACKGROUND_FN, backgroundBitmap));
+    pGraphics->AttachControl(new NAMBackgroundBitmapControl(b, BACKGROUND_FN, backgroundBitmap), kCtrlTagMainBackground);
     pGraphics->AttachControl(new IBitmapControl(b, linesBitmap));
     // Subtle utility-zone overlays to anchor top and footer controls visually.
     const IColor topBarOverlayColor = IColor(72, 6, 6, 8);
@@ -724,7 +725,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       gearSVG));
 
     pGraphics
-      ->AttachControl(new NAMSettingsPageControl(b, backgroundBitmap, inputLevelBackgroundBitmap, switchHandleBitmap,
+      ->AttachControl(new NAMSettingsPageControl(b, settingsBackgroundBitmap, inputLevelBackgroundBitmap, switchHandleBitmap,
                                                  crossSVG, style, radioButtonStyle),
                       kCtrlTagSettingsBox)
       ->Hide(true);
@@ -1221,8 +1222,6 @@ void NeuralAmpModeler::_RefreshTopNavControls()
   if (auto* pGraphics = GetUI())
   {
     const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
-    const auto ampIdx = static_cast<size_t>(TopNavSection::Amp);
-    const auto cabIdx = static_cast<size_t>(TopNavSection::Cab);
     const bool tunerActive = !mTopNavBypassed[tunerIdx];
     const bool showAmpSection = (mTopNavActiveSection == TopNavSection::Amp);
     const bool showCabSection = (mTopNavActiveSection == TopNavSection::Cab);
@@ -1243,6 +1242,16 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     updateIcon(kCtrlTagTopNavFx, TopNavSection::Fx);
     updateIcon(kCtrlTagTopNavTuner, TopNavSection::Tuner);
 
+    const char* backgroundResource = BACKGROUND_FN;
+    if (mTopNavActiveSection == TopNavSection::Stomp)
+      backgroundResource = STOMPBACKGROUND_FN;
+    else if (mTopNavActiveSection == TopNavSection::Cab)
+      backgroundResource = CABBACKGROUND_FN;
+    else if (mTopNavActiveSection == TopNavSection::Fx)
+      backgroundResource = FXBACKGROUND_FN;
+    if (auto* pBackground = dynamic_cast<NAMBackgroundBitmapControl*>(pGraphics->GetControlWithTag(kCtrlTagMainBackground)))
+      pBackground->SetResourceName(backgroundResource);
+
     const bool showTunerReadout = tunerActive;
     if (auto* pTunerReadout = pGraphics->GetControlWithTag(kCtrlTagTunerReadout))
       pTunerReadout->Hide(!showTunerReadout);
@@ -1250,6 +1259,26 @@ void NeuralAmpModeler::_RefreshTopNavControls()
       pTunerMute->Hide(!showTunerReadout);
     if (auto* pTunerClose = pGraphics->GetControlWithTag(kCtrlTagTunerClose))
       pTunerClose->Hide(!showTunerReadout);
+
+    if (auto* pModelBrowser = pGraphics->GetControlWithTag(kCtrlTagModelFileBrowser))
+      pModelBrowser->Hide(!showAmpSection);
+    if (auto* pModelToggle = pGraphics->GetControlWithParamIdx(kModelToggle))
+      pModelToggle->Hide(!showAmpSection);
+    if (auto* pNoiseGateLED = pGraphics->GetControlWithTag(kCtrlTagNoiseGateLED))
+      pNoiseGateLED->Hide(!showAmpSection);
+
+    const auto hideAmpParamControl = [&](const int paramIdx) {
+      if (auto* pControl = pGraphics->GetControlWithParamIdx(paramIdx))
+        pControl->Hide(!showAmpSection);
+    };
+    hideAmpParamControl(kNoiseGateThreshold);
+    hideAmpParamControl(kPreModelGain);
+    hideAmpParamControl(kToneBass);
+    hideAmpParamControl(kToneMid);
+    hideAmpParamControl(kToneTreble);
+    hideAmpParamControl(kTonePresence);
+    hideAmpParamControl(kToneDepth);
+    hideAmpParamControl(kMasterVolume);
 
     if (auto* pIRToggle = pGraphics->GetControlWithTag(kCtrlTagIRToggle))
       pIRToggle->Hide(!showCabSection);

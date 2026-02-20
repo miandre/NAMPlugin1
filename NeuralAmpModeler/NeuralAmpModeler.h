@@ -96,6 +96,7 @@ enum ECtrlTags
   kCtrlTagAmpSlot2,
   kCtrlTagAmpSlot3,
   kCtrlTagPresetLabel,
+  kCtrlTagMainBackground,
   kNumCtrlTags
 };
 

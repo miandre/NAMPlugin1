@@ -85,6 +85,15 @@ public:
     mBitmap = GetUI()->LoadBitmap(mResourceName.c_str(), 1, false, targetScale);
   }
 
+  void SetResourceName(const char* resourceName)
+  {
+    if (resourceName == nullptr || mResourceName == resourceName)
+      return;
+    mResourceName = resourceName;
+    OnRescale();
+    SetDirty(false);
+  }
+
 private:
   std::string mResourceName;
 };
