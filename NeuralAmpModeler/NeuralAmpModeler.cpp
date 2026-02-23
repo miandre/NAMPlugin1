@@ -18,6 +18,11 @@
 
 #include "NeuralAmpModelerControls.h"
 
+#if __has_include("third_party/rubberband/single/RubberBandSingle.cpp")
+// Build Rubber Band as a single translation unit without modifying project files.
+#include "third_party/rubberband/single/RubberBandSingle.cpp"
+#endif
+
 using namespace iplug;
 using namespace igraphics;
 
@@ -152,6 +157,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kMasterVolume)->InitDouble("Master", 5.0, 0.0, 10.0, 0.1);
   GetParam(kTunerActive)->InitBool("Tuner", false);
   GetParam(kTunerMonitorMode)->InitEnum("Tuner Monitor", 1, {"Mute", "Bypass", "Full"});
+  GetParam(kTransposeSemitones)->InitDouble("Transpose", 0.0, -8.0, 8.0, 1.0, "");
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
   GetParam(kNoiseGateThreshold)->InitGain("Threshold", -80.0, -100.0, 0.0, 0.1);
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
@@ -261,10 +267,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float topSideFilterGapX = 82.0f;
     const float leftInputCenterX = contentArea.L + topSideKnobCenterInset;
     const float rightOutputCenterX = contentArea.R - topSideKnobCenterInset;
-    const float leftFilterCenterX = leftInputCenterX + topSideFilterGapX;
+    const float leftTransposeCenterX = leftInputCenterX + topSideFilterGapX;
+    const float leftFilterCenterX = leftTransposeCenterX + topSideFilterGapX;
     const float rightFilterCenterX = rightOutputCenterX - topSideFilterGapX;
 
     const auto inputKnobArea = makeKnobArea(leftInputCenterX, topSideKnobTop);
+    const auto transposeKnobArea = makeKnobArea(leftTransposeCenterX, topSideKnobTop);
     const auto outputKnobArea = makeKnobArea(rightOutputCenterX, topSideKnobTop);
 
     // Amp-face controls (independent group)
@@ -667,6 +675,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new NAMKnobControl(
       inputKnobArea, kInputLevel, "INPUT", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale, kSideLabelYOffset,
       kSideValueYOffset));
+    pGraphics->AttachControl(new NAMKnobControl(
+      transposeKnobArea, kTransposeSemitones, "TRANSPOSE", utilityStyle, outerKnobBackgroundSVG, true, false,
+      topSideKnobScale, kSideLabelYOffset, kSideValueYOffset));
     pGraphics->AttachControl(new NAMKnobControl(noiseGateArea, kNoiseGateThreshold, "GATE", ampKnobStyle,
                                                 ampKnobBackgroundBitmap, false, true, 0.75f, AP_KNOP_OFFSET));
     pGraphics->AttachControl(new NAMKnobControl(preModelGainArea, kPreModelGain, "PRE GAIN", ampKnobStyle,
@@ -771,6 +782,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool toneStackActive = GetParam(kEQActive)->Value();
   const bool modelActive = GetParam(kModelToggle)->Bool();
   const bool tunerActive = GetParam(kTunerActive)->Bool();
+  const int transposeSemitones = static_cast<int>(std::lround(GetParam(kTransposeSemitones)->Value()));
   const double preModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
 
   if (tunerActive)
@@ -799,6 +811,10 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     }
     // tunerMonitorMode == 2 -> fall through to full processing path.
   }
+
+  // Lightweight semitone transposer with internal click-free crossfade on 0<->nonzero transitions.
+  // We call this every block so fade-out to bypass can complete smoothly.
+  mTransposeShifter.ProcessBlock(mInputPointers[0], numFrames, transposeSemitones);
 
   // Noise gate trigger
   sample** triggerOutput = mInputPointers;
@@ -922,6 +938,7 @@ void NeuralAmpModeler::OnReset()
   mOutputSender.Reset(sampleRate);
   // If there is a model or IR loaded, they need to be checked for resampling.
   _ResetModelAndIR(sampleRate, GetBlockSize());
+  mTransposeShifter.Reset(sampleRate, maxBlockSize);
   mToneStack->Reset(sampleRate, maxBlockSize);
   // Pre-size internal mono buffers to the current host max block size.
   // ProcessBlock() should then only write/clear active frames.
