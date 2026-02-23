@@ -13,6 +13,7 @@
 #include "Colors.h"
 #include "TunerAnalyzer.h"
 #include "ToneStack.h"
+#include "TransposeShifter.h"
 
 #include "IPlug_include_in_plug_hdr.h"
 #include "ISender.h"
@@ -66,6 +67,8 @@ enum EParams
   kTunerActive,
   // Tuner monitor mode while active: Mute / Bypass / Full
   kTunerMonitorMode,
+  // Input transpose in semitone steps (-8..+8)
+  kTransposeSemitones,
   kNumParams
 };
 
@@ -358,6 +361,7 @@ private:
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false};
   int mAmpSelectorIndex = 0;
   TunerAnalyzer mTunerAnalyzer;
+  LightweightTransposeShifter mTransposeShifter;
 
   // Tone stack modules
   std::unique_ptr<dsp::tone_stack::AbstractToneStack> mToneStack;
