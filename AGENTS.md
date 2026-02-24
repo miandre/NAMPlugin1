@@ -4,6 +4,7 @@ These rules apply to any AI agent operating in this repository.
 If anything conflicts with real-time audio safety or build stability, prioritize safety and ask.
 
 Also read and follow: SKILLS.md (working modes, review process, communication style).
+Also read: AGENT_SESSION_SUMMARY.md (latest project-specific handoff and current state).
 
 ## Project context
 - Fork of NeuralAmpModelerPlugin.
