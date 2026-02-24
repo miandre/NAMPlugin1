@@ -69,6 +69,11 @@ enum EParams
   kTunerMonitorMode,
   // Input transpose in semitone steps (-8..+8)
   kTransposeSemitones,
+  // Gate release time in milliseconds
+  kNoiseGateReleaseMs,
+  // Boost pedal section
+  kStompBoostLevel,
+  kStompBoostActive,
   kNumParams
 };
 
@@ -100,6 +105,9 @@ enum ECtrlTags
   kCtrlTagAmpSlot3,
   kCtrlTagPresetLabel,
   kCtrlTagMainBackground,
+  kCtrlTagStompModelFileBrowser,
+  kCtrlTagGateOnLED,
+  kCtrlTagBoostOnLED,
   kNumCtrlTags
 };
 
@@ -107,12 +115,14 @@ enum EMsgTags
 {
   // These tags are used from UI -> DSP
   kMsgTagClearModel = 0,
+  kMsgTagClearStompModel,
   kMsgTagClearIRLeft,
   kMsgTagClearIRRight,
   kMsgTagHighlightColor,
   // The following tags are from DSP -> UI
   kMsgTagLoadFailed,
   kMsgTagLoadedModel,
+  kMsgTagLoadedStompModel,
   kMsgTagLoadedIRLeft,
   kMsgTagLoadedIRRight,
   kNumMsgTags
@@ -272,6 +282,10 @@ private:
   // Loads left cab IR and stores it to mStagedIR.
   // Return status code so that error messages can be relayed if
   // it wasn't successful.
+  std::string _StageStompModel(const WDL_String& dspFile);
+  // Loads left cab IR and stores it to mStagedIR.
+  // Return status code so that error messages can be relayed if
+  // it wasn't successful.
   dsp::wav::LoadReturnCode _StageIRLeft(const WDL_String& irPath);
   // Loads right cab IR and stores it to mStagedIRRight.
   dsp::wav::LoadReturnCode _StageIRRight(const WDL_String& irPath);
@@ -341,15 +355,18 @@ private:
   dsp::noise_gate::Gain mNoiseGateGain;
   // The model actually being used:
   std::unique_ptr<ResamplingNAM> mModel;
+  std::unique_ptr<ResamplingNAM> mStompModel;
   // And the IR
   std::unique_ptr<dsp::ImpulseResponse> mIR;
   std::unique_ptr<dsp::ImpulseResponse> mIRRight;
   // Manages switching what DSP is being used.
   std::unique_ptr<ResamplingNAM> mStagedModel;
+  std::unique_ptr<ResamplingNAM> mStagedStompModel;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIR;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRRight;
   // Flags to take away the modules at a safe time.
   std::atomic<bool> mShouldRemoveModel = false;
+  std::atomic<bool> mShouldRemoveStompModel = false;
   std::atomic<bool> mShouldRemoveIRLeft = false;
   std::atomic<bool> mShouldRemoveIRRight = false;
 
@@ -377,6 +394,7 @@ private:
 
   // Path to model's config.json or model.nam
   WDL_String mNAMPath;
+  WDL_String mStompNAMPath;
   // Path to IR (.wav file)
   WDL_String mIRPath;
   WDL_String mIRPathRight;

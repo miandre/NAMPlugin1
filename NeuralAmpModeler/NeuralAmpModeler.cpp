@@ -159,8 +159,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kTunerMonitorMode)->InitEnum("Tuner Monitor", 1, {"Mute", "Bypass", "Full"});
   GetParam(kTransposeSemitones)->InitDouble("Transpose", 0.0, -8.0, 8.0, 1.0, "");
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
-  GetParam(kNoiseGateThreshold)->InitGain("Threshold", -80.0, -100.0, 0.0, 0.1);
+  GetParam(kNoiseGateThreshold)->InitGain("Threshold", -50.0, -80.0, 0.0, 0.1);
+  GetParam(kNoiseGateReleaseMs)->InitDouble("Gate Release", 40.0, 1.0, 100.0, 1.0, "");
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
+  GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
+  GetParam(kStompBoostActive)->InitBool("BoostActive", false);
   GetParam(kEQActive)->InitBool("ToneStack", true);
   GetParam(kOutputMode)->InitEnum("OutputMode", 1, {"Raw", "Normalized", "Calibrated"}); // TODO DRY w/ control
   GetParam(kIRToggle)->InitBool("IRToggle", true);
@@ -223,6 +226,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto switchOnBitmap = pGraphics->LoadBitmap(SWITCH_ON_FN);
     const auto switchHandleBitmap = pGraphics->LoadBitmap(SLIDESWITCHHANDLE_FN);
     const auto meterBackgroundBitmap = pGraphics->LoadBitmap(METERBACKGROUND_FN);
+    const auto pedalKnobBitmap = pGraphics->LoadBitmap(PEDALKNOB_FN);
+    const auto pedalKnobShadowBitmap = pGraphics->LoadBitmap(PEDALKNOBSHADOW_FN);
+    const auto stompButtonUpBitmap = pGraphics->LoadBitmap(STOMPBUTTONUP_FN);
+    const auto stompButtonDownBitmap = pGraphics->LoadBitmap(STOMPBUTTONDOWN_FN);
+    const auto greenLedOnBitmap = pGraphics->LoadBitmap(GREENLEDON_FN);
+    const auto greenLedOffBitmap = pGraphics->LoadBitmap(GREENLEDOFF_FN);
+    const auto redLedOnBitmap = pGraphics->LoadBitmap(REDLEDON_FN);
+    const auto redLedOffBitmap = pGraphics->LoadBitmap(REDLEDOFF_FN);
 
     // Top/section icons are SVG-only now.
 
@@ -254,6 +265,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float knobWidth = 80.0f;
     auto makeKnobArea = [&](const float centerX, const float topY) {
       return IRECT(centerX - knobWidth * 0.5f, topY, centerX + knobWidth * 0.5f, topY + NAM_KNOB_HEIGHT);
+    };
+    constexpr float kPedalKnobScale = 0.15f;
+    auto makePedalKnobArea = [&](const float centerX, const float centerY) {
+      const float w = pedalKnobBitmap.IsValid() ? static_cast<float>(pedalKnobBitmap.W()) * kPedalKnobScale : knobWidth;
+      const float h = pedalKnobBitmap.IsValid() ? static_cast<float>(pedalKnobBitmap.H()) * kPedalKnobScale : knobWidth;
+      constexpr float kPedalLabelValuePad = 38.0f;
+      return IRECT(centerX - 0.5f * w, centerY - 0.5f * h, centerX + 0.5f * w, centerY + 0.5f * h + kPedalLabelValuePad);
     };
     // Top-bar side I/O group (left/right mirrored).
     const float topSideKnobTop = topMainRowArea.MH() - 0.5f * NAM_KNOB_HEIGHT - 8.0f;
@@ -287,7 +305,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto presenceKnobArea = makeKnobArea(frontRowCenterX + 2.0f * frontKnobSpacing, frontKnobTop);
     const auto depthKnobArea = makeKnobArea(frontRowCenterX + 3.0f * frontKnobSpacing, frontKnobTop);
     const auto masterKnobArea = makeKnobArea(frontRowCenterX + 4.0f * frontKnobSpacing, frontKnobTop);
-    const auto noiseGateLEDRect = noiseGateArea.GetFromBLHC(14.0f, 14.0f).GetTranslated(3.0f, -25.0f);
     const float modelSwitchScale = 0.20f;
     const float modelSwitchWidth = switchOffBitmap.W() * modelSwitchScale;
     const float modelSwitchHeight = switchOffBitmap.H() * modelSwitchScale;
@@ -298,10 +315,49 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                        modelSwitchCenterX + 0.5f * modelSwitchWidth,
                                        modelSwitchCenterY + 0.5f * modelSwitchHeight);
 
+    // Stomp section coordinates come from the user's 3x design canvas.
+    constexpr float kDesignW = 3117.0f; // 3 * 1039
+    constexpr float kDesignH = 1998.0f; // 3 * 666
+    // Global background-space offset (if the whole design reference needs nudging).
+    constexpr float kBackgroundOffsetY = 0.0f;
+    // Knob controls include label/value layout, so allow a separate anchor tweak.
+    constexpr float kStompKnobAnchorOffsetY = -20.0f;
+    // Buttons are pure bitmap controls and should stay center-mapped to coordinates.
+    constexpr float kStompButtonAnchorOffsetY = 0.0f;
+    const auto designToUIX = [&](const float x) { return b.L + (x / kDesignW) * b.W(); };
+    const auto designToUIY = [&](const float y) { return b.T + kBackgroundOffsetY + (y / kDesignH) * b.H(); };
+    const float stompGateThresholdX = designToUIX(1020.0f);
+    const float stompGateReleaseX = designToUIX(1267.0f);
+    const float stompBoostLevelX = designToUIX(1975.0f);
+    const float stompKnobY = designToUIY(975.0f) + kStompKnobAnchorOffsetY;
+    const float stompGateSwitchX = designToUIX(1140.0f);
+    const float stompBoostSwitchX = designToUIX(1976.0f);
+    const float stompSwitchY = designToUIY(1476.0f) + kStompButtonAnchorOffsetY;
+    const auto stompGateThresholdArea = makePedalKnobArea(stompGateThresholdX, stompKnobY);
+    const auto stompGateReleaseArea = makePedalKnobArea(stompGateReleaseX, stompKnobY);
+    const auto stompBoostLevelArea = makePedalKnobArea(stompBoostLevelX, stompKnobY);
+    const float stompButtonScale = 0.15f;
+    const float stompButtonW =
+      stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.W()) * stompButtonScale : 46.0f;
+    const float stompButtonH =
+      stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.H()) * stompButtonScale : 30.0f;
+    const auto stompGateSwitchArea =
+      IRECT(stompGateSwitchX - 0.5f * stompButtonW, stompSwitchY - 0.5f * stompButtonH, stompGateSwitchX + 0.5f * stompButtonW,
+            stompSwitchY + 0.5f * stompButtonH);
+    const auto stompBoostSwitchArea =
+      IRECT(stompBoostSwitchX - 0.5f * stompButtonW, stompSwitchY - 0.5f * stompButtonH, stompBoostSwitchX + 0.5f * stompButtonW,
+            stompSwitchY + 0.5f * stompButtonH);
+    const auto stompGateOnLedArea = IRECT(stompGateSwitchArea.MW() - 7.0f, stompGateSwitchArea.B + 11.0f,
+                                          stompGateSwitchArea.MW() + 7.0f, stompGateSwitchArea.B + 25.0f);
+    const auto stompGateActiveLedArea = IRECT(stompGateSwitchArea.MW() - 7.0f, stompGateThresholdArea.B + 6.0f,
+                                              stompGateSwitchArea.MW() + 7.0f, stompGateThresholdArea.B + 20.0f);
+    const auto stompBoostOnLedArea = IRECT(stompBoostSwitchArea.MW() - 7.0f, stompBoostSwitchArea.B + 11.0f,
+                                           stompBoostSwitchArea.MW() + 7.0f, stompBoostSwitchArea.B + 25.0f);
+    const auto stompModelArea = IRECT(stompBoostLevelX - 170.0f, ampFaceArea.B + 40.0f, stompBoostLevelX + 170.0f,
+                                      ampFaceArea.B + 70.0f);
+
     // Gate/EQ toggle row (independent group)
     const float toggleTop = frontKnobTop + 86.0f;
-    const auto ngToggleArea =
-      IRECT(noiseGateArea.MW() - 17.0f, toggleTop, noiseGateArea.MW() + 17.0f, toggleTop + 24.0f);
     const auto eqToggleArea = IRECT(midKnobArea.MW() - 17.0f, toggleTop, midKnobArea.MW() + 17.0f, toggleTop + 24.0f);
 
     // Top-bar filter controls live with input/output controls.
@@ -453,6 +509,26 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     };
 
     // IR loader button
+    auto loadStompModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String&) {
+      if (fileName.GetLength())
+      {
+        const std::string msg = _StageStompModel(fileName);
+        if (msg.size())
+        {
+          std::stringstream ss;
+          ss << "Failed to load boost model. Message:\n\n" << msg;
+          _ShowMessageBox(GetUI(), ss.str().c_str(), "Failed to load boost model!", kMB_OK);
+          GetParam(kStompBoostActive)->Set(0.0);
+        }
+        else
+        {
+          GetParam(kStompBoostActive)->Set(1.0);
+        }
+        SendParameterValueFromDelegate(kStompBoostActive, GetParam(kStompBoostActive)->GetNormalized(), true);
+      }
+    };
+
+    // IR loader button
     auto loadIRLeftCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
       if (fileName.GetLength())
       {
@@ -513,6 +589,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                 loadModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
                                 fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
       kCtrlTagModelFileBrowser);
+    pGraphics->AttachControl(
+      new NAMFileBrowserControl(stompModelArea, kMsgTagClearStompModel, "Select stomp NAM...", "nam",
+                                loadStompModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
+      kCtrlTagStompModelFileBrowser,
+      "STOMP_CONTROLS");
     pGraphics->AttachControl(new NAMTunerDisplayControl(tunerReadoutArea), kCtrlTagTunerReadout);
     pGraphics->AttachControl(
       new NAMTunerMonitorControl(tunerMonitorArea, kTunerMonitorMode, utilityStyle),
@@ -664,9 +746,23 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                                    {}),
                              kCtrlTagAmpSlot3)
       ->SetTooltip("Amp Slot 3");
-    pGraphics->AttachControl(new NAMSwitchControl(ngToggleArea, kNoiseGateActive, "Noise Gate", style, switchHandleBitmap))
-      ->Hide(true);
-    pGraphics->AttachControl(new NAMLEDControl(noiseGateLEDRect), kCtrlTagNoiseGateLED);
+    pGraphics->AttachControl(
+      new NAMMomentaryBitmapButtonControl(stompGateSwitchArea, kNoiseGateActive, stompButtonUpBitmap, stompButtonDownBitmap),
+      -1,
+      "STOMP_CONTROLS");
+    pGraphics->AttachControl(new NAMBitmapLEDControl(stompGateOnLedArea, redLedOnBitmap, redLedOffBitmap),
+                             kCtrlTagGateOnLED,
+                             "STOMP_CONTROLS");
+    pGraphics->AttachControl(new NAMBitmapLEDControl(stompGateActiveLedArea, greenLedOnBitmap, greenLedOffBitmap),
+                             kCtrlTagNoiseGateLED,
+                             "STOMP_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMMomentaryBitmapButtonControl(stompBoostSwitchArea, kStompBoostActive, stompButtonUpBitmap, stompButtonDownBitmap),
+      -1,
+      "STOMP_CONTROLS");
+    pGraphics->AttachControl(new NAMBitmapLEDControl(stompBoostOnLedArea, redLedOnBitmap, redLedOffBitmap),
+                             kCtrlTagBoostOnLED,
+                             "STOMP_CONTROLS");
     pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap))->Hide(true);
 
     // The knobs
@@ -678,8 +774,21 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new NAMKnobControl(
       transposeKnobArea, kTransposeSemitones, "TRANSPOSE", utilityStyle, outerKnobBackgroundSVG, true, false,
       topSideKnobScale, kSideLabelYOffset, kSideValueYOffset));
-    pGraphics->AttachControl(new NAMKnobControl(noiseGateArea, kNoiseGateThreshold, "GATE", ampKnobStyle,
-                                                ampKnobBackgroundBitmap, false, true, 0.75f, AP_KNOP_OFFSET));
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(stompGateThresholdArea, kNoiseGateThreshold, "THRESH", utilityStyle, pedalKnobBitmap,
+                              pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "STOMP_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(stompGateReleaseArea, kNoiseGateReleaseMs, "RELEASE", utilityStyle, pedalKnobBitmap,
+                              pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "STOMP_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "LEVEL", utilityStyle, pedalKnobBitmap,
+                              pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "STOMP_CONTROLS");
     pGraphics->AttachControl(new NAMKnobControl(preModelGainArea, kPreModelGain, "PRE GAIN", ampKnobStyle,
                                                 ampKnobBackgroundBitmap, false, true, 0.7f, AP_KNOP_OFFSET));
     pGraphics->AttachControl(
@@ -778,11 +887,15 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   // Input is collapsed to mono in preparation for the NAM.
   _ProcessInput(inputs, numFrames, numChannelsExternalIn, numChannelsInternal);
   _ApplyDSPStaging();
-  const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
+  const bool stompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
+  const bool noiseGateActive = GetParam(kNoiseGateActive)->Value() && !stompBypassed;
+  const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed && (mStompModel != nullptr);
   const bool toneStackActive = GetParam(kEQActive)->Value();
   const bool modelActive = GetParam(kModelToggle)->Bool();
   const bool tunerActive = GetParam(kTunerActive)->Bool();
   const int transposeSemitones = static_cast<int>(std::lround(GetParam(kTransposeSemitones)->Value()));
+  const double gateReleaseValue = GetParam(kNoiseGateReleaseMs)->Value() * 0.2;
+  const double boostLevelGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
   const double preModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
 
   if (tunerActive)
@@ -820,18 +933,35 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** triggerOutput = mInputPointers;
   if (noiseGateActive)
   {
-    const double time = 0.01;
+    const double time = 0.03;
     const double threshold = GetParam(kNoiseGateThreshold)->Value(); // GetParam...
     const double ratio = 0.1; // Quadratic...
-    const double openTime = 0.005;
-    const double holdTime = 0.01;
-    const double closeTime = 0.05;
+    const double openTime = 0.05;
+    const double holdTime = gateReleaseValue * 0.5;
+    const double closeTime = gateReleaseValue;
     const dsp::noise_gate::TriggerParams triggerParams(time, threshold, ratio, openTime, holdTime, closeTime);
     mNoiseGateTrigger.SetParams(triggerParams);
     mNoiseGateTrigger.SetSampleRate(sampleRate);
     triggerOutput = mNoiseGateTrigger.Process(mInputPointers, numChannelsInternal, numFrames);
   }
-  mNoiseGateIsAttenuating.store(noiseGateActive && mNoiseGateTrigger.IsAttenuating(12.0), std::memory_order_relaxed);
+  mNoiseGateIsAttenuating.store(noiseGateActive && mNoiseGateTrigger.IsAttenuating(10.0), std::memory_order_relaxed);
+
+  sample** modelInputPointers =
+    noiseGateActive ? mNoiseGateGain.Process(triggerOutput, numChannelsInternal, numFrames) : triggerOutput;
+
+  if (boostEnabled)
+  {
+    sample** boostOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
+    mStompModel->process(modelInputPointers, boostOutPointers, nFrames);
+    modelInputPointers = boostOutPointers;
+  }
+
+  if (boostEnabled && boostLevelGain != 1.0)
+  {
+    for (size_t c = 0; c < numChannelsInternal; ++c)
+      for (size_t s = 0; s < numFrames; ++s)
+        modelInputPointers[c][s] *= boostLevelGain;
+  }
 
   if (modelActive && (mModel != nullptr))
   {
@@ -839,21 +969,20 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     {
       for (size_t c = 0; c < numChannelsInternal; ++c)
         for (size_t s = 0; s < numFrames; ++s)
-          triggerOutput[c][s] *= preModelGain;
+          modelInputPointers[c][s] *= preModelGain;
     }
-    mModel->process(triggerOutput, mOutputPointers, nFrames);
+    sample** modelOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
+    mModel->process(modelInputPointers, modelOutPointers, nFrames);
+    modelInputPointers = modelOutPointers;
   }
   else
   {
-    _FallbackDSP(triggerOutput, mOutputPointers, numChannelsInternal, numFrames);
+    _FallbackDSP(modelInputPointers, mOutputPointers, numChannelsInternal, numFrames);
+    modelInputPointers = mOutputPointers;
   }
-  // Apply the noise gate after the NAM
-  sample** gateGainOutput =
-    noiseGateActive ? mNoiseGateGain.Process(mOutputPointers, numChannelsInternal, numFrames) : mOutputPointers;
-
   sample** toneStackOutPointers = (toneStackActive && mToneStack != nullptr)
-                                    ? mToneStack->Process(gateGainOutput, numChannelsInternal, nFrames)
-                                    : gateGainOutput;
+                                    ? mToneStack->Process(modelInputPointers, numChannelsInternal, nFrames)
+                                    : modelInputPointers;
   if (mMasterGain != 1.0)
   {
     for (size_t c = 0; c < numChannelsInternal; ++c)
@@ -977,6 +1106,14 @@ void NeuralAmpModeler::OnIdle()
     mNoiseGateLEDState = noiseGateIsAttenuating;
   }
 
+  if (auto* pGraphics = GetUI())
+  {
+    if (auto* pGateOnLED = pGraphics->GetControlWithTag(kCtrlTagGateOnLED))
+      pGateOnLED->SetValueFromDelegate(GetParam(kNoiseGateActive)->Bool() ? 1.0 : 0.0, 0);
+    if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
+      pBoostOnLED->SetValueFromDelegate(GetParam(kStompBoostActive)->Bool() ? 1.0 : 0.0, 0);
+  }
+
   if (mNewModelLoadedInDSP)
   {
     if (auto* pGraphics = GetUI())
@@ -1049,6 +1186,14 @@ void NeuralAmpModeler::OnUIOpen()
       SendControlMsgFromDelegate(kCtrlTagModelFileBrowser, kMsgTagLoadFailed);
   }
 
+  if (mStompNAMPath.GetLength())
+  {
+    SendControlMsgFromDelegate(
+      kCtrlTagStompModelFileBrowser, kMsgTagLoadedStompModel, mStompNAMPath.GetLength(), mStompNAMPath.Get());
+    if (mStompModel == nullptr && mStagedStompModel == nullptr)
+      SendControlMsgFromDelegate(kCtrlTagStompModelFileBrowser, kMsgTagLoadFailed);
+  }
+
   if (mIRPath.GetLength())
   {
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, mIRPath.GetLength(), mIRPath.Get());
@@ -1114,7 +1259,47 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
 
     switch (paramIdx)
     {
-      case kNoiseGateActive: pGraphics->GetControlWithParamIdx(kNoiseGateThreshold)->SetDisabled(!active); break;
+      case kNoiseGateActive:
+        if (auto* pGateOnLED = pGraphics->GetControlWithTag(kCtrlTagGateOnLED))
+          pGateOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
+        break;
+      case kStompBoostActive:
+        if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
+          pBoostOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
+        if (active && (mStompModel == nullptr) && (mStagedStompModel == nullptr))
+        {
+          WDL_String fileName;
+          WDL_String path;
+          if (mStompNAMPath.GetLength())
+          {
+            path.Set(mStompNAMPath.Get());
+            path.remove_filepart();
+          }
+          pGraphics->PromptForFile(
+            fileName, path, EFileAction::Open, "nam", [this](const WDL_String& chosenFileName, const WDL_String&) {
+              if (chosenFileName.GetLength())
+              {
+                const std::string msg = _StageStompModel(chosenFileName);
+                if (msg.size())
+                {
+                  std::stringstream ss;
+                  ss << "Failed to load boost model. Message:\n\n" << msg;
+                  _ShowMessageBox(GetUI(), ss.str().c_str(), "Failed to load boost model!", kMB_OK);
+                  GetParam(kStompBoostActive)->Set(0.0);
+                }
+                else
+                {
+                  GetParam(kStompBoostActive)->Set(1.0);
+                }
+              }
+              else
+              {
+                GetParam(kStompBoostActive)->Set(0.0);
+              }
+              SendParameterValueFromDelegate(kStompBoostActive, GetParam(kStompBoostActive)->GetNormalized(), true);
+            });
+        }
+        break;
       case kEQActive:
         pGraphics->ForControlInGroup("EQ_KNOBS", [active](IControl* pControl) { pControl->SetDisabled(!active); });
         break;
@@ -1173,6 +1358,7 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
   switch (msgTag)
   {
     case kMsgTagClearModel: mShouldRemoveModel = true; return true;
+    case kMsgTagClearStompModel: mShouldRemoveStompModel = true; return true;
     case kMsgTagClearIRLeft: mShouldRemoveIRLeft = true; return true;
     case kMsgTagClearIRRight: mShouldRemoveIRRight = true; return true;
     case kMsgTagHighlightColor:
@@ -1241,6 +1427,7 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
     const bool tunerActive = !mTopNavBypassed[tunerIdx];
     const bool showAmpSection = (mTopNavActiveSection == TopNavSection::Amp);
+    const bool showStompSection = (mTopNavActiveSection == TopNavSection::Stomp);
     const bool showCabSection = (mTopNavActiveSection == TopNavSection::Cab);
     const auto updateIcon = [&](const int tag, const TopNavSection section) {
       if (auto* pIcon = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
@@ -1281,14 +1468,22 @@ void NeuralAmpModeler::_RefreshTopNavControls()
       pModelBrowser->Hide(!showAmpSection);
     if (auto* pModelToggle = pGraphics->GetControlWithParamIdx(kModelToggle))
       pModelToggle->Hide(!showAmpSection);
+    if (auto* pStompBrowser = pGraphics->GetControlWithTag(kCtrlTagStompModelFileBrowser))
+      pStompBrowser->Hide(!showStompSection);
     if (auto* pNoiseGateLED = pGraphics->GetControlWithTag(kCtrlTagNoiseGateLED))
-      pNoiseGateLED->Hide(!showAmpSection);
+      pNoiseGateLED->Hide(!showStompSection);
+    if (auto* pGateOnLED = pGraphics->GetControlWithTag(kCtrlTagGateOnLED))
+      pGateOnLED->Hide(!showStompSection);
+    if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
+      pBoostOnLED->Hide(!showStompSection);
+    pGraphics->ForControlInGroup("STOMP_CONTROLS", [showStompSection](IControl* pControl) {
+      pControl->Hide(!showStompSection);
+    });
 
     const auto hideAmpParamControl = [&](const int paramIdx) {
       if (auto* pControl = pGraphics->GetControlWithParamIdx(paramIdx))
         pControl->Hide(!showAmpSection);
     };
-    hideAmpParamControl(kNoiseGateThreshold);
     hideAmpParamControl(kPreModelGain);
     hideAmpParamControl(kToneBass);
     hideAmpParamControl(kToneMid);
@@ -1360,6 +1555,13 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     _SetInputGain();
     _SetOutputGain();
   }
+  if (mShouldRemoveStompModel)
+  {
+    mStompModel = nullptr;
+    mStompNAMPath.Set("");
+    mShouldRemoveStompModel = false;
+    _UpdateLatency();
+  }
   if (mShouldRemoveIRLeft)
   {
     mIR = nullptr;
@@ -1381,6 +1583,12 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     _UpdateLatency();
     _SetInputGain();
     _SetOutputGain();
+  }
+  if (mStagedStompModel != nullptr)
+  {
+    mStompModel = std::move(mStagedStompModel);
+    mStagedStompModel = nullptr;
+    _UpdateLatency();
   }
   if (mStagedIR != nullptr)
   {
@@ -1417,7 +1625,7 @@ void NeuralAmpModeler::_FallbackDSP(iplug::sample** inputs, iplug::sample** outp
 {
   for (auto c = 0; c < numChannels; c++)
     for (auto s = 0; s < numFrames; s++)
-      mOutputArray[c][s] = mInputArray[c][s];
+      outputs[c][s] = inputs[c][s];
 }
 
 void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBlockSize)
@@ -1430,6 +1638,14 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
   else if (mModel != nullptr)
   {
     mModel->Reset(sampleRate, maxBlockSize);
+  }
+  if (mStagedStompModel != nullptr)
+  {
+    mStagedStompModel->Reset(sampleRate, maxBlockSize);
+  }
+  else if (mStompModel != nullptr)
+  {
+    mStompModel->Reset(sampleRate, maxBlockSize);
   }
 
   // IR
@@ -1543,6 +1759,35 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath)
     }
     mNAMPath = previousNAMPath;
     std::cerr << "Failed to read DSP module" << std::endl;
+    std::cerr << e.what() << std::endl;
+    return e.what();
+  }
+  return "";
+}
+
+std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
+{
+  WDL_String previousNAMPath = mStompNAMPath;
+  try
+  {
+    auto dspPath = std::filesystem::u8path(modelPath.Get());
+    std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
+    std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
+    temp->Reset(GetSampleRate(), GetBlockSize());
+    mStagedStompModel = std::move(temp);
+    mStompNAMPath = modelPath;
+    SendControlMsgFromDelegate(
+      kCtrlTagStompModelFileBrowser, kMsgTagLoadedStompModel, mStompNAMPath.GetLength(), mStompNAMPath.Get());
+  }
+  catch (std::runtime_error& e)
+  {
+    SendControlMsgFromDelegate(kCtrlTagStompModelFileBrowser, kMsgTagLoadFailed);
+
+    if (mStagedStompModel != nullptr)
+      mStagedStompModel = nullptr;
+
+    mStompNAMPath = previousNAMPath;
+    std::cerr << "Failed to read stomp DSP module" << std::endl;
     std::cerr << e.what() << std::endl;
     return e.what();
   }
@@ -1760,6 +2005,10 @@ void NeuralAmpModeler::_UpdateLatency()
   if (mModel)
   {
     latency += mModel->GetLatency();
+  }
+  if (mStompModel)
+  {
+    latency += mStompModel->GetLatency();
   }
   // Other things that add latency here...
 

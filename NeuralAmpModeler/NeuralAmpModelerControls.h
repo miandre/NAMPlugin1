@@ -101,8 +101,11 @@ private:
 class NAMLEDControl : public IControl
 {
 public:
-  NAMLEDControl(const IRECT& bounds)
+  NAMLEDControl(const IRECT& bounds, const IColor& onColor = IColor(255, 96, 230, 120),
+                const IColor& offColor = COLOR_BLACK.WithOpacity(0.85f))
   : IControl(bounds)
+  , mOnColor(onColor)
+  , mOffColor(offColor)
   {
     mIgnoreMouse = true;
   }
@@ -113,11 +116,42 @@ public:
     const float cx = mRECT.MW();
     const float cy = mRECT.MH();
     const bool isOn = GetValue() > 0.5;
-    const IColor fillColor = isOn ? IColor(255, 96, 230, 120) : COLOR_BLACK.WithOpacity(0.85f);
+    const IColor fillColor = isOn ? mOnColor : mOffColor;
 
     g.FillCircle(fillColor, cx, cy, radius, &mBlend);
     g.DrawCircle(COLOR_BLACK.WithOpacity(0.75f), cx, cy, radius, &mBlend, 1.0f);
   }
+
+private:
+  IColor mOnColor;
+  IColor mOffColor;
+};
+
+class NAMBitmapLEDControl : public IControl
+{
+public:
+  NAMBitmapLEDControl(const IRECT& bounds, const IBitmap& onBitmap, const IBitmap& offBitmap)
+  : IControl(bounds)
+  , mOnBitmap(onBitmap)
+  , mOffBitmap(offBitmap)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    g.DrawFittedBitmap(GetValue() > 0.5 ? mOnBitmap : mOffBitmap, mRECT);
+  }
+
+  void OnRescale() override
+  {
+    mOnBitmap = GetUI()->GetScaledBitmap(mOnBitmap);
+    mOffBitmap = GetUI()->GetScaledBitmap(mOffBitmap);
+  }
+
+private:
+  IBitmap mOnBitmap;
+  IBitmap mOffBitmap;
 };
 
 class NAMBitmapToggleControl : public IControl
@@ -151,6 +185,56 @@ public:
 private:
   IBitmap mOffBitmap;
   IBitmap mOnBitmap;
+};
+
+// A toggle parameter button with momentary press visuals:
+// bitmap goes "down" only while the mouse is pressed.
+class NAMMomentaryBitmapButtonControl : public IControl
+{
+public:
+  NAMMomentaryBitmapButtonControl(const IRECT& bounds, int paramIdx, const IBitmap& upBitmap, const IBitmap& downBitmap)
+  : IControl(bounds, paramIdx)
+  , mUpBitmap(upBitmap)
+  , mDownBitmap(downBitmap)
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    g.DrawFittedBitmap(mPressed ? mDownBitmap : mUpBitmap, mRECT);
+  }
+
+  void OnMouseDown(float, float, const IMouseMod&) override
+  {
+    if (IsDisabled())
+      return;
+    mPressed = true;
+    SetValueFromUserInput(GetValue() > 0.5 ? 0.0 : 1.0);
+    SetDirty(false);
+  }
+
+  void OnMouseUp(float, float, const IMouseMod&) override
+  {
+    mPressed = false;
+    SetDirty(false);
+  }
+
+  void OnMouseOut() override
+  {
+    mPressed = false;
+    IControl::OnMouseOut();
+  }
+
+  void OnRescale() override
+  {
+    mUpBitmap = GetUI()->GetScaledBitmap(mUpBitmap);
+    mDownBitmap = GetUI()->GetScaledBitmap(mDownBitmap);
+  }
+
+private:
+  IBitmap mUpBitmap;
+  IBitmap mDownBitmap;
+  bool mPressed = false;
 };
 
 class NAMTopIconControl : public IControl
@@ -388,6 +472,97 @@ private:
   float mKnobScale = 1.0f;
   float mLabelYOffset = 0.0f;
   float mValueYOffset = 0.0f;
+};
+
+class NAMPedalKnobControl : public IVKnobControl
+{
+public:
+  NAMPedalKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, const IBitmap& knobBitmap,
+                      const IBitmap& shadowBitmap, float knobScale = 1.0f, float labelYOffset = 0.0f,
+                      float valueYOffset = 0.0f)
+  : IVKnobControl(bounds, paramIdx, label, style, true)
+  , mKnobBitmap(knobBitmap)
+  , mShadowBitmap(shadowBitmap)
+  , mKnobScale(knobScale)
+  , mLabelYOffset(labelYOffset)
+  , mValueYOffset(valueYOffset)
+  {
+  }
+
+  void OnRescale() override
+  {
+    mKnobBitmap = GetUI()->GetScaledBitmap(mKnobBitmap);
+    mShadowBitmap = GetUI()->GetScaledBitmap(mShadowBitmap);
+  }
+
+  void OnResize() override
+  {
+    IVKnobControl::OnResize();
+    if (mLabelYOffset != 0.0f)
+      mLabelBounds.Translate(0.0f, mLabelYOffset);
+    const float knobW = mKnobBitmap.IsValid() ? static_cast<float>(mKnobBitmap.W()) * mKnobScale : mWidgetBounds.W();
+    const float knobH = mKnobBitmap.IsValid() ? static_cast<float>(mKnobBitmap.H()) * mKnobScale : mWidgetBounds.H();
+    const IRECT knobBounds = mWidgetBounds.GetCentredInside(knobW, knobH);
+    mValueBounds = knobBounds.GetCentredInside(knobW * 0.74f, 20.0f);
+    if (mValueYOffset != 0.0f)
+      mValueBounds.Translate(0.0f, mValueYOffset);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    DrawBackground(g, mRECT);
+    DrawLabel(g);
+    DrawWidget(g);
+    if (mShowValueWhileDragging)
+      DrawValue(g, false);
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    IKnobControlBase::OnMouseDown(x, y, mod);
+    mShowValueWhileDragging = true;
+    SetDirty(false);
+  }
+
+  void OnMouseUp(float x, float y, const IMouseMod& mod) override
+  {
+    IKnobControlBase::OnMouseUp(x, y, mod);
+    mShowValueWhileDragging = false;
+    SetDirty(true);
+  }
+
+  void OnMouseOut() override
+  {
+    mShowValueWhileDragging = false;
+    IVKnobControl::OnMouseOut();
+  }
+
+  void DrawWidget(IGraphics& g) override
+  {
+    if (!mKnobBitmap.IsValid())
+      return;
+
+    const float knobW = static_cast<float>(mKnobBitmap.W()) * mKnobScale;
+    const float knobH = static_cast<float>(mKnobBitmap.H()) * mKnobScale;
+    const IRECT knobBounds = mWidgetBounds.GetCentredInside(knobW, knobH);
+    if (mShadowBitmap.IsValid())
+      g.DrawFittedBitmap(mShadowBitmap, knobBounds, &mBlend);
+
+    const double angle = -130.0 + GetValue() * 260.0;
+    // Draw the knob to a layer fitted to scaled bounds, then rotate that layer.
+    g.StartLayer(this, knobBounds);
+    g.DrawFittedBitmap(mKnobBitmap, knobBounds, &mBlend);
+    auto layer = g.EndLayer();
+    g.DrawRotatedLayer(layer, angle);
+  }
+
+private:
+  IBitmap mKnobBitmap;
+  IBitmap mShadowBitmap;
+  float mKnobScale = 1.0f;
+  float mLabelYOffset = 0.0f;
+  float mValueYOffset = 0.0f;
+  bool mShowValueWhileDragging = false;
 };
 
 class NAMSwitchControl : public IVSlideSwitchControl, public IBitmapBase
@@ -950,6 +1125,7 @@ public:
         }
         break;
       case kMsgTagLoadedModel:
+      case kMsgTagLoadedStompModel:
       case kMsgTagLoadedIRLeft:
       case kMsgTagLoadedIRRight:
       {
