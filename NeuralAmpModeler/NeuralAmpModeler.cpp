@@ -27,6 +27,7 @@ using namespace iplug;
 using namespace igraphics;
 
 const double kDCBlockerFrequency = 5.0;
+constexpr double kPi = 3.14159265358979323846;
 
 namespace
 {
@@ -118,6 +119,15 @@ const IVStyle utilityStyle = style.WithLabelText(
                                                      EVAlign::Bottom));
 const IVStyle ampKnobStyle = style.WithShowValue(false).WithLabelText(
   IText(DEFAULT_TEXT_SIZE + -4.f, COLOR_BLACK, "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle));
+const IVStyle fxEqSliderStyle =
+  utilityStyle.WithShowValue(false)
+    .WithColor(EVColor::kFG, COLOR_DARK_GRAY.WithOpacity(0.95f))
+    .WithColor(EVColor::kFR, COLOR_DARK_GRAY.WithOpacity(0.85f))
+    .WithColor(EVColor::kPR, COLOR_DARK_GRAY.WithOpacity(0.75f))
+    .WithColor(EVColor::kHL, COLOR_DARK_GRAY.WithOpacity(0.80f))
+    .WithColor(EVColor::kX1, COLOR_DARK_GRAY.WithOpacity(0.95f))
+    .WithLabelText(IText(DEFAULT_TEXT_SIZE - 1.f, COLOR_BLACK.WithOpacity(0.90f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle))
+    .WithValueText(IText(DEFAULT_TEXT_SIZE - 1.f, COLOR_GRAY.WithOpacity(0.85f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Bottom));
 const IVStyle radioButtonStyle =
   style
     .WithColor(EVColor::kON, PluginColors::NAM_THEMECOLOR) // Pressed buttons and their labels
@@ -164,6 +174,27 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
   GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
   GetParam(kStompBoostActive)->InitBool("BoostActive", false);
+  GetParam(kFXEQActive)->InitBool("FX EQ", false);
+  GetParam(kFXEQBand31Hz)->InitDouble("FX EQ 31Hz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQBand62Hz)->InitDouble("FX EQ 62Hz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQBand125Hz)->InitDouble("FX EQ 125Hz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQBand250Hz)->InitDouble("FX EQ 250Hz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQBand500Hz)->InitDouble("FX EQ 500Hz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQBand1kHz)->InitDouble("FX EQ 1kHz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQBand2kHz)->InitDouble("FX EQ 2kHz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQBand4kHz)->InitDouble("FX EQ 4kHz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQBand8kHz)->InitDouble("FX EQ 8kHz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQBand16kHz)->InitDouble("FX EQ 16kHz", 0.0, -12.0, 12.0, 0.1, "dB");
+  GetParam(kFXEQOutputGain)->InitGain("FX EQ Out", 0.0, -18.0, 18.0, 0.1);
+  GetParam(kFXDelayActive)->InitBool("FX Delay", false);
+  GetParam(kFXDelayMix)->InitDouble("FX Delay Mix", 25.0, 0.0, 100.0, 0.1, "%");
+  GetParam(kFXDelayTimeMs)->InitDouble("FX Delay Time", 420.0, 1.0, 2000.0, 1.0, "ms");
+  GetParam(kFXDelayFeedback)->InitDouble("FX Delay Feedback", 35.0, 0.0, 80.0, 0.1, "%");
+  GetParam(kFXReverbActive)->InitBool("FX Reverb", false);
+  GetParam(kFXReverbMix)->InitDouble("FX Reverb Mix", 20.0, 0.0, 100.0, 0.1, "%");
+  GetParam(kFXReverbDecay)->InitDouble("FX Reverb Decay", 1.8, 0.1, 10.0, 0.1, "s");
+  GetParam(kFXReverbPreDelayMs)->InitDouble("FX Reverb PreDelay", 25.0, 0.0, 250.0, 1.0, "ms");
+  GetParam(kFXReverbTone)->InitDouble("FX Reverb Tone", 50.0, 0.0, 100.0, 0.1, "%");
   GetParam(kEQActive)->InitBool("ToneStack", true);
   GetParam(kOutputMode)->InitEnum("OutputMode", 1, {"Raw", "Normalized", "Calibrated"}); // TODO DRY w/ control
   GetParam(kIRToggle)->InitBool("IRToggle", true);
@@ -355,6 +386,62 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                            stompBoostSwitchArea.MW() + 7.0f, stompBoostSwitchArea.B + 25.0f);
     const auto stompModelArea = IRECT(stompBoostLevelX - 170.0f, ampFaceArea.B + 40.0f, stompBoostLevelX + 170.0f,
                                       ampFaceArea.B + 70.0f);
+
+    // FX section coordinates come from the same 3x design canvas used by the stomp section.
+    constexpr float kFXEqSliderW = 16.0f;
+    constexpr float kFXEqSliderH = 97.0f;
+    constexpr float kFXEqSliderGap = 46.5f;
+    const float fxEqSliderTopY = designToUIY(715.0f);
+    const float fxEqSliderStartX = designToUIX(640.0f);
+    auto makeFXEqSliderArea = [&](const int index) {
+      const float cx = fxEqSliderStartX + static_cast<float>(index) * kFXEqSliderGap;
+      return IRECT(cx - 0.5f * kFXEqSliderW, fxEqSliderTopY, cx + 0.5f * kFXEqSliderW, fxEqSliderTopY + kFXEqSliderH);
+    };
+    const auto fxEqBand31Area = makeFXEqSliderArea(0);
+    const auto fxEqBand62Area = makeFXEqSliderArea(1);
+    const auto fxEqBand125Area = makeFXEqSliderArea(2);
+    const auto fxEqBand250Area = makeFXEqSliderArea(3);
+    const auto fxEqBand500Area = makeFXEqSliderArea(4);
+    const auto fxEqBand1kArea = makeFXEqSliderArea(5);
+    const auto fxEqBand2kArea = makeFXEqSliderArea(6);
+    const auto fxEqBand4kArea = makeFXEqSliderArea(7);
+    const auto fxEqBand8kArea = makeFXEqSliderArea(8);
+    const auto fxEqBand16kArea = makeFXEqSliderArea(9);
+    const auto fxEqOutputArea = makePedalKnobArea(designToUIX(2307.0f), designToUIY(840.0f));
+
+    const float fxEqSwitchX = designToUIX(2660.0f);
+    const float fxEqSwitchY = designToUIY(880.0f);
+    const auto fxEqSwitchArea =
+      IRECT(fxEqSwitchX - 0.5f * stompButtonW, fxEqSwitchY - 0.5f * stompButtonH, fxEqSwitchX + 0.5f * stompButtonW,
+            fxEqSwitchY + 0.5f * stompButtonH);
+    const auto fxEqOnLedArea =
+      IRECT(fxEqSwitchArea.MW() + 41.0f, fxEqSwitchArea.B - 34.0f, fxEqSwitchArea.MW() + 55.0f, fxEqSwitchArea.B - 20.0f);
+
+    const float fxReverbKnobY = designToUIY(1215.0f);
+    const auto fxReverbMixArea = makePedalKnobArea(designToUIX(1840.0f), fxReverbKnobY);
+    const auto fxReverbDecayArea = makePedalKnobArea(designToUIX(2064.0f), fxReverbKnobY);
+    const auto fxReverbPreDelayArea = makePedalKnobArea(designToUIX(2259.0f), fxReverbKnobY);
+    const auto fxReverbToneArea = makePedalKnobArea(designToUIX(2445.0f), fxReverbKnobY);
+    const float fxReverbSwitchX = designToUIX(2660.0f);
+    const float fxReverbSwitchY = designToUIY(1250.0f);
+    const auto fxReverbSwitchArea =
+      IRECT(fxReverbSwitchX - 0.5f * stompButtonW, fxReverbSwitchY - 0.5f * stompButtonH,
+            fxReverbSwitchX + 0.5f * stompButtonW, fxReverbSwitchY + 0.5f * stompButtonH);
+    const auto fxReverbOnLedArea = IRECT(fxReverbSwitchArea.MW() + 41.0f, fxReverbSwitchArea.B - 34.0f,
+                                         fxReverbSwitchArea.MW() + 55.0f, fxReverbSwitchArea.B - 20.0f);
+
+    const float fxDelayKnobY = designToUIY(1575.0f);
+    const auto fxDelayMixArea = makePedalKnobArea(designToUIX(820.0f), fxDelayKnobY);
+    const auto fxDelayTimeArea = makePedalKnobArea(designToUIX(1210.0f), fxDelayKnobY);
+    const auto fxDelayFeedbackArea = makePedalKnobArea(designToUIX(1600.0f), fxDelayKnobY);
+    const float fxDelaySwitchX = designToUIX(2660.0f);
+    const float fxDelaySwitchY = designToUIY(1610.0f);
+    const auto fxDelaySwitchArea =
+      IRECT(fxDelaySwitchX - 0.5f * stompButtonW, fxDelaySwitchY - 0.5f * stompButtonH, fxDelaySwitchX + 0.5f * stompButtonW,
+            fxDelaySwitchY + 0.5f * stompButtonH);
+    const auto fxDelayOnLedArea =
+      IRECT(fxDelaySwitchArea.MW() + 41.0f, fxDelaySwitchArea.B - 34.0f, fxDelaySwitchArea.MW() + 55.0f, fxDelaySwitchArea.B - 20.0f);
+
 
     // Gate/EQ toggle row (independent group)
     const float toggleTop = frontKnobTop + 86.0f;
@@ -763,6 +850,27 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new NAMBitmapLEDControl(stompBoostOnLedArea, redLedOnBitmap, redLedOffBitmap),
                              kCtrlTagBoostOnLED,
                              "STOMP_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMMomentaryBitmapButtonControl(fxEqSwitchArea, kFXEQActive, stompButtonUpBitmap, stompButtonDownBitmap),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(new NAMBitmapLEDControl(fxEqOnLedArea, redLedOnBitmap, redLedOffBitmap),
+                             kCtrlTagFXEQOnLED,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMMomentaryBitmapButtonControl(fxDelaySwitchArea, kFXDelayActive, stompButtonUpBitmap, stompButtonDownBitmap),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(new NAMBitmapLEDControl(fxDelayOnLedArea, redLedOnBitmap, redLedOffBitmap),
+                             kCtrlTagFXDelayOnLED,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMMomentaryBitmapButtonControl(fxReverbSwitchArea, kFXReverbActive, stompButtonUpBitmap, stompButtonDownBitmap),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(new NAMBitmapLEDControl(fxReverbOnLedArea, redLedOnBitmap, redLedOffBitmap),
+                             kCtrlTagFXReverbOnLED,
+                             "FX_CONTROLS");
     pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap))->Hide(true);
 
     // The knobs
@@ -789,6 +897,84 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "STOMP_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(
+      fxEqBand31Area, kFXEQBand31Hz, "31Hz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(
+      fxEqBand62Area, kFXEQBand62Hz, "62Hz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(fxEqBand125Area, kFXEQBand125Hz, "125Hz", fxEqSliderStyle,
+                                                 false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(fxEqBand250Area, kFXEQBand250Hz, "250Hz", fxEqSliderStyle,
+                                                 false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(fxEqBand500Area, kFXEQBand500Hz, "500Hz", fxEqSliderStyle,
+                                                 false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(
+      fxEqBand1kArea, kFXEQBand1kHz, "1kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(
+      fxEqBand2kArea, kFXEQBand2kHz, "2kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(
+      fxEqBand4kArea, kFXEQBand4kHz, "4kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(
+      fxEqBand8kArea, kFXEQBand8kHz, "8kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(new IVSliderControl(
+      fxEqBand16kArea, kFXEQBand16kHz, "16kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxEqOutputArea, kFXEQOutputGain, "OUT", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxReverbMixArea, kFXReverbMix, "DRY/WET", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxReverbDecayArea, kFXReverbDecay, "DECAY", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(new NAMPedalKnobControl(fxReverbPreDelayArea, kFXReverbPreDelayMs, "PRE-DLY", utilityStyle,
+                                                     pedalKnobBitmap, pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
+                             -1,
+                             "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxReverbToneArea, kFXReverbTone, "TONE", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxDelayMixArea, kFXDelayMix, "DRY/WET", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxDelayTimeArea, kFXDelayTimeMs, "TIME", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(new NAMPedalKnobControl(fxDelayFeedbackArea, kFXDelayFeedback, "FDBK", utilityStyle, pedalKnobBitmap,
+                                                     pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
+                             -1,
+                             "FX_CONTROLS");
     pGraphics->AttachControl(new NAMKnobControl(preModelGainArea, kPreModelGain, "PRE GAIN", ampKnobStyle,
                                                 ampKnobBackgroundBitmap, false, true, 0.7f, AP_KNOP_OFFSET));
     pGraphics->AttachControl(
@@ -935,9 +1121,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   {
     const double time = 0.03;
     const double threshold = GetParam(kNoiseGateThreshold)->Value(); // GetParam...
-    const double ratio = 0.1; // Quadratic...
-    const double openTime = 0.05;
-    const double holdTime = gateReleaseValue * 0.5;
+    const double ratio = 1.5; // Quadratic...
+    const double openTime = 0.03;
+    const double holdTime = gateReleaseValue * 0.2;
     const double closeTime = gateReleaseValue;
     const dsp::noise_gate::TriggerParams triggerParams(time, threshold, ratio, openTime, holdTime, closeTime);
     mNoiseGateTrigger.SetParams(triggerParams);
@@ -1031,6 +1217,304 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** userLowPassPointers1 = mUserLowPass1.Process(userHighPassPointers2, numChannelsInternal, numFrames);
   sample** userLowPassPointers2 = mUserLowPass2.Process(userLowPassPointers1, numChannelsInternal, numFrames);
 
+  sample** fxEqPointers = userLowPassPointers2;
+  const bool fxBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Fx)];
+  const bool fxEQActive = GetParam(kFXEQActive)->Bool() && !fxBypassed;
+  if (fxEQActive && sampleRate > 0.0)
+  {
+    constexpr std::array<int, 10> kFXEQParamIdx = {
+      kFXEQBand31Hz, kFXEQBand62Hz, kFXEQBand125Hz, kFXEQBand250Hz, kFXEQBand500Hz,
+      kFXEQBand1kHz, kFXEQBand2kHz, kFXEQBand4kHz, kFXEQBand8kHz, kFXEQBand16kHz
+    };
+    constexpr std::array<double, 10> kFXEQCenterHz = {31.0, 62.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 16000.0};
+    constexpr double kFXEQQ = 1.41421356237;
+    constexpr double kFXEQSmoothingMs = 30.0;
+    const double smoothingAlpha = 1.0 - std::exp(-(static_cast<double>(nFrames) / (sampleRate * kFXEQSmoothingMs * 0.001)));
+    const double nyquistGuardHz = 0.49 * sampleRate;
+    const double targetEQOutputGain = DBToAmp(GetParam(kFXEQOutputGain)->Value());
+    mFXEQSmoothedOutputGain += smoothingAlpha * (targetEQOutputGain - mFXEQSmoothedOutputGain);
+
+    for (size_t band = 0; band < kFXEQCenterHz.size(); ++band)
+    {
+      const double targetGainDb = GetParam(kFXEQParamIdx[band])->Value();
+      const double smoothedGainDb = mFXEQSmoothedGainDB[band] + smoothingAlpha * (targetGainDb - mFXEQSmoothedGainDB[band]);
+      mFXEQSmoothedGainDB[band] = smoothedGainDb;
+
+      const double gainA = std::pow(10.0, smoothedGainDb / 40.0);
+      const double freqHz = std::min(kFXEQCenterHz[band], nyquistGuardHz);
+      const double w0 = 2.0 * kPi * freqHz / sampleRate;
+      const double cosW0 = std::cos(w0);
+      const double sinW0 = std::sin(w0);
+      const double alpha = sinW0 / (2.0 * kFXEQQ);
+
+      const double b0 = 1.0 + alpha * gainA;
+      const double b1 = -2.0 * cosW0;
+      const double b2 = 1.0 - alpha * gainA;
+      const double a0 = 1.0 + alpha / gainA;
+      const double a1 = -2.0 * cosW0;
+      const double a2 = 1.0 - alpha / gainA;
+      const double invA0 = (a0 != 0.0) ? (1.0 / a0) : 1.0;
+
+      mFXEQB0[band] = b0 * invA0;
+      mFXEQB1[band] = b1 * invA0;
+      mFXEQB2[band] = b2 * invA0;
+      mFXEQA1[band] = a1 * invA0;
+      mFXEQA2[band] = a2 * invA0;
+    }
+
+    for (size_t c = 0; c < numChannelsInternal; ++c)
+    {
+      auto& z1 = mFXEQZ1[c];
+      auto& z2 = mFXEQZ2[c];
+      for (size_t s = 0; s < numFrames; ++s)
+      {
+        double x = fxEqPointers[c][s];
+        for (size_t band = 0; band < kFXEQCenterHz.size(); ++band)
+        {
+          const double y = mFXEQB0[band] * x + z1[band];
+          z1[band] = mFXEQB1[band] * x - mFXEQA1[band] * y + z2[band];
+          z2[band] = mFXEQB2[band] * x - mFXEQA2[band] * y;
+          x = y;
+        }
+        fxEqPointers[c][s] = static_cast<sample>(x);
+      }
+    }
+
+    if (std::abs(mFXEQSmoothedOutputGain - 1.0) > 1e-6)
+    {
+      for (size_t c = 0; c < numChannelsInternal; ++c)
+        for (size_t s = 0; s < numFrames; ++s)
+          fxEqPointers[c][s] = static_cast<sample>(fxEqPointers[c][s] * mFXEQSmoothedOutputGain);
+    }
+  }
+
+  sample** fxDelayPointers = fxEqPointers;
+  const bool fxDelayActive = GetParam(kFXDelayActive)->Bool() && !fxBypassed;
+  if (mFXDelayBufferSamples > 2 && sampleRate > 0.0)
+  {
+    const double targetTimeSamples = std::clamp(
+      GetParam(kFXDelayTimeMs)->Value() * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
+    const double targetFeedback = std::clamp(GetParam(kFXDelayFeedback)->Value() * 0.01, 0.0, 0.80);
+    const double targetMix = std::clamp(GetParam(kFXDelayMix)->Value() * 0.01, 0.0, 1.0);
+    constexpr double kFXDelayTimeSmoothingMs = 120.0;
+    constexpr double kFXDelayControlSmoothingMs = 30.0;
+    const double timeSmoothingAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kFXDelayTimeSmoothingMs * 0.001));
+    const double controlSmoothingAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kFXDelayControlSmoothingMs * 0.001));
+    double smoothedTimeSamples = mFXDelaySmoothedTimeSamples;
+    double smoothedFeedback = mFXDelaySmoothedFeedback;
+    double smoothedMix = mFXDelaySmoothedMix;
+    size_t writeIndex = mFXDelayWriteIndex;
+
+    for (size_t s = 0; s < numFrames; ++s)
+    {
+      smoothedTimeSamples += timeSmoothingAlpha * (targetTimeSamples - smoothedTimeSamples);
+      smoothedFeedback += controlSmoothingAlpha * (targetFeedback - smoothedFeedback);
+      smoothedMix += controlSmoothingAlpha * (targetMix - smoothedMix);
+
+      for (size_t c = 0; c < numChannelsInternal; ++c)
+      {
+        auto& delayBuffer = mFXDelayBuffer[c];
+        const double dry = fxDelayPointers[c][s];
+
+        double readPos = static_cast<double>(writeIndex) - smoothedTimeSamples;
+        if (readPos < 0.0)
+          readPos += static_cast<double>(mFXDelayBufferSamples);
+        const auto readIndex0 = static_cast<size_t>(readPos);
+        const auto readIndex1 = (readIndex0 + 1 < mFXDelayBufferSamples) ? (readIndex0 + 1) : 0;
+        const double frac = readPos - static_cast<double>(readIndex0);
+        const double delayed =
+          static_cast<double>(delayBuffer[readIndex0]) * (1.0 - frac) + static_cast<double>(delayBuffer[readIndex1]) * frac;
+
+        const double writeValue = dry + smoothedFeedback * delayed;
+        delayBuffer[writeIndex] = static_cast<sample>(writeValue);
+
+        if (fxDelayActive)
+          // "Amount" behavior: keep dry at unity and add wet signal.
+          fxDelayPointers[c][s] = static_cast<sample>(dry + delayed * smoothedMix);
+      }
+
+      ++writeIndex;
+      if (writeIndex >= mFXDelayBufferSamples)
+        writeIndex = 0;
+    }
+    mFXDelaySmoothedTimeSamples = smoothedTimeSamples;
+    mFXDelaySmoothedFeedback = smoothedFeedback;
+    mFXDelaySmoothedMix = smoothedMix;
+    mFXDelayWriteIndex = writeIndex;
+  }
+
+  sample** fxReverbPointers = fxDelayPointers;
+  const bool fxReverbActive = GetParam(kFXReverbActive)->Bool() && !fxBypassed;
+  if (fxReverbActive && sampleRate > 0.0 && mFXReverbPreDelayBufferSamples > 2)
+  {
+    const double targetMix = std::clamp(GetParam(kFXReverbMix)->Value() * 0.01, 0.0, 1.0);
+    const double targetDecaySeconds = std::clamp(GetParam(kFXReverbDecay)->Value(), 0.1, 10.0);
+    const double targetPreDelaySamples = std::clamp(
+      GetParam(kFXReverbPreDelayMs)->Value() * 0.001 * sampleRate, 0.0, static_cast<double>(mFXReverbPreDelayBufferSamples - 2));
+    const double targetTone = std::clamp(GetParam(kFXReverbTone)->Value() * 0.01, 0.0, 1.0);
+
+    constexpr double kReverbMixSmoothingMs = 40.0;
+    constexpr double kReverbDecaySmoothingMs = 80.0;
+    constexpr double kReverbPreDelaySmoothingMs = 120.0;
+    constexpr double kReverbToneSmoothingMs = 60.0;
+    const double mixAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kReverbMixSmoothingMs * 0.001));
+    const double decayAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kReverbDecaySmoothingMs * 0.001));
+    const double preDelayAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kReverbPreDelaySmoothingMs * 0.001));
+    const double toneAlphaParam = 1.0 - std::exp(-1.0 / (sampleRate * kReverbToneSmoothingMs * 0.001));
+
+    double smoothedMix = mFXReverbSmoothedMix;
+    double smoothedDecaySeconds = mFXReverbSmoothedDecaySeconds;
+    double smoothedPreDelaySamples = mFXReverbSmoothedPreDelaySamples;
+    double smoothedTone = mFXReverbSmoothedTone;
+    size_t preDelayWriteIndex = mFXReverbPreDelayWriteIndex;
+
+    constexpr double kAllpassGain = 0.32;
+    constexpr double kWetGain = 0.55;
+    constexpr double kEarlyGain = 0.99;
+    constexpr double kPreDiffAllpassGain = 0.50;
+    constexpr std::array<double, 5> kEarlyTapGains = {0.90, 0.84, 0.70, 0.52, 0.30};
+    constexpr std::array<double, 4> kCombModRatesHz = {0.07, 0.11, 0.15, 0.19};
+    constexpr std::array<double, 4> kCombModDepthSamples = {0.4, 0.7, 1.0, 1.3};
+    std::array<double, 4> combModPhase = mFXReverbCombModPhase;
+
+    for (size_t s = 0; s < numFrames; ++s)
+    {
+      smoothedMix += mixAlpha * (targetMix - smoothedMix);
+      smoothedDecaySeconds += decayAlpha * (targetDecaySeconds - smoothedDecaySeconds);
+      smoothedPreDelaySamples += preDelayAlpha * (targetPreDelaySamples - smoothedPreDelaySamples);
+      smoothedTone += toneAlphaParam * (targetTone - smoothedTone);
+      const double wetMix = std::pow(std::clamp(smoothedMix, 0.0, 1.0), 1.25);
+      const double dryMix = std::sqrt(std::max(0.0, 1.0 - wetMix * wetMix));
+      const double wetGain = 0.8 * wetMix;
+      const double toneCutoffHz = 1200.0 + smoothedTone * 10800.0;
+      const double toneAlpha = 1.0 - std::exp(-2.0 * kPi * toneCutoffHz / sampleRate);
+      const double combDampCutoffHz = 450.0 + smoothedTone * 4200.0;
+      const double combDampAlpha = 1.0 - std::exp(-2.0 * kPi * combDampCutoffHz / sampleRate);
+      std::array<double, 4> combModOffset = {};
+      for (size_t i = 0; i < combModOffset.size(); ++i)
+      {
+        combModOffset[i] = kCombModDepthSamples[i] * std::sin(combModPhase[i]);
+        combModPhase[i] += 2.0 * kPi * kCombModRatesHz[i] / sampleRate;
+        if (combModPhase[i] >= 2.0 * kPi)
+          combModPhase[i] -= 2.0 * kPi;
+      }
+
+      for (size_t c = 0; c < numChannelsInternal; ++c)
+      {
+        auto& preDelayBuffer = mFXReverbPreDelayBuffer[c];
+        if (preDelayBuffer.empty())
+          continue;
+
+        const double dry = fxReverbPointers[c][s];
+        preDelayBuffer[preDelayWriteIndex] = static_cast<sample>(dry);
+
+        double early = 0.0;
+        for (size_t i = 0; i < kEarlyTapGains.size(); ++i)
+        {
+          const size_t tapDelay = mFXReverbEarlyTapSamples[i] % preDelayBuffer.size();
+          const size_t tapIndex = (preDelayWriteIndex + preDelayBuffer.size() - tapDelay) % preDelayBuffer.size();
+          early += kEarlyTapGains[i] * static_cast<double>(preDelayBuffer[tapIndex]);
+        }
+
+        double preReadPos = static_cast<double>(preDelayWriteIndex) - smoothedPreDelaySamples;
+        if (preReadPos < 0.0)
+          preReadPos += static_cast<double>(mFXReverbPreDelayBufferSamples);
+        const auto preReadIndex0 = static_cast<size_t>(preReadPos);
+        const auto preReadIndex1 = (preReadIndex0 + 1 < mFXReverbPreDelayBufferSamples) ? (preReadIndex0 + 1) : 0;
+        const double preFrac = preReadPos - static_cast<double>(preReadIndex0);
+        const double preDelayed = static_cast<double>(preDelayBuffer[preReadIndex0]) * (1.0 - preFrac)
+                                  + static_cast<double>(preDelayBuffer[preReadIndex1]) * preFrac;
+
+        double lateInput = preDelayed;
+        for (size_t i = 0; i < 2; ++i)
+        {
+          auto& preDiffBuffer = mFXReverbPreDiffAllpassBuffer[c][i];
+          if (preDiffBuffer.empty())
+            continue;
+          auto& preDiffWriteIndex = mFXReverbPreDiffAllpassWriteIndex[c][i];
+          const size_t preDiffDelaySamples = mFXReverbPreDiffAllpassDelaySamples[c][i];
+          const size_t readIndex =
+            (preDiffWriteIndex + preDiffBuffer.size() - (preDiffDelaySamples % preDiffBuffer.size())) % preDiffBuffer.size();
+          const double delayed = static_cast<double>(preDiffBuffer[readIndex]);
+          const double out = -kPreDiffAllpassGain * lateInput + delayed;
+          preDiffBuffer[preDiffWriteIndex] = static_cast<sample>(lateInput + kPreDiffAllpassGain * out);
+          lateInput = out;
+
+          ++preDiffWriteIndex;
+          if (preDiffWriteIndex >= preDiffBuffer.size())
+            preDiffWriteIndex = 0;
+        }
+
+        double combSum = 0.0;
+        for (size_t i = 0; i < 4; ++i)
+        {
+          auto& combBuffer = mFXReverbCombBuffer[c][i];
+          if (combBuffer.empty())
+            continue;
+          auto& combWriteIndex = mFXReverbCombWriteIndex[c][i];
+          const size_t combDelaySamples = mFXReverbCombDelaySamples[c][i];
+          const double modulatedDelay = std::clamp(static_cast<double>(combDelaySamples) + combModOffset[i], 1.0,
+                                                   static_cast<double>(combBuffer.size() - 2));
+          double readPos = static_cast<double>(combWriteIndex) - modulatedDelay;
+          if (readPos < 0.0)
+            readPos += static_cast<double>(combBuffer.size());
+          const auto readIndex0 = static_cast<size_t>(readPos);
+          const auto readIndex1 = (readIndex0 + 1 < combBuffer.size()) ? (readIndex0 + 1) : 0;
+          const double frac = readPos - static_cast<double>(readIndex0);
+          const double delayed = static_cast<double>(combBuffer[readIndex0]) * (1.0 - frac)
+                                 + static_cast<double>(combBuffer[readIndex1]) * frac;
+          auto& combDampState = mFXReverbCombDampState[c][i];
+          combDampState += combDampAlpha * (delayed - combDampState);
+          const double delaySeconds = static_cast<double>(combDelaySamples) / sampleRate;
+          const double combFeedback =
+            std::clamp(std::pow(10.0, (-3.0 * delaySeconds) / std::max(0.1, smoothedDecaySeconds)), 0.0, 0.84);
+          combBuffer[combWriteIndex] = static_cast<sample>(lateInput + combFeedback * combDampState);
+          combSum += combDampState;
+
+          ++combWriteIndex;
+          if (combWriteIndex >= combBuffer.size())
+            combWriteIndex = 0;
+        }
+
+        double wet = combSum * 0.25;
+        for (size_t i = 0; i < 2; ++i)
+        {
+          auto& allpassBuffer = mFXReverbAllpassBuffer[c][i];
+          if (allpassBuffer.empty())
+            continue;
+          auto& allpassWriteIndex = mFXReverbAllpassWriteIndex[c][i];
+          const size_t allpassDelaySamples = mFXReverbAllpassDelaySamples[c][i];
+          const size_t readIndex =
+            (allpassWriteIndex + allpassBuffer.size() - (allpassDelaySamples % allpassBuffer.size())) % allpassBuffer.size();
+          const double delayed = static_cast<double>(allpassBuffer[readIndex]);
+          const double out = -kAllpassGain * wet + delayed;
+          allpassBuffer[allpassWriteIndex] = static_cast<sample>(wet + kAllpassGain * out);
+          wet = out;
+
+          ++allpassWriteIndex;
+          if (allpassWriteIndex >= allpassBuffer.size())
+            allpassWriteIndex = 0;
+        }
+
+        mFXReverbToneState[c] += toneAlpha * (wet - mFXReverbToneState[c]);
+        const double tonedWet = mFXReverbToneState[c] * kWetGain;
+        const double earlyWet = early * kEarlyGain;
+        fxReverbPointers[c][s] = static_cast<sample>(dryMix * dry + wetGain * (tonedWet + earlyWet));
+      }
+
+      ++preDelayWriteIndex;
+      if (preDelayWriteIndex >= mFXReverbPreDelayBufferSamples)
+        preDelayWriteIndex = 0;
+    }
+
+    mFXReverbSmoothedMix = smoothedMix;
+    mFXReverbSmoothedDecaySeconds = smoothedDecaySeconds;
+    mFXReverbSmoothedPreDelaySamples = smoothedPreDelaySamples;
+    mFXReverbSmoothedTone = smoothedTone;
+    mFXReverbPreDelayWriteIndex = preDelayWriteIndex;
+    mFXReverbCombModPhase = combModPhase;
+  }
+
   // And the HPF for DC offset (Issue 271)
   const double highPassCutoffFreq = kDCBlockerFrequency;
   // const double lowPassCutoffFreq = 20000.0;
@@ -1038,7 +1522,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   // const recursive_linear_filter::LowPassParams lowPassParams(sampleRate, lowPassCutoffFreq);
   mHighPass.SetParams(highPassParams);
   // mLowPass.SetParams(lowPassParams);
-  sample** hpfPointers = mHighPass.Process(userLowPassPointers2, numChannelsInternal, numFrames);
+  sample** hpfPointers = mHighPass.Process(fxReverbPointers, numChannelsInternal, numFrames);
   // sample** lpfPointers = mLowPass.Process(hpfPointers, numChannelsInternal, numFrames);
 
   // restore previous floating point state
@@ -1057,6 +1541,16 @@ void NeuralAmpModeler::OnReset()
 {
   const auto sampleRate = GetSampleRate();
   const int maxBlockSize = GetBlockSize();
+  constexpr double kFXDelayMaxSeconds = 2.0;
+  constexpr double kFXReverbMaxPreDelaySeconds = 0.30;
+  constexpr std::array<int, 4> kFXReverbCombBaseDelay = {1493, 1789, 2053, 2399};
+  constexpr std::array<int, 2> kFXReverbPreDiffAllpassBaseDelay = {113, 337};
+  constexpr std::array<int, 2> kFXReverbAllpassBaseDelay = {307, 503};
+  constexpr std::array<double, 5> kFXReverbEarlyTapMs = {0.0, 2.7, 5.1, 8.9, 14.7};
+  constexpr std::array<int, 10> kFXEQParamIdx = {
+    kFXEQBand31Hz, kFXEQBand62Hz, kFXEQBand125Hz, kFXEQBand250Hz, kFXEQBand500Hz,
+    kFXEQBand1kHz, kFXEQBand2kHz, kFXEQBand4kHz, kFXEQBand8kHz, kFXEQBand16kHz
+  };
 
   // Tail is because the HPF DC blocker has a decay.
   // 10 cycles should be enough to pass the VST3 tests checking tail behavior.
@@ -1072,6 +1566,70 @@ void NeuralAmpModeler::OnReset()
   // Pre-size internal mono buffers to the current host max block size.
   // ProcessBlock() should then only write/clear active frames.
   _PrepareBuffers(kNumChannelsInternal, (size_t)maxBlockSize);
+  for (size_t band = 0; band < mFXEQSmoothedGainDB.size(); ++band)
+    mFXEQSmoothedGainDB[band] = GetParam(kFXEQParamIdx[band])->Value();
+  mFXEQSmoothedOutputGain = DBToAmp(GetParam(kFXEQOutputGain)->Value());
+  for (auto& channelState : mFXEQZ1)
+    channelState.fill(0.0);
+  for (auto& channelState : mFXEQZ2)
+    channelState.fill(0.0);
+  mFXDelayBufferSamples =
+    std::max<size_t>(2, static_cast<size_t>(std::ceil(kFXDelayMaxSeconds * sampleRate)) + static_cast<size_t>(maxBlockSize) + 2);
+  for (auto& channelBuffer : mFXDelayBuffer)
+    channelBuffer.assign(mFXDelayBufferSamples, 0.0f);
+  mFXDelayWriteIndex = 0;
+  mFXDelaySmoothedTimeSamples =
+    std::clamp(GetParam(kFXDelayTimeMs)->Value() * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
+  mFXDelaySmoothedFeedback = std::clamp(GetParam(kFXDelayFeedback)->Value() * 0.01, 0.0, 0.80);
+  mFXDelaySmoothedMix = std::clamp(GetParam(kFXDelayMix)->Value() * 0.01, 0.0, 1.0);
+
+  mFXReverbPreDelayBufferSamples = std::max<size_t>(
+    2, static_cast<size_t>(std::ceil(kFXReverbMaxPreDelaySeconds * sampleRate)) + static_cast<size_t>(maxBlockSize) + 2);
+  for (auto& channelBuffer : mFXReverbPreDelayBuffer)
+    channelBuffer.assign(mFXReverbPreDelayBufferSamples, 0.0f);
+  mFXReverbPreDelayWriteIndex = 0;
+
+  const double reverbDelayScale = sampleRate / 44100.0;
+  for (size_t i = 0; i < kFXReverbEarlyTapMs.size(); ++i)
+    mFXReverbEarlyTapSamples[i] = static_cast<size_t>(std::llround(kFXReverbEarlyTapMs[i] * 0.001 * sampleRate));
+  for (size_t c = 0; c < kNumChannelsInternal; ++c)
+  {
+    for (size_t i = 0; i < kFXReverbPreDiffAllpassBaseDelay.size(); ++i)
+    {
+      const size_t delaySamples =
+        std::max<size_t>(1, static_cast<size_t>(std::llround(kFXReverbPreDiffAllpassBaseDelay[i] * reverbDelayScale)));
+      mFXReverbPreDiffAllpassDelaySamples[c][i] = delaySamples;
+      mFXReverbPreDiffAllpassBuffer[c][i].assign(delaySamples + 1, 0.0f);
+      mFXReverbPreDiffAllpassWriteIndex[c][i] = 0;
+    }
+
+    for (size_t i = 0; i < kFXReverbCombBaseDelay.size(); ++i)
+    {
+      const size_t delaySamples = std::max<size_t>(1, static_cast<size_t>(std::llround(kFXReverbCombBaseDelay[i] * reverbDelayScale)));
+      mFXReverbCombDelaySamples[c][i] = delaySamples;
+      mFXReverbCombBuffer[c][i].assign(delaySamples + 8, 0.0f);
+      mFXReverbCombWriteIndex[c][i] = 0;
+    }
+
+    for (size_t i = 0; i < kFXReverbAllpassBaseDelay.size(); ++i)
+    {
+      const size_t delaySamples =
+        std::max<size_t>(1, static_cast<size_t>(std::llround(kFXReverbAllpassBaseDelay[i] * reverbDelayScale)));
+      mFXReverbAllpassDelaySamples[c][i] = delaySamples;
+      mFXReverbAllpassBuffer[c][i].assign(delaySamples + 1, 0.0f);
+      mFXReverbAllpassWriteIndex[c][i] = 0;
+    }
+
+    mFXReverbToneState[c] = 0.0;
+    mFXReverbCombDampState[c].fill(0.0);
+  }
+  mFXReverbCombModPhase = {0.0, 1.3, 2.6, 3.9};
+
+  mFXReverbSmoothedMix = std::clamp(GetParam(kFXReverbMix)->Value() * 0.01, 0.0, 1.0);
+  mFXReverbSmoothedDecaySeconds = std::clamp(GetParam(kFXReverbDecay)->Value(), 0.1, 10.0);
+  mFXReverbSmoothedPreDelaySamples = std::clamp(
+    GetParam(kFXReverbPreDelayMs)->Value() * 0.001 * sampleRate, 0.0, static_cast<double>(mFXReverbPreDelayBufferSamples - 2));
+  mFXReverbSmoothedTone = std::clamp(GetParam(kFXReverbTone)->Value() * 0.01, 0.0, 1.0);
   _UpdateLatency();
 }
 
@@ -1300,6 +1858,39 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
             });
         }
         break;
+      case kFXEQActive:
+      {
+        if (auto* pFXEQOnLED = pGraphics->GetControlWithTag(kCtrlTagFXEQOnLED))
+          pFXEQOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
+        const int eqBandParams[] = {
+          kFXEQBand31Hz, kFXEQBand62Hz, kFXEQBand125Hz, kFXEQBand250Hz, kFXEQBand500Hz,
+          kFXEQBand1kHz, kFXEQBand2kHz, kFXEQBand4kHz, kFXEQBand8kHz, kFXEQBand16kHz, kFXEQOutputGain
+        };
+        for (const int eqBandParam : eqBandParams)
+          if (auto* pControl = pGraphics->GetControlWithParamIdx(eqBandParam))
+            pControl->SetDisabled(!active);
+        break;
+      }
+      case kFXDelayActive:
+      {
+        if (auto* pFXDelayOnLED = pGraphics->GetControlWithTag(kCtrlTagFXDelayOnLED))
+          pFXDelayOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
+        const int delayParams[] = {kFXDelayMix, kFXDelayTimeMs, kFXDelayFeedback};
+        for (const int delayParam : delayParams)
+          if (auto* pControl = pGraphics->GetControlWithParamIdx(delayParam))
+            pControl->SetDisabled(!active);
+        break;
+      }
+      case kFXReverbActive:
+      {
+        if (auto* pFXReverbOnLED = pGraphics->GetControlWithTag(kCtrlTagFXReverbOnLED))
+          pFXReverbOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
+        const int reverbParams[] = {kFXReverbMix, kFXReverbDecay, kFXReverbPreDelayMs, kFXReverbTone};
+        for (const int reverbParam : reverbParams)
+          if (auto* pControl = pGraphics->GetControlWithParamIdx(reverbParam))
+            pControl->SetDisabled(!active);
+        break;
+      }
       case kEQActive:
         pGraphics->ForControlInGroup("EQ_KNOBS", [active](IControl* pControl) { pControl->SetDisabled(!active); });
         break;
@@ -1429,6 +2020,7 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     const bool showAmpSection = (mTopNavActiveSection == TopNavSection::Amp);
     const bool showStompSection = (mTopNavActiveSection == TopNavSection::Stomp);
     const bool showCabSection = (mTopNavActiveSection == TopNavSection::Cab);
+    const bool showFxSection = (mTopNavActiveSection == TopNavSection::Fx);
     const auto updateIcon = [&](const int tag, const TopNavSection section) {
       if (auto* pIcon = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
       {
@@ -1478,6 +2070,15 @@ void NeuralAmpModeler::_RefreshTopNavControls()
       pBoostOnLED->Hide(!showStompSection);
     pGraphics->ForControlInGroup("STOMP_CONTROLS", [showStompSection](IControl* pControl) {
       pControl->Hide(!showStompSection);
+    });
+    if (auto* pFXEQOnLED = pGraphics->GetControlWithTag(kCtrlTagFXEQOnLED))
+      pFXEQOnLED->Hide(!showFxSection);
+    if (auto* pFXDelayOnLED = pGraphics->GetControlWithTag(kCtrlTagFXDelayOnLED))
+      pFXDelayOnLED->Hide(!showFxSection);
+    if (auto* pFXReverbOnLED = pGraphics->GetControlWithTag(kCtrlTagFXReverbOnLED))
+      pFXReverbOnLED->Hide(!showFxSection);
+    pGraphics->ForControlInGroup("FX_CONTROLS", [showFxSection](IControl* pControl) {
+      pControl->Hide(!showFxSection);
     });
 
     const auto hideAmpParamControl = [&](const int paramIdx) {

@@ -74,6 +74,28 @@ enum EParams
   // Boost pedal section
   kStompBoostLevel,
   kStompBoostActive,
+  // FX section (append-only)
+  kFXEQActive,
+  kFXEQBand31Hz,
+  kFXEQBand62Hz,
+  kFXEQBand125Hz,
+  kFXEQBand250Hz,
+  kFXEQBand500Hz,
+  kFXEQBand1kHz,
+  kFXEQBand2kHz,
+  kFXEQBand4kHz,
+  kFXEQBand8kHz,
+  kFXEQBand16kHz,
+  kFXDelayActive,
+  kFXDelayMix,
+  kFXDelayTimeMs,
+  kFXDelayFeedback,
+  kFXReverbActive,
+  kFXReverbMix,
+  kFXReverbDecay,
+  kFXReverbPreDelayMs,
+  kFXReverbTone,
+  kFXEQOutputGain,
   kNumParams
 };
 
@@ -108,6 +130,9 @@ enum ECtrlTags
   kCtrlTagStompModelFileBrowser,
   kCtrlTagGateOnLED,
   kCtrlTagBoostOnLED,
+  kCtrlTagFXEQOnLED,
+  kCtrlTagFXDelayOnLED,
+  kCtrlTagFXReverbOnLED,
   kNumCtrlTags
 };
 
@@ -388,6 +413,44 @@ private:
   recursive_linear_filter::HighPass mUserHighPass2;
   recursive_linear_filter::LowPass mUserLowPass1;
   recursive_linear_filter::LowPass mUserLowPass2;
+  // Post-IR FX EQ (10-band peaking cascade, mono internal path)
+  std::array<double, 10> mFXEQB0 = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+  std::array<double, 10> mFXEQB1 = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  std::array<double, 10> mFXEQB2 = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  std::array<double, 10> mFXEQA1 = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  std::array<double, 10> mFXEQA2 = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  std::array<double, 10> mFXEQSmoothedGainDB = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+  double mFXEQSmoothedOutputGain = 1.0;
+  std::array<std::array<double, 10>, kNumChannelsInternal> mFXEQZ1 = {{{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}}};
+  std::array<std::array<double, 10>, kNumChannelsInternal> mFXEQZ2 = {{{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}}};
+  // Post-IR FX delay (preallocated in OnReset, no allocations in audio thread)
+  std::array<std::vector<iplug::sample>, kNumChannelsInternal> mFXDelayBuffer;
+  size_t mFXDelayBufferSamples = 1;
+  size_t mFXDelayWriteIndex = 0;
+  double mFXDelaySmoothedTimeSamples = 1.0;
+  double mFXDelaySmoothedFeedback = 0.0;
+  double mFXDelaySmoothedMix = 0.0;
+  // Post-IR FX reverb (preallocated in OnReset, no allocations in audio thread)
+  std::array<std::vector<iplug::sample>, kNumChannelsInternal> mFXReverbPreDelayBuffer;
+  size_t mFXReverbPreDelayBufferSamples = 1;
+  size_t mFXReverbPreDelayWriteIndex = 0;
+  std::array<size_t, 5> mFXReverbEarlyTapSamples = {0, 0, 0, 0, 0};
+  std::array<std::array<std::vector<iplug::sample>, 2>, kNumChannelsInternal> mFXReverbPreDiffAllpassBuffer;
+  std::array<std::array<size_t, 2>, kNumChannelsInternal> mFXReverbPreDiffAllpassWriteIndex = {};
+  std::array<std::array<size_t, 2>, kNumChannelsInternal> mFXReverbPreDiffAllpassDelaySamples = {};
+  std::array<std::array<std::vector<iplug::sample>, 4>, kNumChannelsInternal> mFXReverbCombBuffer;
+  std::array<std::array<size_t, 4>, kNumChannelsInternal> mFXReverbCombWriteIndex = {};
+  std::array<std::array<size_t, 4>, kNumChannelsInternal> mFXReverbCombDelaySamples = {};
+  std::array<std::array<double, 4>, kNumChannelsInternal> mFXReverbCombDampState = {};
+  std::array<double, 4> mFXReverbCombModPhase = {0.0, 1.3, 2.6, 3.9};
+  std::array<std::array<std::vector<iplug::sample>, 2>, kNumChannelsInternal> mFXReverbAllpassBuffer;
+  std::array<std::array<size_t, 2>, kNumChannelsInternal> mFXReverbAllpassWriteIndex = {};
+  std::array<std::array<size_t, 2>, kNumChannelsInternal> mFXReverbAllpassDelaySamples = {};
+  std::array<double, kNumChannelsInternal> mFXReverbToneState = {};
+  double mFXReverbSmoothedMix = 0.0;
+  double mFXReverbSmoothedDecaySeconds = 1.8;
+  double mFXReverbSmoothedPreDelaySamples = 0.0;
+  double mFXReverbSmoothedTone = 0.5;
   // Keep this as a dedicated DC blocker.
   recursive_linear_filter::HighPass mHighPass;
   //  recursive_linear_filter::LowPass mLowPass;
