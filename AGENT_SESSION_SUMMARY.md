@@ -1,6 +1,6 @@
 # AGENT_SESSION_SUMMARY.md
 
-Last updated: 2026-02-24
+Last updated: 2026-02-25
 
 Purpose: concise handoff for new agents so work can continue without replaying the full chat history.
 
@@ -10,85 +10,98 @@ Purpose: concise handoff for new agents so work can continue without replaying t
 3. `AGENT_SESSION_SUMMARY.md` (this file)
 
 ## Current repository state
-- Branch: `main`
-- Working tree: clean at handoff time
+- Branch: `fx-section`
+- Working tree: clean
 - Remote: `origin` = `https://github.com/miandre/NAMPlugin1.git`
+- Branch point/commit of this session: `28d950c` (`Add FX section v1 with EQ, delay, and reverb`)
 
-## High-level trajectory completed so far
-- Tuner:
-  - Detection quality significantly improved over multiple iterations.
-  - UI redesigned to a clearer, amp-sim style display with mode controls.
-  - Tuner logic split out from monolithic plugin code into dedicated structure/modules (done earlier in history).
-- UI framework:
-  - Top navigation/icons moved to SVG for cleaner scaling.
-  - Multi-page section model implemented (`Stomp`, `Amp`, `Cab`, `FX`, `Settings`) with section-specific backgrounds.
-  - Header/footer/side controls refactored and aligned through several layout passes.
-- Background/rendering:
-  - High-DPI background handling improved (including resize behavior).
-  - Multiple resolution assets integrated.
-- Transpose:
-  - Rubber Band based transpose implemented and tuned.
-  - Click-free bypass/crossfade behavior added around zero-semitone transitions.
-- Stomp section v1 (latest merged feature):
-  - Stomp UI controls added (custom pedal knobs, stomp buttons, LEDs).
-  - Gate pedal and boost pedal scaffolding connected.
-  - Stomp model browser added (for pre-amp boost model loading).
-  - Stomp DSP path integrated into processing chain.
+## Session scope completed (FX section v1)
+- Added full FX section UI + parameter wiring on the `FX` page:
+  - 10-band graphic EQ sliders
+  - EQ on/off button + LED
+  - Delay controls (`DRY/WET`, `TIME`, `FDBK`) + on/off button + LED
+  - Reverb controls (`DRY/WET`, `DECAY`, `PRE-DLY`, `TONE`) + on/off button + LED
+- Added top-nav section show/hide integration for all `FX_CONTROLS`.
+- Set module defaults to OFF for new instances:
+  - `kFXEQActive = false`
+  - `kFXDelayActive = false`
+  - `kFXReverbActive = false`
 
-## Most relevant recent commits (already merged to main)
-- `f8143d3` Add stomp section v1 controls, DSP wiring, and assets
-- `82bb58d` Merge branch `feature/transpose-rubberband`
-- `4ea5a4c` Transpose: Rubber Band backend + click-free bypass
-- `836f667` UI: section-specific backgrounds and visibility
-- `5f8452c` UI: background/layout proportion refresh
-- `490e99c` UI: SVG migration and top/tuner interactions
-- `dc74f29` Hi-DPI background scaling on resize
-- `d3fe503` Tuner analyzer/top-nav/monitor modes
+## DSP implementation status
+### EQ
+- 10 fixed bands implemented post-cab (after user HPF/LPF), before DC blocker.
+- Biquad peaking cascade with smoothed gains.
+- Added EQ output compensation knob:
+  - Parameter: `kFXEQOutputGain` (`-18 dB .. +18 dB`)
+  - UI label: `OUT` (right-side placeholder in EQ rack)
+  - Applied as smoothed post-EQ gain.
 
-## Stomp v1 specifics
-### UI assets introduced
-- `NeuralAmpModeler/resources/img/PedalKnob.png`
-- `NeuralAmpModeler/resources/img/PedalKnobShadow.png`
-- `NeuralAmpModeler/resources/img/StompButtonUp.png`
-- `NeuralAmpModeler/resources/img/StompButtonDown.png`
-- `NeuralAmpModeler/resources/img/GreenLedOn.png`
-- `NeuralAmpModeler/resources/img/GreenLedOff.png`
-- `NeuralAmpModeler/resources/img/RedLedOn.png`
-- `NeuralAmpModeler/resources/img/RedLedOff.png`
+### Delay
+- Implemented as post-EQ stage.
+- Preallocated circular buffer in `OnReset()` (no RT allocations).
+- Delay uses fractional read interpolation.
+- Mix behavior changed to amount style (dry stays unity; wet added by mix).
+- Time smoothing changed to per-sample to reduce zipper/glitch artifacts.
+- Feedback capped to safer range:
+  - Param max changed to `80%`
+  - Runtime clamp `<= 0.80`
 
-### Stomp behavior implemented
-- Gate pedal:
-  - Threshold + release controls
-  - On/off switch
-  - Red on/off LED + green active/attenuating LED behavior
-- Boost pedal:
-  - Level control
-  - On/off switch
-  - Red on/off LED
-  - Optional stomp NAM model loaded and processed before amp model path
-- Stomp model file picker present in stomp view.
+### Reverb (algorithmic v1)
+- Implemented as post-delay stage.
+- Preallocated state in `OnReset()`:
+  - pre-delay line
+  - 4 comb lines
+  - 2 allpass lines
+- Added additional shaping/refinement:
+  - Hybrid dry/wet law (not strict linear crossfade)
+  - Comb feedback damping
+  - Subtle comb modulation
+  - Retuned comb/allpass delay sets
+  - Early reflections taps
+  - Pre-diffusion allpass pair
+  - Write-before-read correction in pre-delay path to improve `PreDelay=0` onset feel
+- Latest tuning pass made tails smoother/lusher by reducing metallic character:
+  - lower modulation depth/rates
+  - lower comb feedback max
+  - darker damping slope
+  - softer diffusion gains
 
-### Notable current gate wiring
-- Gate release parameter is wired in DSP path.
-- User requested and accepted gate release knob range update to `5..1000 ms`.
-- Additional gate internals exist in DSP (`time`, `ratio`, `openTime`, `holdTime`, `closeTime`), but only selected ones are exposed in UI.
+## Important files touched
+- `NeuralAmpModeler/NeuralAmpModeler.h`
+- `NeuralAmpModeler/NeuralAmpModeler.cpp`
 
-## Known conventions established in this project work
-- Keep parameter/UI wiring minimal and incremental.
-- Prefer SVG for icons where practical.
-- For audio-thread safety: no allocations/locks/I/O in `ProcessBlock()` path.
-- Heavy tasks (model/IR loading) staged off audio thread and swapped safely.
-- Validate DSP behavior in `Release|x64` + standalone without debugger.
+## Key conventions kept
+- Audio-thread safety respected:
+  - no allocations/locks/I/O/logging in `ProcessBlock()`
+  - heavy memory setup done in `OnReset()`
+- Parameter enum additions were append-only for serialization safety.
+- UI control grouping maintained (`FX_CONTROLS`) for section visibility control.
 
-## Open direction / likely next steps
-- Continue Stomp section refinement:
-  - finalize graphics/positions for controls
-  - tune gate behavior and exposed controls as needed
-  - expand boost pedal UX and model-management polish
-- Add preset workflow enhancements where needed.
-- Continue per-section feature expansion for `Cab` and `FX`.
+## Known follow-up opportunities
+- Optional `Room/Hall` reverb mode switch with parameterized delay/damping presets.
+- Optional delay `HiCut` control in feedback path.
+- Optional output-level normalization helper for aggressive EQ curves.
+- Broader listening pass in Release standalone to finalize voicing.
 
-## If behavior seems different than expected
-- First check which branch is actually running and whether latest `main` was fetched.
-- Confirm section visibility logic (top-nav state) before assuming DSP failure.
-- Confirm Release build and test outside debugger before judging latency/CPU/audio feel.
+## Verification reminders
+- Validate audio/perf in `Release|x64` only.
+- Run standalone with `Ctrl+F5` (not under debugger) for real DSP behavior.
+- Confirm top-nav bypass/section visibility before diagnosing DSP.
+
+## Startup prompt for next agent (copy/paste)
+You are continuing work in `D:\\Dev\\NAMPlugin` on branch `fx-section`.
+
+Read in order:
+1) `AGENTS.md`
+2) `SKILLS.md`
+3) `AGENT_SESSION_SUMMARY.md`
+
+Current status:
+- FX section v1 is implemented (EQ/Delay/Reverb UI + DSP).
+- Latest work includes EQ output gain compensation knob and multiple delay/reverb voicing refinements.
+- Working tree should be clean.
+
+Your task:
+- First, map current FX signal chain and confirm exact stage order + parameter mappings (files/symbols only, concise).
+- Then propose a minimal next patch (one feature only), with RT-safety notes.
+- Keep diffs small, append-only for params, and avoid unrelated refactors.
