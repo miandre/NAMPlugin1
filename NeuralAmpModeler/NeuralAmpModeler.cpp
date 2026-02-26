@@ -1132,7 +1132,10 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 {
   const size_t numChannelsExternalIn = (size_t)NInChansConnected();
   const size_t numChannelsExternalOut = (size_t)NOutChansConnected();
-  const size_t numChannelsMonoCore = 1;
+  size_t numChannelsMonoCore = 1;
+#ifndef APP_API
+  numChannelsMonoCore = 2;
+#endif
   const size_t numChannelsInternal = kNumChannelsInternal;
   const size_t numFrames = (size_t)nFrames;
   const double sampleRate = GetSampleRate();
@@ -1143,7 +1146,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   disable_denormals();
 
   _PrepareBuffers(numChannelsInternal, numFrames);
-  // Input is collapsed to mono in preparation for the NAM.
+  // Input enters the amp core as mono (standalone) or dual-mono (plugin stereo input).
   _ProcessInput(inputs, numFrames, numChannelsExternalIn, numChannelsMonoCore);
   _ApplyDSPStaging();
   const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
@@ -1152,9 +1155,13 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool stompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
   const bool cabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value() && !stompBypassed;
-  const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed && (mStompModel != nullptr);
+  const bool haveStereoStomp = (mStompModel != nullptr) && (mStompModelRight != nullptr);
+  const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed
+                            && ((numChannelsMonoCore == 1) ? (mStompModel != nullptr) : haveStereoStomp);
   const bool toneStackActive = GetParam(kEQActive)->Value() && !ampBypassed;
   const bool modelActive = GetParam(kModelToggle)->Bool() && !ampBypassed;
+  const bool haveStereoModel = (mModel != nullptr) && (mModelRight != nullptr);
+  const bool haveModelForCore = (numChannelsMonoCore == 1) ? (mModel != nullptr) : haveStereoModel;
   const bool tunerActive = GetParam(kTunerActive)->Bool();
   const int transposeSemitones = static_cast<int>(std::lround(GetParam(kTransposeSemitones)->Value()));
   const double gateReleaseValue = GetParam(kNoiseGateReleaseMs)->Value() * 0.2;
@@ -1195,6 +1202,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   // Lightweight semitone transposer with internal click-free crossfade on 0<->nonzero transitions.
   // We call this every block so fade-out to bypass can complete smoothly.
   mTransposeShifter.ProcessBlock(mInputPointers[0], numFrames, transposeSemitones);
+  if (numChannelsMonoCore > 1)
+    mTransposeShifterRight.ProcessBlock(mInputPointers[1], numFrames, transposeSemitones);
 
   // Noise gate trigger
   sample** triggerOutput = mInputPointers;
@@ -1219,7 +1228,19 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   if (boostEnabled)
   {
     sample** boostOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
-    mStompModel->process(modelInputPointers, boostOutPointers, nFrames);
+    if (numChannelsMonoCore == 1)
+    {
+      mStompModel->process(modelInputPointers, boostOutPointers, nFrames);
+    }
+    else
+    {
+      sample* leftIn[1] = {modelInputPointers[0]};
+      sample* leftOut[1] = {boostOutPointers[0]};
+      sample* rightIn[1] = {modelInputPointers[1]};
+      sample* rightOut[1] = {boostOutPointers[1]};
+      mStompModel->process(leftIn, leftOut, nFrames);
+      mStompModelRight->process(rightIn, rightOut, nFrames);
+    }
     modelInputPointers = boostOutPointers;
   }
 
@@ -1230,7 +1251,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         modelInputPointers[c][s] *= boostLevelGain;
   }
 
-  if (modelActive && (mModel != nullptr))
+  if (modelActive && haveModelForCore)
   {
     if (preModelGain != 1.0)
     {
@@ -1239,7 +1260,19 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
           modelInputPointers[c][s] *= preModelGain;
     }
     sample** modelOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
-    mModel->process(modelInputPointers, modelOutPointers, nFrames);
+    if (numChannelsMonoCore == 1)
+    {
+      mModel->process(modelInputPointers, modelOutPointers, nFrames);
+    }
+    else
+    {
+      sample* leftIn[1] = {modelInputPointers[0]};
+      sample* leftOut[1] = {modelOutPointers[0]};
+      sample* rightIn[1] = {modelInputPointers[1]};
+      sample* rightOut[1] = {modelOutPointers[1]};
+      mModel->process(leftIn, leftOut, nFrames);
+      mModelRight->process(rightIn, rightOut, nFrames);
+    }
     modelInputPointers = modelOutPointers;
   }
   else
@@ -1269,7 +1302,10 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   };
 
   sample** irPointers = mOutputPointers;
-  copyMonoToStereo(toneStackOutPointers);
+  if (numChannelsMonoCore == 1)
+    copyMonoToStereo(toneStackOutPointers);
+  else
+    irPointers = toneStackOutPointers;
   if (GetParam(kIRToggle)->Value() && !cabBypassed)
   {
     const bool haveLeftIR = (mIR != nullptr);
@@ -1283,19 +1319,50 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       const double rightGain = blend;
       for (size_t s = 0; s < numFrames; ++s)
       {
-        const sample irLeft = irLeftPointers[0][s];
-        const sample irRight = irRightPointers[0][s];
-        mOutputArray[0][s] = static_cast<sample>(leftGain * irLeft + rightGain * irRight);
-        mOutputArray[1][s] = static_cast<sample>(leftGain * irRight + rightGain * irLeft);
+        if (numChannelsMonoCore == 1)
+        {
+          const sample irLeft = irLeftPointers[0][s];
+          const sample irRight = irRightPointers[0][s];
+          mOutputArray[0][s] = static_cast<sample>(leftGain * irLeft + rightGain * irRight);
+          mOutputArray[1][s] = static_cast<sample>(leftGain * irRight + rightGain * irLeft);
+        }
+        else
+        {
+          const sample irLeftL = irLeftPointers[0][s];
+          const sample irRightL = irRightPointers[0][s];
+          const sample irLeftR = irLeftPointers[1][s];
+          const sample irRightR = irRightPointers[1][s];
+          mOutputArray[0][s] = static_cast<sample>(leftGain * irLeftL + rightGain * irRightL);
+          mOutputArray[1][s] = static_cast<sample>(leftGain * irRightR + rightGain * irLeftR);
+        }
       }
+      irPointers = mOutputPointers;
     }
     else if (haveLeftIR)
     {
-      copyMonoToStereo(mIR->Process(toneStackOutPointers, numChannelsMonoCore, numFrames));
+      sample** leftIRPointers = mIR->Process(toneStackOutPointers, numChannelsMonoCore, numFrames);
+      if (numChannelsMonoCore == 1)
+      {
+        copyMonoToStereo(leftIRPointers);
+        irPointers = mOutputPointers;
+      }
+      else
+      {
+        irPointers = leftIRPointers;
+      }
     }
     else if (haveRightIR)
     {
-      copyMonoToStereo(mIRRight->Process(toneStackOutPointers, numChannelsMonoCore, numFrames));
+      sample** rightIRPointers = mIRRight->Process(toneStackOutPointers, numChannelsMonoCore, numFrames);
+      if (numChannelsMonoCore == 1)
+      {
+        copyMonoToStereo(rightIRPointers);
+        irPointers = mOutputPointers;
+      }
+      else
+      {
+        irPointers = rightIRPointers;
+      }
     }
   }
 
@@ -1917,6 +1984,7 @@ void NeuralAmpModeler::OnReset()
   // If there is a model or IR loaded, they need to be checked for resampling.
   _ResetModelAndIR(sampleRate, GetBlockSize());
   mTransposeShifter.Reset(sampleRate, maxBlockSize);
+  mTransposeShifterRight.Reset(sampleRate, maxBlockSize);
   for (int slotIndex = 0; slotIndex < static_cast<int>(mToneStacks.size()); ++slotIndex)
   {
     if (mToneStacks[slotIndex] != nullptr)
@@ -2734,6 +2802,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   if (mShouldRemoveModel)
   {
     mModel = nullptr;
+    mModelRight = nullptr;
     mNAMPath.Set("");
     mShouldRemoveModel = false;
     mModelCleared = true;
@@ -2744,6 +2813,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   if (mShouldRemoveStompModel)
   {
     mStompModel = nullptr;
+    mStompModelRight = nullptr;
     mStompNAMPath.Set("");
     mShouldRemoveStompModel = false;
     _UpdateLatency();
@@ -2765,6 +2835,8 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   {
     mModel = std::move(mStagedModel);
     mStagedModel = nullptr;
+    mModelRight = std::move(mStagedModelRight);
+    mStagedModelRight = nullptr;
     mNewModelLoadedInDSP = true;
     _UpdateLatency();
     _SetInputGain();
@@ -2774,6 +2846,8 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   {
     mStompModel = std::move(mStagedStompModel);
     mStagedStompModel = nullptr;
+    mStompModelRight = std::move(mStagedStompModelRight);
+    mStagedStompModelRight = nullptr;
     _UpdateLatency();
   }
   if (mStagedIR != nullptr)
@@ -2825,6 +2899,14 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
   {
     mModel->Reset(sampleRate, maxBlockSize);
   }
+  if (mStagedModelRight != nullptr)
+  {
+    mStagedModelRight->Reset(sampleRate, maxBlockSize);
+  }
+  else if (mModelRight != nullptr)
+  {
+    mModelRight->Reset(sampleRate, maxBlockSize);
+  }
   if (mStagedStompModel != nullptr)
   {
     mStagedStompModel->Reset(sampleRate, maxBlockSize);
@@ -2832,6 +2914,14 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
   else if (mStompModel != nullptr)
   {
     mStompModel->Reset(sampleRate, maxBlockSize);
+  }
+  if (mStagedStompModelRight != nullptr)
+  {
+    mStagedStompModelRight->Reset(sampleRate, maxBlockSize);
+  }
+  else if (mStompModelRight != nullptr)
+  {
+    mStompModelRight->Reset(sampleRate, maxBlockSize);
   }
 
   // IR
@@ -2930,10 +3020,19 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
   try
   {
     auto dspPath = std::filesystem::u8path(modelPath.Get());
-    std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
-    std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
-    temp->Reset(GetSampleRate(), GetBlockSize());
-    mStagedModel = std::move(temp);
+    auto loadResampledModel = [this, &dspPath]() {
+      std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
+      std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
+      temp->Reset(GetSampleRate(), GetBlockSize());
+      return temp;
+    };
+
+    mStagedModel = loadResampledModel();
+#ifndef APP_API
+    mStagedModelRight = loadResampledModel();
+#else
+    mStagedModelRight = nullptr;
+#endif
     mAmpNAMPaths[slotIndex] = modelPath;
     if (mAmpSelectorIndex == slotIndex)
       mNAMPath = modelPath;
@@ -2946,6 +3045,10 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
     if (mStagedModel != nullptr)
     {
       mStagedModel = nullptr;
+    }
+    if (mStagedModelRight != nullptr)
+    {
+      mStagedModelRight = nullptr;
     }
     mAmpNAMPaths[slotIndex] = previousSlotPath;
     mNAMPath = previousNAMPath;
@@ -2962,10 +3065,19 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
   try
   {
     auto dspPath = std::filesystem::u8path(modelPath.Get());
-    std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
-    std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
-    temp->Reset(GetSampleRate(), GetBlockSize());
-    mStagedStompModel = std::move(temp);
+    auto loadResampledStompModel = [this, &dspPath]() {
+      std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
+      std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
+      temp->Reset(GetSampleRate(), GetBlockSize());
+      return temp;
+    };
+
+    mStagedStompModel = loadResampledStompModel();
+#ifndef APP_API
+    mStagedStompModelRight = loadResampledStompModel();
+#else
+    mStagedStompModelRight = nullptr;
+#endif
     mStompNAMPath = modelPath;
     SendControlMsgFromDelegate(
       kCtrlTagStompModelFileBrowser, kMsgTagLoadedStompModel, mStompNAMPath.GetLength(), mStompNAMPath.Get());
@@ -2976,6 +3088,8 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
 
     if (mStagedStompModel != nullptr)
       mStagedStompModel = nullptr;
+    if (mStagedStompModelRight != nullptr)
+      mStagedStompModelRight = nullptr;
 
     mStompNAMPath = previousNAMPath;
     std::cerr << "Failed to read stomp DSP module" << std::endl;
@@ -3117,7 +3231,7 @@ void NeuralAmpModeler::_PrepareIOPointers(const size_t numChannels)
 void NeuralAmpModeler::_ProcessInput(iplug::sample** inputs, const size_t nFrames, const size_t nChansIn,
                                      const size_t nChansOut)
 {
-  // Mono core ingest for the amp chain.
+  // Mono or dual-mono core ingest for the amp chain.
   if (nChansOut < 1)
     return;
   if (inputs == nullptr)
@@ -3125,24 +3239,42 @@ void NeuralAmpModeler::_ProcessInput(iplug::sample** inputs, const size_t nFrame
   if (nChansIn == 0)
     return;
 
-  // On the standalone, we can probably assume that the user has plugged into only one input and they expect it to be
-  // carried straight through. Don't apply any division over nChansIn because we're just "catching anything out there."
-  // However, in a DAW, it's probably something providing stereo, and we want to take the average in order to avoid
-  // doubling the loudness. (This would change w/ double mono processing)
-  double gain = mInputGain;
-#ifndef APP_API
-  gain /= (float)nChansIn;
-#endif
-  // Assume _PrepareBuffers() was already called
-  for (size_t c = 0; c < nChansIn; c++)
+  if (nChansOut == 1)
   {
-    if (inputs[c] == nullptr)
-      continue;
-    for (size_t s = 0; s < nFrames; s++)
-      if (c == 0)
-        mInputArray[0][s] = gain * inputs[c][s];
-      else
-        mInputArray[0][s] += gain * inputs[c][s];
+    // On the standalone, we can probably assume that the user has plugged into only one input and they expect it to be
+    // carried straight through. Don't apply any division over nChansIn because we're just "catching anything out there."
+    // However, in a DAW, it's probably something providing stereo, and we want to take the average in order to avoid
+    // doubling the loudness. (This would change w/ double mono processing)
+    double gain = mInputGain;
+#ifndef APP_API
+    gain /= static_cast<double>(nChansIn);
+#endif
+    // Assume _PrepareBuffers() was already called
+    for (size_t c = 0; c < nChansIn; c++)
+    {
+      if (inputs[c] == nullptr)
+        continue;
+      for (size_t s = 0; s < nFrames; s++)
+        if (c == 0)
+          mInputArray[0][s] = gain * inputs[c][s];
+        else
+          mInputArray[0][s] += gain * inputs[c][s];
+    }
+    return;
+  }
+
+  // Dual-mono ingest: L follows input 0, R follows input 1 (or duplicates L if unavailable).
+  const double gain = mInputGain;
+  sample* inputLeft = (nChansIn > 0) ? inputs[0] : nullptr;
+  sample* inputRight = (nChansIn > 1) ? inputs[1] : nullptr;
+  if (inputLeft == nullptr)
+    return;
+  if (inputRight == nullptr)
+    inputRight = inputLeft;
+  for (size_t s = 0; s < nFrames; ++s)
+  {
+    mInputArray[0][s] = gain * inputLeft[s];
+    mInputArray[1][s] = gain * inputRight[s];
   }
 }
 

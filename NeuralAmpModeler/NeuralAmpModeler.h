@@ -409,13 +409,19 @@ private:
   dsp::noise_gate::Gain mNoiseGateGain;
   // The model actually being used:
   std::unique_ptr<ResamplingNAM> mModel;
+  // Plugin stereo core: right-channel model instance (independent state).
+  std::unique_ptr<ResamplingNAM> mModelRight;
   std::unique_ptr<ResamplingNAM> mStompModel;
+  // Plugin stereo core: right-channel stomp model instance (independent state).
+  std::unique_ptr<ResamplingNAM> mStompModelRight;
   // And the IR
   std::unique_ptr<dsp::ImpulseResponse> mIR;
   std::unique_ptr<dsp::ImpulseResponse> mIRRight;
   // Manages switching what DSP is being used.
   std::unique_ptr<ResamplingNAM> mStagedModel;
+  std::unique_ptr<ResamplingNAM> mStagedModelRight;
   std::unique_ptr<ResamplingNAM> mStagedStompModel;
+  std::unique_ptr<ResamplingNAM> mStagedStompModelRight;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIR;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRRight;
   // Flags to take away the modules at a safe time.
@@ -438,6 +444,7 @@ private:
   std::array<double, kNumChannelsInternal> mAmpSwitchDeClickPrevSample = {};
   TunerAnalyzer mTunerAnalyzer;
   LightweightTransposeShifter mTransposeShifter;
+  LightweightTransposeShifter mTransposeShifterRight;
 
   // Tone stack modules
   std::array<std::unique_ptr<dsp::tone_stack::AbstractToneStack>, 3> mToneStacks;
