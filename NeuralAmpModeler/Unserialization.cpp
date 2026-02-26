@@ -66,7 +66,7 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
 
   if (mNAMPath.GetLength())
   {
-    _StageModel(mNAMPath);
+    _StageModel(mNAMPath, mAmpSelectorIndex, _GetAmpModelCtrlTagForSlot(mAmpSelectorIndex));
   }
   if (mIRPath.GetLength())
   {

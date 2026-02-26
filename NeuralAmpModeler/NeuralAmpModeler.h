@@ -109,6 +109,8 @@ const int numKnobs = 8;
 enum ECtrlTags
 {
   kCtrlTagModelFileBrowser = 0,
+  kCtrlTagModelFileBrowser2,
+  kCtrlTagModelFileBrowser3,
   kCtrlTagIRFileBrowserLeft,
   kCtrlTagIRFileBrowserRight,
   kCtrlTagIRToggle,
@@ -308,7 +310,10 @@ private:
   void _InitToneStack();
   // Loads a NAM model and stores it to mStagedNAM
   // Returns an empty string on success, or an error message on failure.
-  std::string _StageModel(const WDL_String& dspFile);
+  std::string _StageModel(const WDL_String& dspFile, int slotIndex, int slotCtrlTag);
+  int _GetAmpModelCtrlTagForSlot(int slotIndex) const;
+  int _GetAmpSlotForModelCtrlTag(int ctrlTag) const;
+  void _SelectAmpSlot(int slotIndex);
   // Loads left cab IR and stores it to mStagedIR.
   // Return status code so that error messages can be relayed if
   // it wasn't successful.
@@ -406,7 +411,9 @@ private:
   bool mNoiseGateLEDState = false;
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false};
-  int mAmpSelectorIndex = 0;
+  int mAmpSelectorIndex = 1;
+  std::atomic<int> mAmpSwitchDeClickSamplesRemaining = 0;
+  std::array<double, kNumChannelsInternal> mAmpSwitchDeClickPrevSample = {};
   TunerAnalyzer mTunerAnalyzer;
   LightweightTransposeShifter mTransposeShifter;
 
@@ -474,6 +481,7 @@ private:
 
   // Path to model's config.json or model.nam
   WDL_String mNAMPath;
+  std::array<WDL_String, 3> mAmpNAMPaths;
   WDL_String mStompNAMPath;
   // Path to IR (.wav file)
   WDL_String mIRPath;
