@@ -283,6 +283,20 @@ public:
   bool OnMessage(int msgTag, int ctrlTag, int dataSize, const void* pData) override;
 
 private:
+  struct AmpSlotState
+  {
+    double modelToggle = 0.0;
+    bool modelToggleTouched = false;
+    double toneStackActive = 1.0;
+    double preModelGain = 0.0;
+    double bass = 5.0;
+    double mid = 5.0;
+    double treble = 5.0;
+    double presence = 5.0;
+    double depth = 5.0;
+    double master = 5.0;
+  };
+
   enum class TopNavSection : int
   {
     Amp = 0,
@@ -360,6 +374,11 @@ private:
   void _ToggleTopNavSectionBypass(TopNavSection section);
   void _RefreshTopNavControls();
   void _SyncTunerParamToTopNav();
+  void _CaptureAmpSlotState(int slotIndex);
+  void _ApplyAmpSlotState(int slotIndex);
+  void _ApplyAmpSlotStateToToneStack(int slotIndex);
+  void _ApplyCurrentAmpParamsToActiveToneStack();
+  bool _IsAmpSlotManagedParam(int paramIdx) const;
 
   // Make sure that the latency is reported correctly.
   void _UpdateLatency();
@@ -412,13 +431,15 @@ private:
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false};
   int mAmpSelectorIndex = 1;
+  bool mApplyingAmpSlotState = false;
+  std::array<AmpSlotState, 3> mAmpSlotStates = {};
   std::atomic<int> mAmpSwitchDeClickSamplesRemaining = 0;
   std::array<double, kNumChannelsInternal> mAmpSwitchDeClickPrevSample = {};
   TunerAnalyzer mTunerAnalyzer;
   LightweightTransposeShifter mTransposeShifter;
 
   // Tone stack modules
-  std::unique_ptr<dsp::tone_stack::AbstractToneStack> mToneStack;
+  std::array<std::unique_ptr<dsp::tone_stack::AbstractToneStack>, 3> mToneStacks;
 
   // Post-IR filters
   recursive_linear_filter::HighPass mUserHighPass1;

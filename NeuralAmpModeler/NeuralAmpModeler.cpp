@@ -213,6 +213,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kInputCalibrationLevel)
     ->InitDouble(kInputCalibrationLevelParamName.c_str(), kDefaultInputCalibrationLevel, -60.0, 60.0, 0.1, "dBu");
   _SetMasterGain();
+  _CaptureAmpSlotState(mAmpSelectorIndex);
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpSlotStates.size()); ++slotIndex)
+  {
+    if (slotIndex != mAmpSelectorIndex)
+      mAmpSlotStates[slotIndex] = mAmpSlotStates[mAmpSelectorIndex];
+    _ApplyAmpSlotStateToToneStack(slotIndex);
+  }
 
   mNoiseGateTrigger.AddListener(&mNoiseGateGain);
 
@@ -606,14 +613,22 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
             ss << "Failed to load NAM model. Message:\n\n" << msg;
             _ShowMessageBox(GetUI(), ss.str().c_str(), "Failed to load model!", kMB_OK);
             GetParam(kModelToggle)->Set(0.0);
+            mAmpSlotStates[slotIndex].modelToggle = 0.0;
+            mAmpSlotStates[slotIndex].modelToggleTouched = true;
           }
           else
+          {
             GetParam(kModelToggle)->Set(1.0);
+            mAmpSlotStates[slotIndex].modelToggle = 1.0;
+            mAmpSlotStates[slotIndex].modelToggleTouched = true;
+          }
           SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
         }
         else
         {
           mAmpNAMPaths[slotIndex] = fileName;
+          mAmpSlotStates[slotIndex].modelToggle = 1.0;
+          mAmpSlotStates[slotIndex].modelToggleTouched = true;
           SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadedModel, fileName.GetLength(), fileName.Get());
         }
       }
@@ -1129,6 +1144,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   // Input is collapsed to mono in preparation for the NAM.
   _ProcessInput(inputs, numFrames, numChannelsExternalIn, numChannelsInternal);
   _ApplyDSPStaging();
+  const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
+  auto* activeToneStack = mToneStacks[activeSlot].get();
   const bool stompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value() && !stompBypassed;
   const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed && (mStompModel != nullptr);
@@ -1222,8 +1239,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     _FallbackDSP(modelInputPointers, mOutputPointers, numChannelsInternal, numFrames);
     modelInputPointers = mOutputPointers;
   }
-  sample** toneStackOutPointers = (toneStackActive && mToneStack != nullptr)
-                                    ? mToneStack->Process(modelInputPointers, numChannelsInternal, nFrames)
+  sample** toneStackOutPointers = (toneStackActive && activeToneStack != nullptr)
+                                    ? activeToneStack->Process(modelInputPointers, numChannelsInternal, nFrames)
                                     : modelInputPointers;
   if (mMasterGain != 1.0)
   {
@@ -1784,7 +1801,12 @@ void NeuralAmpModeler::OnReset()
   // If there is a model or IR loaded, they need to be checked for resampling.
   _ResetModelAndIR(sampleRate, GetBlockSize());
   mTransposeShifter.Reset(sampleRate, maxBlockSize);
-  mToneStack->Reset(sampleRate, maxBlockSize);
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mToneStacks.size()); ++slotIndex)
+  {
+    if (mToneStacks[slotIndex] != nullptr)
+      mToneStacks[slotIndex]->Reset(sampleRate, maxBlockSize);
+    _ApplyAmpSlotStateToToneStack(slotIndex);
+  }
   // Pre-size internal mono buffers to the current host max block size.
   // ProcessBlock() should then only write/clear active frames.
   _PrepareBuffers(kNumChannelsInternal, (size_t)maxBlockSize);
@@ -2050,12 +2072,19 @@ void NeuralAmpModeler::OnParamChange(int paramIdx)
     case kMasterVolume: _SetMasterGain(); break;
     case kTunerActive: mTunerAnalyzer.Reset(); break;
     // Tone stack:
-    case kToneBass: mToneStack->SetParam("bass", GetParam(paramIdx)->Value()); break;
-    case kToneMid: mToneStack->SetParam("middle", GetParam(paramIdx)->Value()); break;
-    case kToneTreble: mToneStack->SetParam("treble", GetParam(paramIdx)->Value()); break;
-    case kTonePresence: mToneStack->SetParam("presence", GetParam(paramIdx)->Value()); break;
-    case kToneDepth: mToneStack->SetParam("depth", GetParam(paramIdx)->Value()); break;
+    case kToneBass:
+    case kToneMid:
+    case kToneTreble:
+    case kTonePresence:
+    case kToneDepth: _ApplyCurrentAmpParamsToActiveToneStack(); break;
     default: break;
+  }
+
+  if (_IsAmpSlotManagedParam(paramIdx))
+  {
+    _CaptureAmpSlotState(mAmpSelectorIndex);
+    if (paramIdx == kModelToggle)
+      mAmpSlotStates[mAmpSelectorIndex].modelToggleTouched = true;
   }
 }
 
@@ -2151,6 +2180,8 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
         pGraphics->GetControlWithParamIdx(kCabIRBlend)->SetDisabled(!active);
         break;
       case kModelToggle:
+        if (mApplyingAmpSlotState)
+          break;
         if (active && (mModel == nullptr) && (mStagedModel == nullptr))
         {
           WDL_String fileName;
@@ -2211,6 +2242,8 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
       }
 
       mAmpNAMPaths[slotIndex].Set("");
+      mAmpSlotStates[slotIndex].modelToggle = 0.0;
+      mAmpSlotStates[slotIndex].modelToggleTouched = true;
       if (slotIndex == mAmpSelectorIndex)
       {
         mNAMPath.Set("");
@@ -2311,29 +2344,36 @@ void NeuralAmpModeler::_SelectAmpSlot(int slotIndex)
     return;
   }
 
+  _CaptureAmpSlotState(mAmpSelectorIndex);
   mAmpSelectorIndex = slotIndex;
-  mAmpSwitchDeClickSamplesRemaining.store(kAmpSlotSwitchDeClickSamples, std::memory_order_relaxed);
+  bool stageFailed = false;
   const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
   const WDL_String& slotPath = mAmpNAMPaths[slotIndex];
   if (slotPath.GetLength())
   {
     const std::string msg = _StageModel(slotPath, slotIndex, slotCtrlTag);
-    if (msg.size() && GetParam(kModelToggle)->Bool())
+    if (msg.size())
     {
-      GetParam(kModelToggle)->Set(0.0);
-      SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+      stageFailed = true;
+      mAmpSlotStates[slotIndex].modelToggle = 0.0;
+      mAmpSlotStates[slotIndex].modelToggleTouched = true;
     }
   }
   else
   {
     mNAMPath.Set("");
     mShouldRemoveModel = true;
-    if (GetParam(kModelToggle)->Bool())
-    {
-      GetParam(kModelToggle)->Set(0.0);
-      SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
-    }
+    mAmpSlotStates[slotIndex].modelToggle = 0.0;
+    mAmpSlotStates[slotIndex].modelToggleTouched = true;
   }
+
+  _ApplyAmpSlotState(slotIndex);
+  if (stageFailed && GetParam(kModelToggle)->Bool())
+  {
+    GetParam(kModelToggle)->Set(0.0);
+    SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+  }
+  mAmpSwitchDeClickSamplesRemaining.store(kAmpSlotSwitchDeClickSamples, std::memory_order_relaxed);
 
   _RefreshTopNavControls();
 }
@@ -2459,6 +2499,103 @@ void NeuralAmpModeler::_SyncTunerParamToTopNav()
     SendParameterValueFromDelegate(kTunerActive, GetParam(kTunerActive)->GetNormalized(), true);
     OnParamChange(kTunerActive);
   }
+}
+
+bool NeuralAmpModeler::_IsAmpSlotManagedParam(const int paramIdx) const
+{
+  switch (paramIdx)
+  {
+    case kModelToggle:
+    case kEQActive:
+    case kPreModelGain:
+    case kToneBass:
+    case kToneMid:
+    case kToneTreble:
+    case kTonePresence:
+    case kToneDepth:
+    case kMasterVolume: return true;
+    default: return false;
+  }
+}
+
+void NeuralAmpModeler::_CaptureAmpSlotState(int slotIndex)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotStates.size()) - 1);
+  auto& state = mAmpSlotStates[slotIndex];
+  state.modelToggle = GetParam(kModelToggle)->Bool() ? 1.0 : 0.0;
+  state.toneStackActive = GetParam(kEQActive)->Bool() ? 1.0 : 0.0;
+  state.preModelGain = GetParam(kPreModelGain)->Value();
+  state.bass = GetParam(kToneBass)->Value();
+  state.mid = GetParam(kToneMid)->Value();
+  state.treble = GetParam(kToneTreble)->Value();
+  state.presence = GetParam(kTonePresence)->Value();
+  state.depth = GetParam(kToneDepth)->Value();
+  state.master = GetParam(kMasterVolume)->Value();
+}
+
+void NeuralAmpModeler::_ApplyAmpSlotStateToToneStack(int slotIndex)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
+  auto* toneStack = mToneStacks[slotIndex].get();
+  if (toneStack == nullptr)
+    return;
+
+  const auto& state = mAmpSlotStates[slotIndex];
+  toneStack->SetParam("bass", state.bass);
+  toneStack->SetParam("middle", state.mid);
+  toneStack->SetParam("treble", state.treble);
+  toneStack->SetParam("presence", state.presence);
+  toneStack->SetParam("depth", state.depth);
+}
+
+void NeuralAmpModeler::_ApplyCurrentAmpParamsToActiveToneStack()
+{
+  const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
+  auto* toneStack = mToneStacks[activeSlot].get();
+  if (toneStack == nullptr)
+    return;
+
+  toneStack->SetParam("bass", GetParam(kToneBass)->Value());
+  toneStack->SetParam("middle", GetParam(kToneMid)->Value());
+  toneStack->SetParam("treble", GetParam(kToneTreble)->Value());
+  toneStack->SetParam("presence", GetParam(kTonePresence)->Value());
+  toneStack->SetParam("depth", GetParam(kToneDepth)->Value());
+}
+
+void NeuralAmpModeler::_ApplyAmpSlotState(int slotIndex)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotStates.size()) - 1);
+  auto& state = mAmpSlotStates[slotIndex];
+  const bool hasSlotModelPath = mAmpNAMPaths[slotIndex].GetLength() > 0;
+  const bool useModelToggleFallback = hasSlotModelPath && !state.modelToggleTouched;
+  const double modelToggleValue = useModelToggleFallback ? 1.0 : state.modelToggle;
+  auto applyParam = [this](const int paramIdx, const double value) {
+    auto* param = GetParam(paramIdx);
+    param->Set(value);
+    SendParameterValueFromDelegate(paramIdx, param->GetNormalized(), true);
+  };
+
+  mApplyingAmpSlotState = true;
+  applyParam(kModelToggle, modelToggleValue);
+  applyParam(kEQActive, state.toneStackActive);
+  applyParam(kPreModelGain, state.preModelGain);
+  applyParam(kToneBass, state.bass);
+  applyParam(kToneMid, state.mid);
+  applyParam(kToneTreble, state.treble);
+  applyParam(kTonePresence, state.presence);
+  applyParam(kToneDepth, state.depth);
+  applyParam(kMasterVolume, state.master);
+  mApplyingAmpSlotState = false;
+
+  if (useModelToggleFallback)
+  {
+    state.modelToggle = modelToggleValue;
+    state.modelToggleTouched = true;
+  }
+
+  _SetMasterGain();
+  _ApplyCurrentAmpParamsToActiveToneStack();
+  _CaptureAmpSlotState(slotIndex);
 }
 
 void NeuralAmpModeler::_AllocateIOPointers(const size_t nChans)
@@ -2821,7 +2958,8 @@ size_t NeuralAmpModeler::_GetBufferNumFrames() const
 void NeuralAmpModeler::_InitToneStack()
 {
   // If you want to customize the tone stack, then put it here!
-  mToneStack = std::make_unique<dsp::tone_stack::BasicNamToneStack>();
+  for (auto& toneStack : mToneStacks)
+    toneStack = std::make_unique<dsp::tone_stack::BasicNamToneStack>();
 }
 void NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t numFrames)
 {
