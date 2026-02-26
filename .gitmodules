@@ -1,6 +1,6 @@
 [submodule "iPlug2"]
 	path = iPlug2
-	url = https://github.com/iPlug2/iPlug2
+	url = https://github.com/miandre/iPlug2.git
 	# url = https://github.com/sdatkinson/iPlug2.git
 [submodule "eigen"]
 	path = eigen
