@@ -13,6 +13,7 @@
 // a bunch of stuff.
 #include "NeuralAmpModeler.h"
 #include "IPlug_include_in_plug_src.h"
+#include "IPlugPaths.h"
 // clang-format on
 #include "architecture.hpp"
 
@@ -1790,6 +1791,98 @@ void NeuralAmpModeler::OnReset()
     kFXEQBand31Hz, kFXEQBand62Hz, kFXEQBand125Hz, kFXEQBand250Hz, kFXEQBand500Hz,
     kFXEQBand1kHz, kFXEQBand2kHz, kFXEQBand4kHz, kFXEQBand8kHz, kFXEQBand16kHz
   };
+
+#if defined(APP_API) && (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
+  if (!mStartupDefaultLoadAttempted)
+  {
+    mStartupDefaultLoadAttempted = true;
+
+    const bool anyAmpSlotPath = std::any_of(
+      mAmpNAMPaths.begin(), mAmpNAMPaths.end(), [](const WDL_String& path) { return path.GetLength() > 0; });
+    const bool hasExistingPaths =
+      anyAmpSlotPath || (mNAMPath.GetLength() > 0) || (mStompNAMPath.GetLength() > 0) || (mIRPath.GetLength() > 0) ||
+      (mIRPathRight.GetLength() > 0);
+
+    if (!hasExistingPaths)
+    {
+      auto existsNoThrow = [](const std::filesystem::path& path) {
+        std::error_code ec;
+        const bool exists = std::filesystem::exists(path, ec);
+        return exists && !ec;
+      };
+      auto makeAbsoluteNoThrow = [](const std::filesystem::path& path) {
+        std::error_code ec;
+        const std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
+        return ec ? path : absolutePath;
+      };
+      auto setWdlPath = [](WDL_String& target, const std::filesystem::path& path) { target.Set(path.string().c_str()); };
+      auto hasAllDefaultFiles = [&](const std::filesystem::path& baseDir) {
+        return existsNoThrow(baseDir / "Amp1.nam") && existsNoThrow(baseDir / "Amp2.nam") &&
+               existsNoThrow(baseDir / "Amp3.nam") && existsNoThrow(baseDir / "Boost1.nam") &&
+               existsNoThrow(baseDir / "Cab1.wav");
+      };
+
+      std::vector<std::filesystem::path> candidateDirs = {
+        "NeuralAmpModeler/resources/tmpLoad", "resources/tmpLoad", "tmpLoad"
+      };
+      {
+        WDL_String hostPath;
+        HostPath(hostPath, GetBundleID());
+        if (hostPath.GetLength() > 0)
+        {
+          const std::filesystem::path hostDir(hostPath.Get());
+          candidateDirs.push_back(hostDir / "tmpLoad");
+          candidateDirs.push_back(hostDir / "resources" / "tmpLoad");
+
+          std::filesystem::path cursor = hostDir;
+          for (int depth = 0; depth < 10; ++depth)
+          {
+            candidateDirs.push_back(cursor / "NeuralAmpModeler" / "resources" / "tmpLoad");
+            candidateDirs.push_back(cursor / "resources" / "tmpLoad");
+            if (!cursor.has_parent_path())
+              break;
+            cursor = cursor.parent_path();
+          }
+        }
+      }
+      std::filesystem::path defaultsDir;
+      for (const auto& candidateDir : candidateDirs)
+      {
+        if (hasAllDefaultFiles(candidateDir))
+        {
+          defaultsDir = makeAbsoluteNoThrow(candidateDir);
+          break;
+        }
+      }
+
+      if (!defaultsDir.empty())
+      {
+        setWdlPath(mAmpNAMPaths[0], defaultsDir / "Amp1.nam");
+        setWdlPath(mAmpNAMPaths[1], defaultsDir / "Amp2.nam");
+        setWdlPath(mAmpNAMPaths[2], defaultsDir / "Amp3.nam");
+        setWdlPath(mStompNAMPath, defaultsDir / "Boost1.nam");
+        setWdlPath(mIRPath, defaultsDir / "Cab1.wav");
+
+        const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+        if (mModel == nullptr && mStagedModel == nullptr)
+        {
+          const std::string stageMsg =
+            _StageModel(mAmpNAMPaths[activeSlot], activeSlot, _GetAmpModelCtrlTagForSlot(activeSlot));
+          if (stageMsg.empty())
+          {
+            mAmpSlotStates[activeSlot].modelToggle = 1.0;
+            mAmpSlotStates[activeSlot].modelToggleTouched = true;
+            _ApplyAmpSlotState(activeSlot);
+          }
+        }
+        if (mStompModel == nullptr && mStagedStompModel == nullptr)
+          _StageStompModel(mStompNAMPath);
+        if (mIR == nullptr && mStagedIR == nullptr)
+          _StageIRLeft(mIRPath);
+      }
+    }
+  }
+#endif
 
   // Tail is because the HPF DC blocker has a decay.
   // 10 cycles should be enough to pass the VST3 tests checking tail behavior.

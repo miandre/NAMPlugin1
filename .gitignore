@@ -13,3 +13,4 @@ mkcert*
 
 NeuralAmpModeler/*.wav
 NeuralAmpModeler/peaks/
+NeuralAmpModeler/resources/tmpLoad/

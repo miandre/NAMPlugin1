@@ -432,6 +432,7 @@ private:
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false};
   int mAmpSelectorIndex = 1;
   bool mApplyingAmpSlotState = false;
+  bool mStartupDefaultLoadAttempted = false;
   std::array<AmpSlotState, 3> mAmpSlotStates = {};
   std::atomic<int> mAmpSwitchDeClickSamplesRemaining = 0;
   std::array<double, kNumChannelsInternal> mAmpSwitchDeClickPrevSample = {};

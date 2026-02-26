@@ -11,6 +11,7 @@
 #define BUNDLE_NAME "NeuralAmpModeler"
 #define BUNDLE_MFR "StevenAtkinson"
 #define BUNDLE_DOMAIN "com"
+#define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
 
 #define SHARED_RESOURCES_SUBPATH "NeuralAmpModeler"
 
