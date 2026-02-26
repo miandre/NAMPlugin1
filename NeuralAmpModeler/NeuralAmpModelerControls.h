@@ -1463,18 +1463,28 @@ public:
     const auto titleArea = GetRECT().GetPadded(-(pad + 10.0f)).GetFromTop(50.0f);
     AddNamedChildControl(new IVLabelControl(titleArea, "SETTINGS", titleStyle), mControlNames.title);
 
-    // Attach input/output calibration controls
+    // Attach output mode with input calibration stacked below it (right column)
     {
-      const float height = NAM_KNOB_HEIGHT + NAM_SWTICH_HEIGHT + 10.0f;
-      const float width = titleArea.W();
-      const auto inputOutputArea = titleArea.GetFromBottom(height).GetTranslated(0.0f, height);
-      const auto inputArea = inputOutputArea.GetFromLeft(0.5f * width);
-      const auto outputArea = inputOutputArea.GetFromRight(0.5f * width);
-
+      const auto settingsBody = GetRECT().GetPadded(-(pad + 10.0f));
+      const auto controlsArea = settingsBody.GetFromTop(310.0f).GetTranslated(0.0f, 70.0f);
+      const auto rightArea = controlsArea.GetFromRight(0.5f * controlsArea.W());
       const float knobWidth = 87.0f; // HACK based on looking at the main page knobs.
+
+      const auto outputRadioArea = rightArea.GetFromTop(138.0f).GetHPadded(-8.0f);
+      const float buttonSize = 10.0f;
+      auto* outputModeControl =
+        AddNamedChildControl(new OutputModeControl(outputRadioArea, kOutputMode, mRadioButtonStyle, buttonSize),
+                             mControlNames.outputMode, kCtrlTagOutputMode);
+      outputModeControl->SetTooltip(
+        "How to adjust the level of the output.\nRaw=No adjustment.\nNormalized=Adjust the level so that all models "
+        "are about the same loudness.\nCalibrated=Match the input's digital-analog calibration.");
+
+      const float inputLevelTop = outputRadioArea.B + 16.0f;
       const auto inputLevelArea =
-        inputArea.GetFromTop(NAM_KNOB_HEIGHT).GetFromBottom(25.0f).GetMidHPadded(0.5f * knobWidth);
-      const auto inputSwitchArea = inputArea.GetFromBottom(NAM_SWTICH_HEIGHT).GetMidHPadded(0.5f * knobWidth);
+        IRECT(rightArea.L, inputLevelTop, rightArea.R, inputLevelTop + 30.0f).GetMidHPadded(0.5f * knobWidth);
+      const auto inputSwitchArea =
+        IRECT(rightArea.L, inputLevelArea.B + 10.0f, rightArea.R, inputLevelArea.B + 10.0f + NAM_SWTICH_HEIGHT)
+          .GetMidHPadded(0.5f * knobWidth);
 
       auto* inputLevelControl = AddNamedChildControl(
         new InputLevelControl(inputLevelArea, kInputCalibrationLevel, mInputLevelBackgroundBitmap, text),
@@ -1485,26 +1495,13 @@ public:
       AddNamedChildControl(
         new NAMSwitchControl(inputSwitchArea, kCalibrateInput, "Calibrate Input", mStyle, mSwitchBitmap),
         mControlNames.calibrateInput, kCtrlTagCalibrateInput);
-
-      // Same-ish height & width as input controls
-      const auto outputRadioArea = outputArea.GetFromBottom(
-        1.1f * (inputLevelArea.H() + inputSwitchArea.H())); // .GetMidHPadded(0.55f * knobWidth);
-      const float buttonSize = 10.0f;
-      auto* outputModeControl =
-        AddNamedChildControl(new OutputModeControl(outputRadioArea, kOutputMode, mRadioButtonStyle, buttonSize),
-                             mControlNames.outputMode, kCtrlTagOutputMode);
-      outputModeControl->SetTooltip(
-        "How to adjust the level of the output.\nRaw=No adjustment.\nNormalized=Adjust the level so that all models "
-        "are about the same loudness.\nCalibrated=Match the input's digital-analog calibration.");
     }
 
     const float halfWidth = PLUG_WIDTH / 2.0f - pad;
     const auto bottomArea = GetRECT().GetPadded(-pad).GetFromBottom(78.0f);
     const float lineHeight = 15.0f;
     const auto modelInfoArea = bottomArea.GetFromLeft(halfWidth).GetFromTop(4 * lineHeight);
-    const auto aboutArea = bottomArea.GetFromRight(halfWidth).GetFromTop(5 * lineHeight);
     AddNamedChildControl(new ModelInfoControl(modelInfoArea, leftStyle), mControlNames.modelInfo);
-    AddNamedChildControl(new AboutControl(aboutArea, leftStyle, leftText), mControlNames.about);
 
     auto closeAction = [&](IControl* pCaller) {
       static_cast<NAMSettingsPageControl*>(pCaller->GetParent())->HideAnimated(true);
@@ -1536,7 +1533,6 @@ private:
   // Make sure that these are all unique and that you use them with AddNamedChildControl
   struct ControlNames
   {
-    const std::string about = "About";
     const std::string bitmap = "Bitmap";
     const std::string calibrateInput = "CalibrateInput";
     const std::string close = "Close";
@@ -1592,35 +1588,4 @@ private:
     IBitmap mBitmap;
   };
 
-  class AboutControl : public IContainerBase
-  {
-  public:
-    AboutControl(const IRECT& bounds, const IVStyle& style, const IText& text)
-    : IContainerBase(bounds)
-    , mStyle(style)
-    , mText(text) {};
-
-    void OnAttached() override
-    {
-      WDL_String verStr, buildInfoStr;
-      PLUG()->GetPluginVersionStr(verStr);
-
-      buildInfoStr.SetFormatted(100, "Version %s %s %s", verStr.Get(), PLUG()->GetArchStr(), PLUG()->GetAPIStr());
-
-      AddChildControl(new IVLabelControl(GetRECT().SubRectVertical(5, 0), "NEURAL AMP MODELER", mStyle));
-      AddChildControl(new IVLabelControl(GetRECT().SubRectVertical(5, 1), "By Steven Atkinson", mStyle));
-      AddChildControl(new IVLabelControl(GetRECT().SubRectVertical(5, 2), buildInfoStr.Get(), mStyle));
-      AddChildControl(new IURLControl(GetRECT().SubRectVertical(5, 3),
-                                      "Plug-in development: Steve Atkinson, Oli Larkin, ... ",
-                                      "https://github.com/sdatkinson/NeuralAmpModelerPlugin/graphs/contributors", mText,
-                                      COLOR_TRANSPARENT, PluginColors::HELP_TEXT_MO, PluginColors::HELP_TEXT_CLICKED));
-      AddChildControl(new IURLControl(GetRECT().SubRectVertical(5, 4), "www.neuralampmodeler.com",
-                                      "https://www.neuralampmodeler.com", mText, COLOR_TRANSPARENT,
-                                      PluginColors::HELP_TEXT_MO, PluginColors::HELP_TEXT_CLICKED));
-    };
-
-  private:
-    IVStyle mStyle;
-    IText mText;
-  };
 };

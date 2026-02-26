@@ -389,8 +389,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                               stompGateSwitchArea.MW() + 7.0f, stompGateThresholdArea.B + 20.0f);
     const auto stompBoostOnLedArea = IRECT(stompBoostSwitchArea.MW() - 7.0f, stompBoostSwitchArea.B + 11.0f,
                                            stompBoostSwitchArea.MW() + 7.0f, stompBoostSwitchArea.B + 25.0f);
-    const auto stompModelArea = IRECT(stompBoostLevelX - 170.0f, ampFaceArea.B + 40.0f, stompBoostLevelX + 170.0f,
-                                      ampFaceArea.B + 70.0f);
     // FX section coordinates come from the same 3x design canvas used by the stomp section.
     constexpr float kFXEqSliderW = 16.0f;
     constexpr float kFXEqSliderH = 97.0f;
@@ -484,14 +482,16 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Top bar has two visual rows: icon row + primary control row.
     const float topBarIconRowTop = topMainRowArea.MH() - 0.5f * topNavIconHeight + kTopNavRowYOffset;
     const float topBarControlRowTopBase = topUtilityRowArea.T;
+    constexpr float kSettingsPad = 20.0f;
     constexpr float kModelPickerWidth = 320.0f;
     constexpr float kModelPickerHeight = 30.0f;
-    // Temporary model picker placement near the bottom of the amp body.
-    const float modelPickerTop = ampFaceArea.B + 25.0f;
-    const auto modelArea = IRECT(heroArea.MW() - 0.5f * kModelPickerWidth,
-                                 modelPickerTop,
-                                 heroArea.MW() + 0.5f * kModelPickerWidth,
-                                 modelPickerTop + kModelPickerHeight);
+    const auto settingsInnerArea = b.GetPadded(-(kSettingsPad + 10.0f));
+    const float settingsLoaderLeft = settingsInnerArea.L + 22.0f;
+    const float settingsLoaderRight = settingsLoaderLeft + kModelPickerWidth;
+    const float settingsLoaderTop = settingsInnerArea.T + 108.0f;
+    const auto settingsAmpModelArea =
+      IRECT(settingsLoaderLeft, settingsLoaderTop, settingsLoaderRight, settingsLoaderTop + kModelPickerHeight);
+    const auto settingsStompModelArea = settingsAmpModelArea.GetTranslated(0.0f, 56.0f);
     const float tunerPanelWidth = 700.0f;
     const float tunerPanelHeight = 150.0f;
     const float tunerPanelTop = topUtilityRowArea.B + 90.0f;
@@ -687,17 +687,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 #endif
     // Getting started page listing additional resources
     const char* const getUrl = "https://www.neuralampmodeler.com/users#comp-marb84o5";
-    pGraphics->AttachControl(
-      new NAMFileBrowserControl(modelArea, kMsgTagClearModel, defaultNamFileString.c_str(), "nam",
-                                loadModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
-                                fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
-      kCtrlTagModelFileBrowser);
-    pGraphics->AttachControl(
-      new NAMFileBrowserControl(stompModelArea, kMsgTagClearStompModel, "Select stomp NAM...", "nam",
-                                loadStompModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
-                                fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
-      kCtrlTagStompModelFileBrowser,
-      "STOMP_CONTROLS");
     pGraphics->AttachControl(new NAMTunerDisplayControl(tunerReadoutArea), kCtrlTagTunerReadout);
     pGraphics->AttachControl(
       new NAMTunerMonitorControl(tunerMonitorArea, kTunerMonitorMode, utilityStyle),
@@ -1070,11 +1059,20 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       },
       gearSVG));
 
-    pGraphics
-      ->AttachControl(new NAMSettingsPageControl(b, settingsBackgroundBitmap, inputLevelBackgroundBitmap, switchHandleBitmap,
-                                                 crossSVG, style, radioButtonStyle),
-                      kCtrlTagSettingsBox)
-      ->Hide(true);
+    auto* pSettingsBox =
+      new NAMSettingsPageControl(b, settingsBackgroundBitmap, inputLevelBackgroundBitmap, switchHandleBitmap, crossSVG, style,
+                                 radioButtonStyle);
+    pGraphics->AttachControl(pSettingsBox, kCtrlTagSettingsBox)->Hide(true);
+    pSettingsBox->AddChildControl(
+      new NAMFileBrowserControl(settingsAmpModelArea, kMsgTagClearModel, defaultNamFileString.c_str(), "nam",
+                                loadModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
+      kCtrlTagModelFileBrowser);
+    pSettingsBox->AddChildControl(
+      new NAMFileBrowserControl(settingsStompModelArea, kMsgTagClearStompModel, "Select stomp NAM...", "nam",
+                                loadStompModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
+      kCtrlTagStompModelFileBrowser);
 
     pGraphics->ForAllControlsFunc([](IControl* pControl) {
       pControl->SetMouseEventsWhenDisabled(true);
@@ -2255,12 +2253,8 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     if (auto* pTunerClose = pGraphics->GetControlWithTag(kCtrlTagTunerClose))
       pTunerClose->Hide(!showTunerReadout);
 
-    if (auto* pModelBrowser = pGraphics->GetControlWithTag(kCtrlTagModelFileBrowser))
-      pModelBrowser->Hide(!showAmpSection);
     if (auto* pModelToggle = pGraphics->GetControlWithParamIdx(kModelToggle))
       pModelToggle->Hide(!showAmpSection);
-    if (auto* pStompBrowser = pGraphics->GetControlWithTag(kCtrlTagStompModelFileBrowser))
-      pStompBrowser->Hide(!showStompSection);
     if (auto* pNoiseGateLED = pGraphics->GetControlWithTag(kCtrlTagNoiseGateLED))
       pNoiseGateLED->Hide(!showStompSection);
     if (auto* pGateOnLED = pGraphics->GetControlWithTag(kCtrlTagGateOnLED))
