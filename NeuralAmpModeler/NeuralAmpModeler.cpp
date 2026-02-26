@@ -195,6 +195,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kFXReverbDecay)->InitDouble("FX Reverb Decay", 1.8, 0.1, 10.0, 0.1, "s");
   GetParam(kFXReverbPreDelayMs)->InitDouble("FX Reverb PreDelay", 25.0, 0.0, 250.0, 1.0, "ms");
   GetParam(kFXReverbTone)->InitDouble("FX Reverb Tone", 50.0, 0.0, 100.0, 0.1, "%");
+  GetParam(kFXDelayLowCutHz)->InitDouble("FX Delay LoCut", 120.0, 20.0, 2000.0, 1.0, "Hz");
+  GetParam(kFXDelayHighCutHz)->InitDouble("FX Delay HiCut", 12000.0, 1000.0, 20000.0, 10.0, "Hz");
+  GetParam(kFXReverbLowCutHz)->InitDouble("FX Reverb LoCut", 120.0, 20.0, 2000.0, 1.0, "Hz");
+  GetParam(kFXReverbHighCutHz)->InitDouble("FX Reverb HiCut", 12000.0, 1000.0, 20000.0, 10.0, "Hz");
+  GetParam(kFXReverbMode)->InitBool("FX Reverb Hall", true);
   GetParam(kEQActive)->InitBool("ToneStack", true);
   GetParam(kOutputMode)->InitEnum("OutputMode", 1, {"Raw", "Normalized", "Calibrated"}); // TODO DRY w/ control
   GetParam(kIRToggle)->InitBool("IRToggle", true);
@@ -386,7 +391,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                            stompBoostSwitchArea.MW() + 7.0f, stompBoostSwitchArea.B + 25.0f);
     const auto stompModelArea = IRECT(stompBoostLevelX - 170.0f, ampFaceArea.B + 40.0f, stompBoostLevelX + 170.0f,
                                       ampFaceArea.B + 70.0f);
-
     // FX section coordinates come from the same 3x design canvas used by the stomp section.
     constexpr float kFXEqSliderW = 16.0f;
     constexpr float kFXEqSliderH = 97.0f;
@@ -422,6 +426,16 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto fxReverbDecayArea = makePedalKnobArea(designToUIX(2064.0f), fxReverbKnobY);
     const auto fxReverbPreDelayArea = makePedalKnobArea(designToUIX(2259.0f), fxReverbKnobY);
     const auto fxReverbToneArea = makePedalKnobArea(designToUIX(2445.0f), fxReverbKnobY);
+    const auto fxReverbLowCutArea = makePedalKnobArea(designToUIX(820.0f), fxReverbKnobY);
+    const auto fxReverbHighCutArea = makePedalKnobArea(designToUIX(1210.0f), fxReverbKnobY);
+    constexpr float kFXModeSwitchScale = 0.18f;
+    const float fxModeSwitchW = switchOffBitmap.IsValid() ? static_cast<float>(switchOffBitmap.W()) * kFXModeSwitchScale : 88.0f;
+    const float fxModeSwitchH = switchOffBitmap.IsValid() ? static_cast<float>(switchOffBitmap.H()) * kFXModeSwitchScale : 52.0f;
+    const float fxReverbModeCenterX = designToUIX(1485.0f);
+    const float fxReverbModeCenterY = designToUIY(1250.0f);
+    const auto fxReverbModeArea =
+      IRECT(fxReverbModeCenterX - 0.5f * fxModeSwitchW, fxReverbModeCenterY - 0.5f * fxModeSwitchH,
+            fxReverbModeCenterX + 0.5f * fxModeSwitchW, fxReverbModeCenterY + 0.5f * fxModeSwitchH);
     const float fxReverbSwitchX = designToUIX(2660.0f);
     const float fxReverbSwitchY = designToUIY(1250.0f);
     const auto fxReverbSwitchArea =
@@ -434,6 +448,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto fxDelayMixArea = makePedalKnobArea(designToUIX(820.0f), fxDelayKnobY);
     const auto fxDelayTimeArea = makePedalKnobArea(designToUIX(1210.0f), fxDelayKnobY);
     const auto fxDelayFeedbackArea = makePedalKnobArea(designToUIX(1600.0f), fxDelayKnobY);
+    const auto fxDelayLowCutArea = makePedalKnobArea(designToUIX(1990.0f), fxDelayKnobY);
+    const auto fxDelayHighCutArea = makePedalKnobArea(designToUIX(2380.0f), fxDelayKnobY);
     const float fxDelaySwitchX = designToUIX(2660.0f);
     const float fxDelaySwitchY = designToUIY(1610.0f);
     const auto fxDelaySwitchArea =
@@ -962,6 +978,20 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxReverbLowCutArea, kFXReverbLowCutHz, "LO CUT", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxReverbHighCutArea, kFXReverbHighCutHz, "HI CUT", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(new NAMBitmapToggleControl(fxReverbModeArea, kFXReverbMode, switchOffBitmap, switchOnBitmap),
+                             -1,
+                             "FX_CONTROLS")
+      ->SetTooltip("Reverb mode: Room (OFF) / Hall (ON)");
+    pGraphics->AttachControl(
       new NAMPedalKnobControl(fxDelayMixArea, kFXDelayMix, "DRY/WET", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
@@ -975,6 +1005,16 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                                      pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
                              -1,
                              "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxDelayLowCutArea, kFXDelayLowCutHz, "LO CUT", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxDelayHighCutArea, kFXDelayHighCutHz, "HI CUT", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "FX_CONTROLS");
     pGraphics->AttachControl(new NAMKnobControl(preModelGainArea, kPreModelGain, "PRE GAIN", ampKnobStyle,
                                                 ampKnobBackgroundBitmap, false, true, 0.7f, AP_KNOP_OFFSET));
     pGraphics->AttachControl(
@@ -1296,6 +1336,10 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       GetParam(kFXDelayTimeMs)->Value() * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
     const double targetFeedback = std::clamp(GetParam(kFXDelayFeedback)->Value() * 0.01, 0.0, 0.80);
     const double targetMix = std::clamp(GetParam(kFXDelayMix)->Value() * 0.01, 0.0, 1.0);
+    const double maxCutHz = std::max(40.0, 0.45 * sampleRate);
+    const double targetLowCutHz = std::clamp(GetParam(kFXDelayLowCutHz)->Value(), 20.0, maxCutHz);
+    const double targetHighCutHz =
+      std::clamp(std::max(GetParam(kFXDelayHighCutHz)->Value(), targetLowCutHz + 20.0), 20.0, maxCutHz);
     constexpr double kFXDelayTimeSmoothingMs = 120.0;
     constexpr double kFXDelayControlSmoothingMs = 30.0;
     const double timeSmoothingAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kFXDelayTimeSmoothingMs * 0.001));
@@ -1303,6 +1347,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     double smoothedTimeSamples = mFXDelaySmoothedTimeSamples;
     double smoothedFeedback = mFXDelaySmoothedFeedback;
     double smoothedMix = mFXDelaySmoothedMix;
+    double smoothedLowCutHz = mFXDelaySmoothedLowCutHz;
+    double smoothedHighCutHz = mFXDelaySmoothedHighCutHz;
     size_t writeIndex = mFXDelayWriteIndex;
 
     for (size_t s = 0; s < numFrames; ++s)
@@ -1310,6 +1356,12 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       smoothedTimeSamples += timeSmoothingAlpha * (targetTimeSamples - smoothedTimeSamples);
       smoothedFeedback += controlSmoothingAlpha * (targetFeedback - smoothedFeedback);
       smoothedMix += controlSmoothingAlpha * (targetMix - smoothedMix);
+      smoothedLowCutHz += controlSmoothingAlpha * (targetLowCutHz - smoothedLowCutHz);
+      smoothedHighCutHz += controlSmoothingAlpha * (targetHighCutHz - smoothedHighCutHz);
+      if (smoothedHighCutHz < smoothedLowCutHz + 20.0)
+        smoothedHighCutHz = std::min(maxCutHz, smoothedLowCutHz + 20.0);
+      const double lowCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedLowCutHz / sampleRate);
+      const double highCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedHighCutHz / sampleRate);
 
       for (size_t c = 0; c < numChannelsInternal; ++c)
       {
@@ -1325,12 +1377,19 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         const double delayed =
           static_cast<double>(delayBuffer[readIndex0]) * (1.0 - frac) + static_cast<double>(delayBuffer[readIndex1]) * frac;
 
-        const double writeValue = dry + smoothedFeedback * delayed;
+        auto& lowCutState = mFXDelayLowCutLPState[c];
+        auto& highCutState = mFXDelayHighCutLPState[c];
+        lowCutState += lowCutAlpha * (delayed - lowCutState);
+        const double lowCutDelayed = delayed - lowCutState;
+        highCutState += highCutAlpha * (lowCutDelayed - highCutState);
+        const double filteredDelayed = highCutState;
+
+        const double writeValue = dry + smoothedFeedback * filteredDelayed;
         delayBuffer[writeIndex] = static_cast<sample>(writeValue);
 
         if (fxDelayActive)
           // "Amount" behavior: keep dry at unity and add wet signal.
-          fxDelayPointers[c][s] = static_cast<sample>(dry + delayed * smoothedMix);
+          fxDelayPointers[c][s] = static_cast<sample>(dry + filteredDelayed * smoothedMix);
       }
 
       ++writeIndex;
@@ -1340,6 +1399,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     mFXDelaySmoothedTimeSamples = smoothedTimeSamples;
     mFXDelaySmoothedFeedback = smoothedFeedback;
     mFXDelaySmoothedMix = smoothedMix;
+    mFXDelaySmoothedLowCutHz = smoothedLowCutHz;
+    mFXDelaySmoothedHighCutHz = smoothedHighCutHz;
     mFXDelayWriteIndex = writeIndex;
   }
 
@@ -1352,30 +1413,72 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     const double targetPreDelaySamples = std::clamp(
       GetParam(kFXReverbPreDelayMs)->Value() * 0.001 * sampleRate, 0.0, static_cast<double>(mFXReverbPreDelayBufferSamples - 2));
     const double targetTone = std::clamp(GetParam(kFXReverbTone)->Value() * 0.01, 0.0, 1.0);
+    const double targetMode = GetParam(kFXReverbMode)->Bool() ? 1.0 : 0.0;
+    const double maxCutHz = std::max(40.0, 0.45 * sampleRate);
+    const double targetLowCutHz = std::clamp(GetParam(kFXReverbLowCutHz)->Value(), 20.0, maxCutHz);
+    const double targetHighCutHz =
+      std::clamp(std::max(GetParam(kFXReverbHighCutHz)->Value(), targetLowCutHz + 20.0), 20.0, maxCutHz);
 
     constexpr double kReverbMixSmoothingMs = 40.0;
     constexpr double kReverbDecaySmoothingMs = 80.0;
     constexpr double kReverbPreDelaySmoothingMs = 120.0;
     constexpr double kReverbToneSmoothingMs = 60.0;
+    constexpr double kReverbModeSmoothingMs = 120.0;
+    constexpr double kReverbCutSmoothingMs = 60.0;
+    constexpr double kReverbEarlyLevelSmoothingMs = 70.0;
+    constexpr double kReverbEarlyToneSmoothingMs = 70.0;
     const double mixAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kReverbMixSmoothingMs * 0.001));
     const double decayAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kReverbDecaySmoothingMs * 0.001));
     const double preDelayAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kReverbPreDelaySmoothingMs * 0.001));
     const double toneAlphaParam = 1.0 - std::exp(-1.0 / (sampleRate * kReverbToneSmoothingMs * 0.001));
+    const double modeAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kReverbModeSmoothingMs * 0.001));
+    const double cutAlphaParam = 1.0 - std::exp(-1.0 / (sampleRate * kReverbCutSmoothingMs * 0.001));
+    const double earlyLevelAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kReverbEarlyLevelSmoothingMs * 0.001));
+    const double earlyToneAlphaParam = 1.0 - std::exp(-1.0 / (sampleRate * kReverbEarlyToneSmoothingMs * 0.001));
 
     double smoothedMix = mFXReverbSmoothedMix;
     double smoothedDecaySeconds = mFXReverbSmoothedDecaySeconds;
     double smoothedPreDelaySamples = mFXReverbSmoothedPreDelaySamples;
     double smoothedTone = mFXReverbSmoothedTone;
+    double smoothedMode = mFXReverbSmoothedMode;
+    double smoothedEarlyLevel = mFXReverbSmoothedEarlyLevel;
+    double smoothedEarlyToneHz = mFXReverbSmoothedEarlyToneHz;
+    double smoothedLowCutHz = mFXReverbSmoothedLowCutHz;
+    double smoothedHighCutHz = mFXReverbSmoothedHighCutHz;
     size_t preDelayWriteIndex = mFXReverbPreDelayWriteIndex;
 
-    constexpr double kAllpassGain = 0.32;
-    constexpr double kWetGain = 0.55;
-    constexpr double kEarlyGain = 0.99;
-    constexpr double kPreDiffAllpassGain = 0.50;
-    constexpr std::array<double, 5> kEarlyTapGains = {0.90, 0.84, 0.70, 0.52, 0.30};
-    constexpr std::array<double, 4> kCombModRatesHz = {0.07, 0.11, 0.15, 0.19};
-    constexpr std::array<double, 4> kCombModDepthSamples = {0.4, 0.7, 1.0, 1.3};
-    std::array<double, 4> combModPhase = mFXReverbCombModPhase;
+    constexpr double kRoomWetGain = 0.44;
+    constexpr double kHallWetGain = 0.52;
+    constexpr double kRoomEarlyGain = 1.18;
+    constexpr double kHallEarlyGain = 1.04;
+    constexpr double kRoomEarlyDirect = 0.10;
+    constexpr double kHallEarlyDirect = 0.14;
+    constexpr double kRoomEarlyLevelBase = 1.08;
+    constexpr double kHallEarlyLevelBase = 1.02;
+    constexpr double kRoomPreDiffAllpassGain = 0.40;
+    constexpr double kHallPreDiffAllpassGain = 0.56;
+    constexpr double kRoomDecayScale = 0.62;
+    constexpr double kHallDecayScale = 1.45;
+    constexpr double kRoomCombFeedbackMax = 0.90;
+    constexpr double kHallCombFeedbackMax = 0.988;
+    constexpr double kRoomToneTilt = 1.00;
+    constexpr double kHallToneTilt = 0.92;
+    constexpr double kRoomCombDampTilt = 0.90;
+    constexpr double kHallCombDampTilt = 0.80;
+    constexpr double kRoomLateDiffusionGain = 0.16;
+    constexpr double kHallLateDiffusionGain = 0.23;
+    constexpr double kRoomLateInputGain = 0.32;
+    constexpr double kHallLateInputGain = 0.46;
+    constexpr double kHallExtraPreDelayMs = 6.0;
+    constexpr double kRoomOutputTrim = 1.00;
+    constexpr double kHallOutputTrim = 0.86;
+    constexpr std::array<double, 8> kRoomEarlyTapGains = {1.10, 0.92, 0.80, 0.66, 0.50, 0.36, 0.25, 0.16};
+    constexpr std::array<double, 8> kHallEarlyTapGains = {1.02, 0.86, 0.74, 0.60, 0.46, 0.34, 0.23, 0.15};
+    constexpr std::array<double, 8> kRoomCombModRatesHz = {0.07, 0.09, 0.11, 0.13, 0.15, 0.18, 0.21, 0.24};
+    constexpr std::array<double, 8> kHallCombModRatesHz = {0.025, 0.032, 0.039, 0.047, 0.056, 0.066, 0.078, 0.091};
+    constexpr std::array<double, 8> kRoomCombModDepthSamples = {0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.18, 0.22};
+    constexpr std::array<double, 8> kHallCombModDepthSamples = {0.22, 0.30, 0.38, 0.48, 0.58, 0.70, 0.84, 1.00};
+    std::array<double, 8> combModPhase = mFXReverbCombModPhase;
 
     for (size_t s = 0; s < numFrames; ++s)
     {
@@ -1383,18 +1486,53 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       smoothedDecaySeconds += decayAlpha * (targetDecaySeconds - smoothedDecaySeconds);
       smoothedPreDelaySamples += preDelayAlpha * (targetPreDelaySamples - smoothedPreDelaySamples);
       smoothedTone += toneAlphaParam * (targetTone - smoothedTone);
+      smoothedMode += modeAlpha * (targetMode - smoothedMode);
+      smoothedLowCutHz += cutAlphaParam * (targetLowCutHz - smoothedLowCutHz);
+      smoothedHighCutHz += cutAlphaParam * (targetHighCutHz - smoothedHighCutHz);
+      if (smoothedHighCutHz < smoothedLowCutHz + 20.0)
+        smoothedHighCutHz = std::min(maxCutHz, smoothedLowCutHz + 20.0);
+      const double hallAmount = std::clamp(smoothedMode, 0.0, 1.0);
+      const double roomAmount = 1.0 - hallAmount;
+      const double targetEarlyLevel = roomAmount * kRoomEarlyLevelBase + hallAmount * kHallEarlyLevelBase;
+      smoothedEarlyLevel += earlyLevelAlpha * (targetEarlyLevel - smoothedEarlyLevel);
+      const double targetEarlyToneHz =
+        roomAmount * (1700.0 + smoothedTone * 3600.0) + hallAmount * (1400.0 + smoothedTone * 3000.0);
+      smoothedEarlyToneHz += earlyToneAlphaParam * (targetEarlyToneHz - smoothedEarlyToneHz);
+      smoothedEarlyToneHz = std::clamp(smoothedEarlyToneHz, 900.0, 7000.0);
+      const double wetCoreGain = roomAmount * kRoomWetGain + hallAmount * kHallWetGain;
+      const double earlyGain = roomAmount * kRoomEarlyGain + hallAmount * kHallEarlyGain;
+      const double preDiffAllpassGain = roomAmount * kRoomPreDiffAllpassGain + hallAmount * kHallPreDiffAllpassGain;
+      const double effectiveDecaySeconds =
+        std::max(0.1, smoothedDecaySeconds * (roomAmount * kRoomDecayScale + hallAmount * kHallDecayScale));
+      const double combFeedbackMax = roomAmount * kRoomCombFeedbackMax + hallAmount * kHallCombFeedbackMax;
+      const double toneTilt = roomAmount * kRoomToneTilt + hallAmount * kHallToneTilt;
+      const double combDampTilt = roomAmount * kRoomCombDampTilt + hallAmount * kHallCombDampTilt;
+      const double lateDiffusionGain = roomAmount * kRoomLateDiffusionGain + hallAmount * kHallLateDiffusionGain;
+      const double lateInputGain = roomAmount * kRoomLateInputGain + hallAmount * kHallLateInputGain;
+      const double earlyDirectMix = roomAmount * kRoomEarlyDirect + hallAmount * kHallEarlyDirect;
+      const double modeOutputTrim = roomAmount * kRoomOutputTrim + hallAmount * kHallOutputTrim;
+      const double effectivePreDelaySamples = std::clamp(
+        smoothedPreDelaySamples + hallAmount * (kHallExtraPreDelayMs * 0.001 * sampleRate),
+        0.0,
+        static_cast<double>(mFXReverbPreDelayBufferSamples - 2));
       const double wetMix = std::pow(std::clamp(smoothedMix, 0.0, 1.0), 1.25);
-      const double dryMix = std::sqrt(std::max(0.0, 1.0 - wetMix * wetMix));
-      const double wetGain = 0.8 * wetMix;
-      const double toneCutoffHz = 1200.0 + smoothedTone * 10800.0;
+      const double dryMix = std::sqrt(std::max(0.0, 1.0 - wetMix));
+      const double wetGain = 1.5 * wetMix;
+      const double mixNormalize = 1.0 / std::max(1.0, dryMix + wetGain);
+      const double toneCutoffHz = std::clamp((2000.0 + smoothedTone * 12000.0) * toneTilt, 1000.0, 16000.0);
       const double toneAlpha = 1.0 - std::exp(-2.0 * kPi * toneCutoffHz / sampleRate);
-      const double combDampCutoffHz = 450.0 + smoothedTone * 4200.0;
+      const double combDampCutoffHz = std::clamp((900.0 + smoothedTone * 2500.0) * combDampTilt, 500.0, 4500.0);
       const double combDampAlpha = 1.0 - std::exp(-2.0 * kPi * combDampCutoffHz / sampleRate);
-      std::array<double, 4> combModOffset = {};
+      const double wetLowCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedLowCutHz / sampleRate);
+      const double wetHighCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedHighCutHz / sampleRate);
+      const double earlyToneAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedEarlyToneHz / sampleRate);
+      std::array<double, 8> combModOffset = {};
       for (size_t i = 0; i < combModOffset.size(); ++i)
       {
-        combModOffset[i] = kCombModDepthSamples[i] * std::sin(combModPhase[i]);
-        combModPhase[i] += 2.0 * kPi * kCombModRatesHz[i] / sampleRate;
+        const double combModDepth = roomAmount * kRoomCombModDepthSamples[i] + hallAmount * kHallCombModDepthSamples[i];
+        const double combModRateHz = roomAmount * kRoomCombModRatesHz[i] + hallAmount * kHallCombModRatesHz[i];
+        combModOffset[i] = combModDepth * std::sin(combModPhase[i]);
+        combModPhase[i] += 2.0 * kPi * combModRateHz / sampleRate;
         if (combModPhase[i] >= 2.0 * kPi)
           combModPhase[i] -= 2.0 * kPi;
       }
@@ -1409,14 +1547,22 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         preDelayBuffer[preDelayWriteIndex] = static_cast<sample>(dry);
 
         double early = 0.0;
-        for (size_t i = 0; i < kEarlyTapGains.size(); ++i)
+        for (size_t i = 0; i < kHallEarlyTapGains.size(); ++i)
         {
-          const size_t tapDelay = mFXReverbEarlyTapSamples[i] % preDelayBuffer.size();
-          const size_t tapIndex = (preDelayWriteIndex + preDelayBuffer.size() - tapDelay) % preDelayBuffer.size();
-          early += kEarlyTapGains[i] * static_cast<double>(preDelayBuffer[tapIndex]);
+          const size_t roomTapDelay = mFXReverbEarlyTapSamples[0][i] % preDelayBuffer.size();
+          const size_t hallTapDelay = mFXReverbEarlyTapSamples[1][i] % preDelayBuffer.size();
+          const size_t roomTapIndex = (preDelayWriteIndex + preDelayBuffer.size() - roomTapDelay) % preDelayBuffer.size();
+          const size_t hallTapIndex = (preDelayWriteIndex + preDelayBuffer.size() - hallTapDelay) % preDelayBuffer.size();
+          const double tapSample =
+            roomAmount * static_cast<double>(preDelayBuffer[roomTapIndex]) + hallAmount * static_cast<double>(preDelayBuffer[hallTapIndex]);
+          const double tapGain = roomAmount * kRoomEarlyTapGains[i] + hallAmount * kHallEarlyTapGains[i];
+          early += tapGain * tapSample;
         }
+        auto& earlyToneState = mFXReverbEarlyToneState[c];
+        earlyToneState += earlyToneAlpha * (early - earlyToneState);
+        const double earlyShaped = earlyToneState * smoothedEarlyLevel;
 
-        double preReadPos = static_cast<double>(preDelayWriteIndex) - smoothedPreDelaySamples;
+        double preReadPos = static_cast<double>(preDelayWriteIndex) - effectivePreDelaySamples;
         if (preReadPos < 0.0)
           preReadPos += static_cast<double>(mFXReverbPreDelayBufferSamples);
         const auto preReadIndex0 = static_cast<size_t>(preReadPos);
@@ -1436,8 +1582,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
           const size_t readIndex =
             (preDiffWriteIndex + preDiffBuffer.size() - (preDiffDelaySamples % preDiffBuffer.size())) % preDiffBuffer.size();
           const double delayed = static_cast<double>(preDiffBuffer[readIndex]);
-          const double out = -kPreDiffAllpassGain * lateInput + delayed;
-          preDiffBuffer[preDiffWriteIndex] = static_cast<sample>(lateInput + kPreDiffAllpassGain * out);
+          const double out = -preDiffAllpassGain * lateInput + delayed;
+          preDiffBuffer[preDiffWriteIndex] = static_cast<sample>(lateInput + preDiffAllpassGain * out);
           lateInput = out;
 
           ++preDiffWriteIndex;
@@ -1445,8 +1591,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
             preDiffWriteIndex = 0;
         }
 
+        std::array<double, 8> combOut = {};
         double combSum = 0.0;
-        for (size_t i = 0; i < 4; ++i)
+        for (size_t i = 0; i < combOut.size(); ++i)
         {
           auto& combBuffer = mFXReverbCombBuffer[c][i];
           if (combBuffer.empty())
@@ -1465,18 +1612,31 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
                                  + static_cast<double>(combBuffer[readIndex1]) * frac;
           auto& combDampState = mFXReverbCombDampState[c][i];
           combDampState += combDampAlpha * (delayed - combDampState);
-          const double delaySeconds = static_cast<double>(combDelaySamples) / sampleRate;
-          const double combFeedback =
-            std::clamp(std::pow(10.0, (-3.0 * delaySeconds) / std::max(0.1, smoothedDecaySeconds)), 0.0, 0.84);
-          combBuffer[combWriteIndex] = static_cast<sample>(lateInput + combFeedback * combDampState);
+          combOut[i] = combDampState;
           combSum += combDampState;
+        }
+
+        constexpr double kFDNHouseholderScale = 0.25; // 2 / 8
+        const double fdnInput = lateInput * lateInputGain;
+        for (size_t i = 0; i < combOut.size(); ++i)
+        {
+          auto& combBuffer = mFXReverbCombBuffer[c][i];
+          if (combBuffer.empty())
+            continue;
+          auto& combWriteIndex = mFXReverbCombWriteIndex[c][i];
+          const size_t combDelaySamples = mFXReverbCombDelaySamples[c][i];
+          const double delaySeconds = static_cast<double>(combDelaySamples) / sampleRate;
+          const double combFeedback = std::clamp(std::pow(10.0, (-3.0 * delaySeconds) / effectiveDecaySeconds), 0.0, combFeedbackMax);
+          const double mixed = kFDNHouseholderScale * combSum - combOut[i];
+          combBuffer[combWriteIndex] = static_cast<sample>(fdnInput + combFeedback * mixed);
 
           ++combWriteIndex;
           if (combWriteIndex >= combBuffer.size())
             combWriteIndex = 0;
         }
 
-        double wet = combSum * 0.25;
+        const double wet = combSum * 0.125;
+        double diffusedWet = wet;
         for (size_t i = 0; i < 2; ++i)
         {
           auto& allpassBuffer = mFXReverbAllpassBuffer[c][i];
@@ -1487,19 +1647,26 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
           const size_t readIndex =
             (allpassWriteIndex + allpassBuffer.size() - (allpassDelaySamples % allpassBuffer.size())) % allpassBuffer.size();
           const double delayed = static_cast<double>(allpassBuffer[readIndex]);
-          const double out = -kAllpassGain * wet + delayed;
-          allpassBuffer[allpassWriteIndex] = static_cast<sample>(wet + kAllpassGain * out);
-          wet = out;
+          const double out = -lateDiffusionGain * diffusedWet + delayed;
+          allpassBuffer[allpassWriteIndex] = static_cast<sample>(diffusedWet + lateDiffusionGain * out);
+          diffusedWet = out;
 
           ++allpassWriteIndex;
           if (allpassWriteIndex >= allpassBuffer.size())
             allpassWriteIndex = 0;
         }
 
-        mFXReverbToneState[c] += toneAlpha * (wet - mFXReverbToneState[c]);
-        const double tonedWet = mFXReverbToneState[c] * kWetGain;
-        const double earlyWet = early * kEarlyGain;
-        fxReverbPointers[c][s] = static_cast<sample>(dryMix * dry + wetGain * (tonedWet + earlyWet));
+        mFXReverbToneState[c] += toneAlpha * (diffusedWet - mFXReverbToneState[c]);
+        const double tonedWet = mFXReverbToneState[c] * wetCoreGain;
+        const double rawWet = tonedWet + earlyShaped * earlyGain;
+        auto& lowCutState = mFXReverbLowCutLPState[c];
+        auto& highCutState = mFXReverbHighCutLPState[c];
+        lowCutState += wetLowCutAlpha * (rawWet - lowCutState);
+        const double lowCutWet = rawWet - lowCutState;
+        highCutState += wetHighCutAlpha * (lowCutWet - highCutState);
+        const double earlyDirect = earlyShaped * earlyDirectMix;
+        fxReverbPointers[c][s] =
+          static_cast<sample>(mixNormalize * (dryMix * dry + wetGain * (modeOutputTrim * highCutState + earlyDirect)));
       }
 
       ++preDelayWriteIndex;
@@ -1511,6 +1678,11 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     mFXReverbSmoothedDecaySeconds = smoothedDecaySeconds;
     mFXReverbSmoothedPreDelaySamples = smoothedPreDelaySamples;
     mFXReverbSmoothedTone = smoothedTone;
+    mFXReverbSmoothedMode = smoothedMode;
+    mFXReverbSmoothedEarlyLevel = smoothedEarlyLevel;
+    mFXReverbSmoothedEarlyToneHz = smoothedEarlyToneHz;
+    mFXReverbSmoothedLowCutHz = smoothedLowCutHz;
+    mFXReverbSmoothedHighCutHz = smoothedHighCutHz;
     mFXReverbPreDelayWriteIndex = preDelayWriteIndex;
     mFXReverbCombModPhase = combModPhase;
   }
@@ -1543,10 +1715,11 @@ void NeuralAmpModeler::OnReset()
   const int maxBlockSize = GetBlockSize();
   constexpr double kFXDelayMaxSeconds = 2.0;
   constexpr double kFXReverbMaxPreDelaySeconds = 0.30;
-  constexpr std::array<int, 4> kFXReverbCombBaseDelay = {1493, 1789, 2053, 2399};
+  constexpr std::array<int, 8> kFXReverbCombBaseDelay = {1423, 1597, 1789, 1999, 2239, 2473, 2741, 3049};
   constexpr std::array<int, 2> kFXReverbPreDiffAllpassBaseDelay = {113, 337};
   constexpr std::array<int, 2> kFXReverbAllpassBaseDelay = {307, 503};
-  constexpr std::array<double, 5> kFXReverbEarlyTapMs = {0.0, 2.7, 5.1, 8.9, 14.7};
+  constexpr std::array<double, 8> kFXReverbRoomEarlyTapMs = {0.0, 1.6, 3.0, 4.7, 6.8, 9.6, 12.9, 16.4};
+  constexpr std::array<double, 8> kFXReverbHallEarlyTapMs = {0.0, 2.8, 5.2, 8.1, 11.6, 15.9, 21.0, 27.0};
   constexpr std::array<int, 10> kFXEQParamIdx = {
     kFXEQBand31Hz, kFXEQBand62Hz, kFXEQBand125Hz, kFXEQBand250Hz, kFXEQBand500Hz,
     kFXEQBand1kHz, kFXEQBand2kHz, kFXEQBand4kHz, kFXEQBand8kHz, kFXEQBand16kHz
@@ -1582,6 +1755,12 @@ void NeuralAmpModeler::OnReset()
     std::clamp(GetParam(kFXDelayTimeMs)->Value() * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
   mFXDelaySmoothedFeedback = std::clamp(GetParam(kFXDelayFeedback)->Value() * 0.01, 0.0, 0.80);
   mFXDelaySmoothedMix = std::clamp(GetParam(kFXDelayMix)->Value() * 0.01, 0.0, 1.0);
+  const double maxDelayCutHz = std::max(40.0, 0.45 * sampleRate);
+  mFXDelaySmoothedLowCutHz = std::clamp(GetParam(kFXDelayLowCutHz)->Value(), 20.0, maxDelayCutHz);
+  mFXDelaySmoothedHighCutHz =
+    std::clamp(std::max(GetParam(kFXDelayHighCutHz)->Value(), mFXDelaySmoothedLowCutHz + 20.0), 20.0, maxDelayCutHz);
+  mFXDelayLowCutLPState.fill(0.0);
+  mFXDelayHighCutLPState.fill(0.0);
 
   mFXReverbPreDelayBufferSamples = std::max<size_t>(
     2, static_cast<size_t>(std::ceil(kFXReverbMaxPreDelaySeconds * sampleRate)) + static_cast<size_t>(maxBlockSize) + 2);
@@ -1590,8 +1769,11 @@ void NeuralAmpModeler::OnReset()
   mFXReverbPreDelayWriteIndex = 0;
 
   const double reverbDelayScale = sampleRate / 44100.0;
-  for (size_t i = 0; i < kFXReverbEarlyTapMs.size(); ++i)
-    mFXReverbEarlyTapSamples[i] = static_cast<size_t>(std::llround(kFXReverbEarlyTapMs[i] * 0.001 * sampleRate));
+  for (size_t i = 0; i < kFXReverbRoomEarlyTapMs.size(); ++i)
+  {
+    mFXReverbEarlyTapSamples[0][i] = static_cast<size_t>(std::llround(kFXReverbRoomEarlyTapMs[i] * 0.001 * sampleRate));
+    mFXReverbEarlyTapSamples[1][i] = static_cast<size_t>(std::llround(kFXReverbHallEarlyTapMs[i] * 0.001 * sampleRate));
+  }
   for (size_t c = 0; c < kNumChannelsInternal; ++c)
   {
     for (size_t i = 0; i < kFXReverbPreDiffAllpassBaseDelay.size(); ++i)
@@ -1621,15 +1803,31 @@ void NeuralAmpModeler::OnReset()
     }
 
     mFXReverbToneState[c] = 0.0;
+    mFXReverbEarlyToneState[c] = 0.0;
     mFXReverbCombDampState[c].fill(0.0);
   }
-  mFXReverbCombModPhase = {0.0, 1.3, 2.6, 3.9};
+  mFXReverbCombModPhase = {0.0, 0.78, 1.57, 2.35, 3.14, 3.93, 4.71, 5.50};
 
   mFXReverbSmoothedMix = std::clamp(GetParam(kFXReverbMix)->Value() * 0.01, 0.0, 1.0);
   mFXReverbSmoothedDecaySeconds = std::clamp(GetParam(kFXReverbDecay)->Value(), 0.1, 10.0);
   mFXReverbSmoothedPreDelaySamples = std::clamp(
     GetParam(kFXReverbPreDelayMs)->Value() * 0.001 * sampleRate, 0.0, static_cast<double>(mFXReverbPreDelayBufferSamples - 2));
   mFXReverbSmoothedTone = std::clamp(GetParam(kFXReverbTone)->Value() * 0.01, 0.0, 1.0);
+  mFXReverbSmoothedMode = GetParam(kFXReverbMode)->Bool() ? 1.0 : 0.0;
+  const double roomAmount = 1.0 - std::clamp(mFXReverbSmoothedMode, 0.0, 1.0);
+  const double hallAmount = 1.0 - roomAmount;
+  constexpr double kInitRoomEarlyLevel = 1.10;
+  constexpr double kInitHallEarlyLevel = 0.96;
+  mFXReverbSmoothedEarlyLevel = roomAmount * kInitRoomEarlyLevel + hallAmount * kInitHallEarlyLevel;
+  const double roomEarlyToneHz = 1700.0 + mFXReverbSmoothedTone * 3600.0;
+  const double hallEarlyToneHz = 1400.0 + mFXReverbSmoothedTone * 3000.0;
+  mFXReverbSmoothedEarlyToneHz = roomAmount * roomEarlyToneHz + hallAmount * hallEarlyToneHz;
+  const double maxReverbCutHz = std::max(40.0, 0.45 * sampleRate);
+  mFXReverbSmoothedLowCutHz = std::clamp(GetParam(kFXReverbLowCutHz)->Value(), 20.0, maxReverbCutHz);
+  mFXReverbSmoothedHighCutHz =
+    std::clamp(std::max(GetParam(kFXReverbHighCutHz)->Value(), mFXReverbSmoothedLowCutHz + 20.0), 20.0, maxReverbCutHz);
+  mFXReverbLowCutLPState.fill(0.0);
+  mFXReverbHighCutLPState.fill(0.0);
   _UpdateLatency();
 }
 
@@ -1875,7 +2073,7 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       {
         if (auto* pFXDelayOnLED = pGraphics->GetControlWithTag(kCtrlTagFXDelayOnLED))
           pFXDelayOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        const int delayParams[] = {kFXDelayMix, kFXDelayTimeMs, kFXDelayFeedback};
+        const int delayParams[] = {kFXDelayMix, kFXDelayTimeMs, kFXDelayFeedback, kFXDelayLowCutHz, kFXDelayHighCutHz};
         for (const int delayParam : delayParams)
           if (auto* pControl = pGraphics->GetControlWithParamIdx(delayParam))
             pControl->SetDisabled(!active);
@@ -1885,7 +2083,8 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       {
         if (auto* pFXReverbOnLED = pGraphics->GetControlWithTag(kCtrlTagFXReverbOnLED))
           pFXReverbOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        const int reverbParams[] = {kFXReverbMix, kFXReverbDecay, kFXReverbPreDelayMs, kFXReverbTone};
+        const int reverbParams[] = {kFXReverbMix, kFXReverbDecay, kFXReverbPreDelayMs, kFXReverbTone,
+                                    kFXReverbLowCutHz, kFXReverbHighCutHz};
         for (const int reverbParam : reverbParams)
           if (auto* pControl = pGraphics->GetControlWithParamIdx(reverbParam))
             pControl->SetDisabled(!active);
