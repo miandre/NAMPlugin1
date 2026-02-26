@@ -1147,11 +1147,13 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   _ApplyDSPStaging();
   const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
   auto* activeToneStack = mToneStacks[activeSlot].get();
+  const bool ampBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
   const bool stompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
+  const bool cabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value() && !stompBypassed;
   const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed && (mStompModel != nullptr);
-  const bool toneStackActive = GetParam(kEQActive)->Value();
-  const bool modelActive = GetParam(kModelToggle)->Bool();
+  const bool toneStackActive = GetParam(kEQActive)->Value() && !ampBypassed;
+  const bool modelActive = GetParam(kModelToggle)->Bool() && !ampBypassed;
   const bool tunerActive = GetParam(kTunerActive)->Bool();
   const int transposeSemitones = static_cast<int>(std::lround(GetParam(kTransposeSemitones)->Value()));
   const double gateReleaseValue = GetParam(kNoiseGateReleaseMs)->Value() * 0.2;
@@ -1243,7 +1245,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** toneStackOutPointers = (toneStackActive && activeToneStack != nullptr)
                                     ? activeToneStack->Process(modelInputPointers, numChannelsInternal, nFrames)
                                     : modelInputPointers;
-  if (mMasterGain != 1.0)
+  if (!ampBypassed && mMasterGain != 1.0)
   {
     for (size_t c = 0; c < numChannelsInternal; ++c)
       for (size_t s = 0; s < numFrames; ++s)
@@ -1251,7 +1253,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   }
 
   sample** irPointers = toneStackOutPointers;
-  if (GetParam(kIRToggle)->Value())
+  if (GetParam(kIRToggle)->Value() && !cabBypassed)
   {
     const bool haveLeftIR = (mIR != nullptr);
     const bool haveRightIR = (mIRRight != nullptr);
