@@ -1171,7 +1171,11 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     if (tunerMonitorMode == 0)
     {
       for (size_t c = 0; c < numChannelsExternalOut; ++c)
+      {
+        if (outputs == nullptr || outputs[c] == nullptr)
+          continue;
         std::fill(outputs[c], outputs[c] + numFrames, 0.0f);
+      }
       std::feupdateenv(&fe_state);
       _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
       return;
@@ -3099,6 +3103,8 @@ void NeuralAmpModeler::_ProcessInput(iplug::sample** inputs, const size_t nFrame
   // We'll assume that the main processing is mono for now. We'll handle dual amps later.
   if (nChansOut != 1)
     return;
+  if (inputs == nullptr)
+    return;
 
   // On the standalone, we can probably assume that the user has plugged into only one input and they expect it to be
   // carried straight through. Don't apply any division over nChansIn because we're just "catching anything out there."
@@ -3110,28 +3116,41 @@ void NeuralAmpModeler::_ProcessInput(iplug::sample** inputs, const size_t nFrame
 #endif
   // Assume _PrepareBuffers() was already called
   for (size_t c = 0; c < nChansIn; c++)
+  {
+    if (inputs[c] == nullptr)
+      continue;
     for (size_t s = 0; s < nFrames; s++)
       if (c == 0)
         mInputArray[0][s] = gain * inputs[c][s];
       else
         mInputArray[0][s] += gain * inputs[c][s];
+  }
 }
 
 void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** outputs, const size_t nFrames,
                                       const size_t nChansIn, const size_t nChansOut)
 {
+  if (outputs == nullptr)
+    return;
   const double gain = mOutputGain;
   // Assume _PrepareBuffers() was already called
   if (nChansIn != 1)
   {
     for (auto cout = 0; cout < nChansOut; cout++)
+    {
+      if (outputs[cout] == nullptr)
+        continue;
       for (auto s = 0; s < nFrames; s++)
         outputs[cout][s] = 0.0;
+    }
     return;
   }
   // Broadcast the internal mono stream to all output channels.
   const size_t cin = 0;
   for (auto cout = 0; cout < nChansOut; cout++)
+  {
+    if (outputs[cout] == nullptr)
+      continue;
     for (auto s = 0; s < nFrames; s++)
 #ifdef APP_API // Ensure valid output to interface
       outputs[cout][s] = std::clamp(gain * inputs[cin][s], -1.0, 1.0);
@@ -3139,6 +3158,7 @@ void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** ou
       // values.
       outputs[cout][s] = gain * inputs[cin][s];
 #endif
+  }
 }
 
 void NeuralAmpModeler::_UpdateControlsFromModel()
@@ -3195,8 +3215,10 @@ void NeuralAmpModeler::_UpdateMeters(sample** inputPointer, sample** outputPoint
 {
   // Right now, we didn't specify MAXNC when we initialized these, so it's 1.
   const int nChansHack = 1;
-  mInputSender.ProcessBlock(inputPointer, (int)nFrames, kCtrlTagInputMeter, nChansHack);
-  mOutputSender.ProcessBlock(outputPointer, (int)nFrames, kCtrlTagOutputMeter, nChansHack);
+  if (inputPointer != nullptr && inputPointer[0] != nullptr)
+    mInputSender.ProcessBlock(inputPointer, (int)nFrames, kCtrlTagInputMeter, nChansHack);
+  if (outputPointer != nullptr && outputPointer[0] != nullptr)
+    mOutputSender.ProcessBlock(outputPointer, (int)nFrames, kCtrlTagOutputMeter, nChansHack);
 }
 
 // HACK

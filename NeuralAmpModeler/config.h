@@ -16,7 +16,9 @@
 #define SHARED_RESOURCES_SUBPATH "NeuralAmpModeler"
 
 #ifdef APP_API
-  #define PLUG_CHANNEL_IO "1-2"
+  // Standalone host opens max channel count from this list.
+  // Keep stereo input capability available for ASIO wrapper drivers that are unstable on mono input streams.
+  #define PLUG_CHANNEL_IO "1-2 2-2"
 #else
   #define PLUG_CHANNEL_IO "1-1 1-2 2-2"
 #endif
