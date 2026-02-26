@@ -1,8 +1,8 @@
 # AGENT_SESSION_SUMMARY.md
 
-Last updated: 2026-02-25
+Last updated: 2026-02-26
 
-Purpose: concise handoff for new agents so work can continue without replaying the full chat history.
+Purpose: concise handoff for new agents so work can continue without replaying full chat history.
 
 ## Read order for new agents
 1. `AGENTS.md`
@@ -10,98 +10,115 @@ Purpose: concise handoff for new agents so work can continue without replaying t
 3. `AGENT_SESSION_SUMMARY.md` (this file)
 
 ## Current repository state
-- Branch: `fx-section`
-- Working tree: clean
+- Branch: `main`
 - Remote: `origin` = `https://github.com/miandre/NAMPlugin1.git`
-- Branch point/commit of this session: `28d950c` (`Add FX section v1 with EQ, delay, and reverb`)
+- `main` is synced to `origin/main` at commit `6eeb81e`.
+- Working tree note: untracked local folder exists: `NeuralAmpModeler/resources/tmpLoad/` (not committed, not part of product features).
 
-## Session scope completed (FX section v1)
-- Added full FX section UI + parameter wiring on the `FX` page:
-  - 10-band graphic EQ sliders
-  - EQ on/off button + LED
-  - Delay controls (`DRY/WET`, `TIME`, `FDBK`) + on/off button + LED
-  - Reverb controls (`DRY/WET`, `DECAY`, `PRE-DLY`, `TONE`) + on/off button + LED
-- Added top-nav section show/hide integration for all `FX_CONTROLS`.
-- Set module defaults to OFF for new instances:
-  - `kFXEQActive = false`
-  - `kFXDelayActive = false`
-  - `kFXReverbActive = false`
+## Merged work summary
+- `28d950c`: FX section v1 (EQ/Delay/Reverb UI + DSP).
+- `4d867e5`: FX improvements and reverb/delay voicing refinements.
+- `f38e7d3`: registered new amp background bitmaps (`Amp1/2/3Background`).
+- `d64edad` + `89bb8c2`: settings page/layout migration + 3-slot amp UI behavior.
+- `6eeb81e`: amp-slot state separation and switch/model activation fixes.
 
-## DSP implementation status
-### EQ
-- 10 fixed bands implemented post-cab (after user HPF/LPF), before DC blocker.
-- Biquad peaking cascade with smoothed gains.
-- Added EQ output compensation knob:
-  - Parameter: `kFXEQOutputGain` (`-18 dB .. +18 dB`)
-  - UI label: `OUT` (right-side placeholder in EQ rack)
-  - Applied as smoothed post-EQ gain.
-
-### Delay
-- Implemented as post-EQ stage.
-- Preallocated circular buffer in `OnReset()` (no RT allocations).
-- Delay uses fractional read interpolation.
-- Mix behavior changed to amount style (dry stays unity; wet added by mix).
-- Time smoothing changed to per-sample to reduce zipper/glitch artifacts.
-- Feedback capped to safer range:
-  - Param max changed to `80%`
-  - Runtime clamp `<= 0.80`
-
-### Reverb (algorithmic v1)
-- Implemented as post-delay stage.
-- Preallocated state in `OnReset()`:
-  - pre-delay line
-  - 4 comb lines
-  - 2 allpass lines
-- Added additional shaping/refinement:
-  - Hybrid dry/wet law (not strict linear crossfade)
-  - Comb feedback damping
-  - Subtle comb modulation
-  - Retuned comb/allpass delay sets
-  - Early reflections taps
-  - Pre-diffusion allpass pair
-  - Write-before-read correction in pre-delay path to improve `PreDelay=0` onset feel
-- Latest tuning pass made tails smoother/lusher by reducing metallic character:
-  - lower modulation depth/rates
-  - lower comb feedback max
-  - darker damping slope
-  - softer diffusion gains
-
-## Important files touched
+## Handover A: FX section changes
+Files:
 - `NeuralAmpModeler/NeuralAmpModeler.h`
 - `NeuralAmpModeler/NeuralAmpModeler.cpp`
 
-## Key conventions kept
-- Audio-thread safety respected:
-  - no allocations/locks/I/O/logging in `ProcessBlock()`
-  - heavy memory setup done in `OnReset()`
-- Parameter enum additions were append-only for serialization safety.
-- UI control grouping maintained (`FX_CONTROLS`) for section visibility control.
+Current FX params (append-only enum additions are already in place):
+- EQ: `kFXEQActive`, `kFXEQBand31Hz..kFXEQBand16kHz`, `kFXEQOutputGain`.
+- Delay: `kFXDelayActive`, `kFXDelayMix`, `kFXDelayTimeMs`, `kFXDelayFeedback`, `kFXDelayLowCutHz`, `kFXDelayHighCutHz`.
+- Reverb: `kFXReverbActive`, `kFXReverbMix`, `kFXReverbDecay`, `kFXReverbPreDelayMs`, `kFXReverbTone`, `kFXReverbLowCutHz`, `kFXReverbHighCutHz`, `kFXReverbMode` (room/hall style switch).
 
-## Known follow-up opportunities
-- Optional `Room/Hall` reverb mode switch with parameterized delay/damping presets.
-- Optional delay `HiCut` control in feedback path.
-- Optional output-level normalization helper for aggressive EQ curves.
-- Broader listening pass in Release standalone to finalize voicing.
+FX chain location in `ProcessBlock()` (mono internal path):
+1. user HPF/LPF (post-cab filters)
+2. FX EQ
+3. FX Delay
+4. FX Reverb
+5. DC blocker HPF
+
+Implementation notes:
+- Delay and reverb allocate buffers/state in `OnReset()` only.
+- No heap allocation/locks/I/O/logging in audio callback paths.
+- Delay uses fractional reads and smoothing.
+- Reverb is an algorithmic mono design with early reflections, pre-diffusion, FDN-style late network, damping/modulation, and room/hall-dependent voicing constants.
+
+## Handover B: UI layout changes
+Files:
+- `NeuralAmpModeler/NeuralAmpModeler.cpp`
+- `NeuralAmpModeler/NeuralAmpModeler.h`
+- `NeuralAmpModeler/NeuralAmpModelerControls.h`
+- `NeuralAmpModeler/config.h`
+- `NeuralAmpModeler/resources/main.rc`
+
+What changed:
+- Settings page now hosts model pickers for Amp 1, Amp 2, Amp 3, and Stomp.
+- Amp/stomp model picker controls were moved out of page-local placement into settings page child controls.
+- Calibration controls were repositioned in settings layout (under output mode area).
+- Footer amp selector now has 3 slots (`kCtrlTagAmpSlot1/2/3`) on amp page.
+- Main amp background switches by active slot via `kCtrlTagMainBackground`:
+  - slot 1 -> `Amp1Background`
+  - slot 2 -> `Amp2Background` (default startup)
+  - slot 3 -> `Amp3Background`
+- File browser UX cleanup: clear (`X`) behavior is retained and globe/open behavior was removed from the picker UX.
+
+## Handover C: amp separation (runtime behavior)
+Files:
+- `NeuralAmpModeler/NeuralAmpModeler.h`
+- `NeuralAmpModeler/NeuralAmpModeler.cpp`
+
+What is separated per amp slot at runtime:
+- Slot model path (`mAmpNAMPaths[3]`).
+- Slot amp state (`AmpSlotState`): model toggle, EQ active, pre gain, bass/mid/treble/presence/depth, master.
+- Slot tone stack instance (`mToneStacks[3]`) and per-slot tone params.
+
+Key methods:
+- `_SelectAmpSlot(int)`
+- `_CaptureAmpSlotState(int)`
+- `_ApplyAmpSlotState(int)`
+- `_ApplyAmpSlotStateToToneStack(int)`
+- `_ApplyCurrentAmpParamsToActiveToneStack()`
+
+Behavior details:
+- Slot switch captures old slot state, stages/clears incoming slot model, then applies incoming slot state.
+- This order avoids audible old-model/new-knob mismatch during switch.
+- `modelToggleTouched` logic prevents unintended bypass for slots with model paths.
+- Small de-click smoothing on slot switch is enabled (`kAmpSlotSwitchDeClickSamples`).
+
+Important limitation:
+- Runtime slot separation works for live switching.
+- Full per-slot persistence in plugin serialized state is not fully implemented yet; serialization still stores legacy single `NAMPath` (`mNAMPath`) plus IR paths.
 
 ## Verification reminders
-- Validate audio/perf in `Release|x64` only.
-- Run standalone with `Ctrl+F5` (not under debugger) for real DSP behavior.
-- Confirm top-nav bypass/section visibility before diagnosing DSP.
+- Validate in `Release|x64` only.
+- Run standalone via `Ctrl+F5` in Visual Studio (not under debugger for DSP judgments).
+- User preference: do not run builds from agent unless explicitly asked.
 
-## Startup prompt for next agent (copy/paste)
-You are continuing work in `D:\\Dev\\NAMPlugin` on branch `fx-section`.
+## Starter prompt for a new agent (copy/paste)
+You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
 
-Read in order:
+Read first, in this exact order:
 1) `AGENTS.md`
 2) `SKILLS.md`
 3) `AGENT_SESSION_SUMMARY.md`
 
-Current status:
-- FX section v1 is implemented (EQ/Delay/Reverb UI + DSP).
-- Latest work includes EQ output gain compensation knob and multiple delay/reverb voicing refinements.
-- Working tree should be clean.
+Then read these implementation files:
+4) `NeuralAmpModeler/NeuralAmpModeler.h` (params, ctrl tags, slot state structs)
+5) `NeuralAmpModeler/NeuralAmpModeler.cpp` (UI layout, slot switching, DSP chain)
+6) `NeuralAmpModeler/NeuralAmpModelerControls.h` (file browser/picker behavior)
+7) `NeuralAmpModeler/Unserialization.cpp` (current serialization limits)
+8) `NeuralAmpModeler/config.h` and `NeuralAmpModeler/resources/main.rc` (bitmap/resource registration)
 
-Your task:
-- First, map current FX signal chain and confirm exact stage order + parameter mappings (files/symbols only, concise).
-- Then propose a minimal next patch (one feature only), with RT-safety notes.
-- Keep diffs small, append-only for params, and avoid unrelated refactors.
+Current status:
+- FX section is implemented and tuned (EQ/Delay/Reverb, room/hall mode, low/high cuts).
+- Settings page contains 3 amp pickers + stomp picker.
+- Amp footer selects slot, background, and corresponding model.
+- Runtime per-slot amp controls are separated and switching behavior is stabilized.
+
+Task style requirements:
+- Propose minimal diffs first.
+- Keep parameter enum additions append-only.
+- Preserve audio-thread safety (no alloc/locks/I/O/logging in callback path).
+- Do not run builds unless explicitly requested by user.
