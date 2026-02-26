@@ -20,8 +20,8 @@
 
 
 const int kNumPresets = 1;
-// The plugin is mono inside
-constexpr size_t kNumChannelsInternal = 1;
+// Mono core path with stereo-capable post-cab processing/output bus.
+constexpr size_t kNumChannelsInternal = 2;
 
 class NAMSender : public iplug::IPeakAvgSender<>
 {
@@ -447,7 +447,7 @@ private:
   recursive_linear_filter::HighPass mUserHighPass2;
   recursive_linear_filter::LowPass mUserLowPass1;
   recursive_linear_filter::LowPass mUserLowPass2;
-  // Post-IR FX EQ (10-band peaking cascade, mono internal path)
+  // Post-IR FX EQ (10-band peaking cascade, stereo internal bus)
   std::array<double, 10> mFXEQB0 = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
   std::array<double, 10> mFXEQB1 = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   std::array<double, 10> mFXEQB2 = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
@@ -455,8 +455,8 @@ private:
   std::array<double, 10> mFXEQA2 = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   std::array<double, 10> mFXEQSmoothedGainDB = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   double mFXEQSmoothedOutputGain = 1.0;
-  std::array<std::array<double, 10>, kNumChannelsInternal> mFXEQZ1 = {{{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}}};
-  std::array<std::array<double, 10>, kNumChannelsInternal> mFXEQZ2 = {{{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}}};
+  std::array<std::array<double, 10>, kNumChannelsInternal> mFXEQZ1 = {};
+  std::array<std::array<double, 10>, kNumChannelsInternal> mFXEQZ2 = {};
   // Post-IR FX delay (preallocated in OnReset, no allocations in audio thread)
   std::array<std::vector<iplug::sample>, kNumChannelsInternal> mFXDelayBuffer;
   size_t mFXDelayBufferSamples = 1;

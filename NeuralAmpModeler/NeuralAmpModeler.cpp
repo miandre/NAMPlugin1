@@ -1132,6 +1132,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 {
   const size_t numChannelsExternalIn = (size_t)NInChansConnected();
   const size_t numChannelsExternalOut = (size_t)NOutChansConnected();
+  const size_t numChannelsMonoCore = 1;
   const size_t numChannelsInternal = kNumChannelsInternal;
   const size_t numFrames = (size_t)nFrames;
   const double sampleRate = GetSampleRate();
@@ -1143,7 +1144,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
   _PrepareBuffers(numChannelsInternal, numFrames);
   // Input is collapsed to mono in preparation for the NAM.
-  _ProcessInput(inputs, numFrames, numChannelsExternalIn, numChannelsInternal);
+  _ProcessInput(inputs, numFrames, numChannelsExternalIn, numChannelsMonoCore);
   _ApplyDSPStaging();
   const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
   auto* activeToneStack = mToneStacks[activeSlot].get();
@@ -1177,15 +1178,15 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         std::fill(outputs[c], outputs[c] + numFrames, 0.0f);
       }
       std::feupdateenv(&fe_state);
-      _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
+      _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsMonoCore, numChannelsExternalOut);
       return;
     }
     if (tunerMonitorMode == 1)
     {
       // Clean bypass while tuning, using post-input-gain mono signal.
       std::feupdateenv(&fe_state);
-      _ProcessOutput(mInputPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
-      _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
+      _ProcessOutput(mInputPointers, outputs, numFrames, numChannelsMonoCore, numChannelsExternalOut);
+      _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsMonoCore, numChannelsExternalOut);
       return;
     }
     // tunerMonitorMode == 2 -> fall through to full processing path.
@@ -1208,12 +1209,12 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     const dsp::noise_gate::TriggerParams triggerParams(time, threshold, ratio, openTime, holdTime, closeTime);
     mNoiseGateTrigger.SetParams(triggerParams);
     mNoiseGateTrigger.SetSampleRate(sampleRate);
-    triggerOutput = mNoiseGateTrigger.Process(mInputPointers, numChannelsInternal, numFrames);
+    triggerOutput = mNoiseGateTrigger.Process(mInputPointers, numChannelsMonoCore, numFrames);
   }
   mNoiseGateIsAttenuating.store(noiseGateActive && mNoiseGateTrigger.IsAttenuating(10.0), std::memory_order_relaxed);
 
   sample** modelInputPointers =
-    noiseGateActive ? mNoiseGateGain.Process(triggerOutput, numChannelsInternal, numFrames) : triggerOutput;
+    noiseGateActive ? mNoiseGateGain.Process(triggerOutput, numChannelsMonoCore, numFrames) : triggerOutput;
 
   if (boostEnabled)
   {
@@ -1224,7 +1225,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
   if (boostEnabled && boostLevelGain != 1.0)
   {
-    for (size_t c = 0; c < numChannelsInternal; ++c)
+    for (size_t c = 0; c < numChannelsMonoCore; ++c)
       for (size_t s = 0; s < numFrames; ++s)
         modelInputPointers[c][s] *= boostLevelGain;
   }
@@ -1233,7 +1234,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   {
     if (preModelGain != 1.0)
     {
-      for (size_t c = 0; c < numChannelsInternal; ++c)
+      for (size_t c = 0; c < numChannelsMonoCore; ++c)
         for (size_t s = 0; s < numFrames; ++s)
           modelInputPointers[c][s] *= preModelGain;
     }
@@ -1243,42 +1244,58 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   }
   else
   {
-    _FallbackDSP(modelInputPointers, mOutputPointers, numChannelsInternal, numFrames);
+    _FallbackDSP(modelInputPointers, mOutputPointers, numChannelsMonoCore, numFrames);
     modelInputPointers = mOutputPointers;
   }
   sample** toneStackOutPointers = (toneStackActive && activeToneStack != nullptr)
-                                    ? activeToneStack->Process(modelInputPointers, numChannelsInternal, nFrames)
+                                    ? activeToneStack->Process(modelInputPointers, numChannelsMonoCore, nFrames)
                                     : modelInputPointers;
   if (!ampBypassed && mMasterGain != 1.0)
   {
-    for (size_t c = 0; c < numChannelsInternal; ++c)
+    for (size_t c = 0; c < numChannelsMonoCore; ++c)
       for (size_t s = 0; s < numFrames; ++s)
         toneStackOutPointers[c][s] *= mMasterGain;
   }
 
-  sample** irPointers = toneStackOutPointers;
+  auto copyMonoToStereo = [this, numFrames](sample** monoPointers) {
+    if (monoPointers == nullptr || monoPointers[0] == nullptr)
+      return;
+    for (size_t s = 0; s < numFrames; ++s)
+    {
+      const sample monoSample = monoPointers[0][s];
+      mOutputArray[0][s] = monoSample;
+      mOutputArray[1][s] = monoSample;
+    }
+  };
+
+  sample** irPointers = mOutputPointers;
+  copyMonoToStereo(toneStackOutPointers);
   if (GetParam(kIRToggle)->Value() && !cabBypassed)
   {
     const bool haveLeftIR = (mIR != nullptr);
     const bool haveRightIR = (mIRRight != nullptr);
     if (haveLeftIR && haveRightIR)
     {
-      sample** irLeftPointers = mIR->Process(toneStackOutPointers, numChannelsInternal, numFrames);
-      sample** irRightPointers = mIRRight->Process(toneStackOutPointers, numChannelsInternal, numFrames);
+      sample** irLeftPointers = mIR->Process(toneStackOutPointers, numChannelsMonoCore, numFrames);
+      sample** irRightPointers = mIRRight->Process(toneStackOutPointers, numChannelsMonoCore, numFrames);
       const double blend = GetParam(kCabIRBlend)->Value() * 0.01;
       const double leftGain = 1.0 - blend;
       const double rightGain = blend;
       for (size_t s = 0; s < numFrames; ++s)
-        mOutputArray[0][s] = leftGain * irLeftPointers[0][s] + rightGain * irRightPointers[0][s];
-      irPointers = mOutputPointers;
+      {
+        const sample irLeft = irLeftPointers[0][s];
+        const sample irRight = irRightPointers[0][s];
+        mOutputArray[0][s] = static_cast<sample>(leftGain * irLeft + rightGain * irRight);
+        mOutputArray[1][s] = static_cast<sample>(leftGain * irRight + rightGain * irLeft);
+      }
     }
     else if (haveLeftIR)
     {
-      irPointers = mIR->Process(toneStackOutPointers, numChannelsInternal, numFrames);
+      copyMonoToStereo(mIR->Process(toneStackOutPointers, numChannelsMonoCore, numFrames));
     }
     else if (haveRightIR)
     {
-      irPointers = mIRRight->Process(toneStackOutPointers, numChannelsInternal, numFrames);
+      copyMonoToStereo(mIRRight->Process(toneStackOutPointers, numChannelsMonoCore, numFrames));
     }
   }
 
@@ -1906,7 +1923,7 @@ void NeuralAmpModeler::OnReset()
       mToneStacks[slotIndex]->Reset(sampleRate, maxBlockSize);
     _ApplyAmpSlotStateToToneStack(slotIndex);
   }
-  // Pre-size internal mono buffers to the current host max block size.
+  // Pre-size internal stereo-capable buffers to the current host max block size.
   // ProcessBlock() should then only write/clear active frames.
   _PrepareBuffers(kNumChannelsInternal, (size_t)maxBlockSize);
   for (size_t band = 0; band < mFXEQSmoothedGainDB.size(); ++band)
@@ -3043,7 +3060,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
 
 size_t NeuralAmpModeler::_GetBufferNumChannels() const
 {
-  // Assumes input=output (no mono->stereo effects)
+  // Assumes input and output internal buses use the same channel count.
   return mInputArray.size();
 }
 
@@ -3100,10 +3117,12 @@ void NeuralAmpModeler::_PrepareIOPointers(const size_t numChannels)
 void NeuralAmpModeler::_ProcessInput(iplug::sample** inputs, const size_t nFrames, const size_t nChansIn,
                                      const size_t nChansOut)
 {
-  // We'll assume that the main processing is mono for now. We'll handle dual amps later.
-  if (nChansOut != 1)
+  // Mono core ingest for the amp chain.
+  if (nChansOut < 1)
     return;
   if (inputs == nullptr)
+    return;
+  if (nChansIn == 0)
     return;
 
   // On the standalone, we can probably assume that the user has plugged into only one input and they expect it to be
@@ -3133,31 +3152,79 @@ void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** ou
   if (outputs == nullptr)
     return;
   const double gain = mOutputGain;
+
+  auto writeSample = [gain](sample inputSample) {
+#ifdef APP_API // Ensure valid output to interface
+    return static_cast<sample>(std::clamp(gain * inputSample, -1.0, 1.0));
+#else // In a DAW, other things may come next and should be able to handle large
+      // values.
+    return static_cast<sample>(gain * inputSample);
+#endif
+  };
+
   // Assume _PrepareBuffers() was already called
-  if (nChansIn != 1)
+  if (nChansIn == 0 || inputs == nullptr || inputs[0] == nullptr)
   {
-    for (auto cout = 0; cout < nChansOut; cout++)
+    for (size_t cout = 0; cout < nChansOut; ++cout)
     {
       if (outputs[cout] == nullptr)
         continue;
-      for (auto s = 0; s < nFrames; s++)
+      for (size_t s = 0; s < nFrames; ++s)
         outputs[cout][s] = 0.0;
     }
     return;
   }
-  // Broadcast the internal mono stream to all output channels.
-  const size_t cin = 0;
-  for (auto cout = 0; cout < nChansOut; cout++)
+
+  if (nChansIn == 1)
+  {
+    // Broadcast internal mono stream to all output channels.
+    for (size_t cout = 0; cout < nChansOut; ++cout)
+    {
+      if (outputs[cout] == nullptr)
+        continue;
+      for (size_t s = 0; s < nFrames; ++s)
+        outputs[cout][s] = writeSample(inputs[0][s]);
+    }
+    return;
+  }
+
+  if (nChansOut == 1)
+  {
+    if (outputs[0] == nullptr)
+      return;
+
+    // Downmix internal stereo bus to mono output.
+    for (size_t s = 0; s < nFrames; ++s)
+    {
+      double mix = 0.0;
+      size_t activeChannels = 0;
+      for (size_t cin = 0; cin < nChansIn; ++cin)
+      {
+        if (inputs[cin] == nullptr)
+          continue;
+        mix += inputs[cin][s];
+        ++activeChannels;
+      }
+      const sample monoSample = (activeChannels > 0) ? static_cast<sample>(mix / static_cast<double>(activeChannels)) : 0.0f;
+      outputs[0][s] = writeSample(monoSample);
+    }
+    return;
+  }
+
+  // Map each output channel to matching internal channel (wrap for extra outputs).
+  for (size_t cout = 0; cout < nChansOut; ++cout)
   {
     if (outputs[cout] == nullptr)
       continue;
-    for (auto s = 0; s < nFrames; s++)
-#ifdef APP_API // Ensure valid output to interface
-      outputs[cout][s] = std::clamp(gain * inputs[cin][s], -1.0, 1.0);
-#else // In a DAW, other things may come next and should be able to handle large
-      // values.
-      outputs[cout][s] = gain * inputs[cin][s];
-#endif
+    const size_t cin = cout % nChansIn;
+    if (inputs[cin] == nullptr)
+    {
+      for (size_t s = 0; s < nFrames; ++s)
+        outputs[cout][s] = 0.0;
+      continue;
+    }
+    for (size_t s = 0; s < nFrames; ++s)
+      outputs[cout][s] = writeSample(inputs[cin][s]);
   }
 }
 
