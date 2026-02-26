@@ -31,6 +31,8 @@ constexpr double kPi = 3.14159265358979323846;
 
 namespace
 {
+constexpr int kAmpSlotSwitchDeClickSamples = 96;
+
 struct AsymmetricPreGainShape : public IParam::Shape
 {
   IParam::Shape* Clone() const override { return new AsymmetricPreGainShape(*this); }
@@ -239,7 +241,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     const auto gearSVG = pGraphics->LoadSVG(GEAR_FN);
     const auto fileSVG = pGraphics->LoadSVG(FILE_FN);
-    const auto globeSVG = pGraphics->LoadSVG(GLOBE_ICON_FN);
     const auto crossSVG = pGraphics->LoadSVG(CLOSE_BUTTON_FN);
     const auto rightArrowSVG = pGraphics->LoadSVG(RIGHT_ARROW_FN);
     const auto leftArrowSVG = pGraphics->LoadSVG(LEFT_ARROW_FN);
@@ -252,7 +253,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto tunerActiveSVG = pGraphics->LoadSVG(TUNER_ACTIVE_SVG_FN);
     const auto outerKnobBackgroundSVG = pGraphics->LoadSVG(FLATKNOBBACKGROUND_SVG_FN);
 
-    const auto backgroundBitmap = pGraphics->LoadBitmap(BACKGROUND_FN);
+    const auto amp2BackgroundBitmap = pGraphics->LoadBitmap(AMP2BACKGROUND_FN);
     const auto settingsBackgroundBitmap = pGraphics->LoadBitmap(SETTINGSBACKGROUND_FN);
     const auto fileBackgroundBitmap = pGraphics->LoadBitmap(FILEBACKGROUND_FN);
     const auto inputLevelBackgroundBitmap = pGraphics->LoadBitmap(INPUTLEVELBACKGROUND_FN);
@@ -489,9 +490,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float settingsLoaderLeft = settingsInnerArea.L + 22.0f;
     const float settingsLoaderRight = settingsLoaderLeft + kModelPickerWidth;
     const float settingsLoaderTop = settingsInnerArea.T + 108.0f;
-    const auto settingsAmpModelArea =
+    const auto settingsAmpModelArea1 =
       IRECT(settingsLoaderLeft, settingsLoaderTop, settingsLoaderRight, settingsLoaderTop + kModelPickerHeight);
-    const auto settingsStompModelArea = settingsAmpModelArea.GetTranslated(0.0f, 56.0f);
+    const auto settingsAmpModelArea2 = settingsAmpModelArea1.GetTranslated(0.0f, 56.0f);
+    const auto settingsAmpModelArea3 = settingsAmpModelArea2.GetTranslated(0.0f, 56.0f);
+    const auto settingsStompModelArea = settingsAmpModelArea3.GetTranslated(0.0f, 56.0f);
     const float tunerPanelWidth = 700.0f;
     const float tunerPanelHeight = 150.0f;
     const float tunerPanelTop = topUtilityRowArea.B + 90.0f;
@@ -591,24 +594,38 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       topSideMeterTop + topSideMeterHeight);
 
     // Model loader button
-    auto loadModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
+    auto loadAmpModelForSlot = [this](const int slotIndex, const int ctrlTag, const WDL_String& fileName) {
       if (fileName.GetLength())
       {
-        // Sets mNAMPath and mStagedNAM
-        const std::string msg = _StageModel(fileName);
-        // TODO error messages like the IR loader.
-        if (msg.size())
+        if (mAmpSelectorIndex == slotIndex)
         {
-          std::stringstream ss;
-          ss << "Failed to load NAM model. Message:\n\n" << msg;
-          _ShowMessageBox(GetUI(), ss.str().c_str(), "Failed to load model!", kMB_OK);
-          GetParam(kModelToggle)->Set(0.0);
+          const std::string msg = _StageModel(fileName, slotIndex, ctrlTag);
+          if (msg.size())
+          {
+            std::stringstream ss;
+            ss << "Failed to load NAM model. Message:\n\n" << msg;
+            _ShowMessageBox(GetUI(), ss.str().c_str(), "Failed to load model!", kMB_OK);
+            GetParam(kModelToggle)->Set(0.0);
+          }
+          else
+            GetParam(kModelToggle)->Set(1.0);
+          SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
         }
         else
-          GetParam(kModelToggle)->Set(1.0);
-        SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
-        std::cout << "Loaded: " << fileName.Get() << std::endl;
+        {
+          mAmpNAMPaths[slotIndex] = fileName;
+          SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadedModel, fileName.GetLength(), fileName.Get());
+        }
       }
+    };
+    auto loadModelCompletionHandlerSlot1 = [loadAmpModelForSlot](const WDL_String& fileName, const WDL_String&) {
+      loadAmpModelForSlot(0, kCtrlTagModelFileBrowser, fileName);
+    };
+    auto loadModelCompletionHandlerSlot2 = [loadAmpModelForSlot](const WDL_String& fileName, const WDL_String&) {
+      loadAmpModelForSlot(1, kCtrlTagModelFileBrowser2, fileName);
+    };
+    auto loadModelCompletionHandlerSlot3 = [loadAmpModelForSlot](const WDL_String& fileName, const WDL_String&) {
+      loadAmpModelForSlot(2, kCtrlTagModelFileBrowser3, fileName);
     };
 
     // IR loader button
@@ -664,7 +681,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       }
     };
 
-    pGraphics->AttachControl(new NAMBackgroundBitmapControl(b, BACKGROUND_FN, backgroundBitmap), kCtrlTagMainBackground);
+    pGraphics->AttachControl(new NAMBackgroundBitmapControl(b, AMP2BACKGROUND_FN, amp2BackgroundBitmap), kCtrlTagMainBackground);
     pGraphics->AttachControl(new IBitmapControl(b, linesBitmap));
     // Subtle utility-zone overlays to anchor top and footer controls visually.
     const IColor topBarOverlayColor = IColor(72, 6, 6, 8);
@@ -680,13 +697,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto topUtilityBottomSeparatorArea = IRECT(contentArea.L, topUtilityRowArea.B, contentArea.R, topUtilityRowArea.B + 1.0f);
     pGraphics->AttachControl(new IPanelControl(topUtilityBottomSeparatorArea, separatorColor));
 
-#ifdef NAM_PICK_DIRECTORY
-    const std::string defaultNamFileString = "Select model directory...";
-#else
-    const std::string defaultNamFileString = "Select model...";
-#endif
     // Getting started page listing additional resources
-    const char* const getUrl = "https://www.neuralampmodeler.com/users#comp-marb84o5";
     pGraphics->AttachControl(new NAMTunerDisplayControl(tunerReadoutArea), kCtrlTagTunerReadout);
     pGraphics->AttachControl(
       new NAMTunerMonitorControl(tunerMonitorArea, kTunerMonitorMode, utilityStyle),
@@ -805,35 +816,31 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle), kCtrlTagIRToggle);
     pGraphics->AttachControl(new NAMFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Select cab IR L...", "wav",
                                                        loadIRLeftCompletionHandler, utilityStyle, fileSVG, crossSVG,
-                                                       leftArrowSVG, rightArrowSVG, fileBackgroundBitmap, globeSVG,
-                                                       "Get IRs", getUrl),
+                                                       leftArrowSVG, rightArrowSVG, fileBackgroundBitmap),
                              kCtrlTagIRFileBrowserLeft);
     pGraphics->AttachControl(
       new NAMFileBrowserControl(irRightArea, kMsgTagClearIRRight, "Select cab IR R...", "wav",
-                                 loadIRRightCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
-                                 fileBackgroundBitmap, globeSVG, "Get IRs", getUrl),
+                                loadIRRightCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap),
       kCtrlTagIRFileBrowserRight);
     pGraphics->AttachControl(new NAMBlendSliderControl(cabBlendArea, kCabIRBlend, utilityStyle));
     pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot1Area, ampActiveSVG, ampActiveSVG, ampActiveSVG,
                                                    [this]() {
-                                                     mAmpSelectorIndex = 0;
-                                                     _RefreshTopNavControls();
+                                                     _SelectAmpSlot(0);
                                                    },
                                                    {}),
                              kCtrlTagAmpSlot1)
       ->SetTooltip("Amp Slot 1");
     pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot2Area, ampActiveSVG, ampActiveSVG, ampActiveSVG,
                                                    [this]() {
-                                                     mAmpSelectorIndex = 1;
-                                                     _RefreshTopNavControls();
+                                                     _SelectAmpSlot(1);
                                                    },
                                                    {}),
                              kCtrlTagAmpSlot2)
       ->SetTooltip("Amp Slot 2");
     pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot3Area, ampActiveSVG, ampActiveSVG, ampActiveSVG,
                                                    [this]() {
-                                                     mAmpSelectorIndex = 2;
-                                                     _RefreshTopNavControls();
+                                                     _SelectAmpSlot(2);
                                                    },
                                                    {}),
                              kCtrlTagAmpSlot3)
@@ -1062,17 +1069,28 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     auto* pSettingsBox =
       new NAMSettingsPageControl(b, settingsBackgroundBitmap, inputLevelBackgroundBitmap, switchHandleBitmap, crossSVG, style,
                                  radioButtonStyle);
-    pGraphics->AttachControl(pSettingsBox, kCtrlTagSettingsBox)->Hide(true);
+    pGraphics->AttachControl(pSettingsBox, kCtrlTagSettingsBox);
     pSettingsBox->AddChildControl(
-      new NAMFileBrowserControl(settingsAmpModelArea, kMsgTagClearModel, defaultNamFileString.c_str(), "nam",
-                                loadModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
-                                fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
+      new NAMFileBrowserControl(settingsAmpModelArea1, kMsgTagClearModel, "Select amp 1 model...", "nam",
+                                loadModelCompletionHandlerSlot1, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap),
       kCtrlTagModelFileBrowser);
+    pSettingsBox->AddChildControl(
+      new NAMFileBrowserControl(settingsAmpModelArea2, kMsgTagClearModel, "Select amp 2 model...", "nam",
+                                loadModelCompletionHandlerSlot2, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap),
+      kCtrlTagModelFileBrowser2);
+    pSettingsBox->AddChildControl(
+      new NAMFileBrowserControl(settingsAmpModelArea3, kMsgTagClearModel, "Select amp 3 model...", "nam",
+                                loadModelCompletionHandlerSlot3, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap),
+      kCtrlTagModelFileBrowser3);
     pSettingsBox->AddChildControl(
       new NAMFileBrowserControl(settingsStompModelArea, kMsgTagClearStompModel, "Select stomp NAM...", "nam",
                                 loadStompModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
-                                fileBackgroundBitmap, globeSVG, "Get NAM Models", getUrl),
+                                fileBackgroundBitmap),
       kCtrlTagStompModelFileBrowser);
+    pSettingsBox->HideAnimated(true);
 
     pGraphics->ForAllControlsFunc([](IControl* pControl) {
       pControl->SetMouseEventsWhenDisabled(true);
@@ -1695,6 +1713,39 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** hpfPointers = mHighPass.Process(fxReverbPointers, numChannelsInternal, numFrames);
   // sample** lpfPointers = mLowPass.Process(hpfPointers, numChannelsInternal, numFrames);
 
+  // Smooth the first samples after an amp slot switch to reduce hard-step clicks.
+  if (numFrames > 0)
+  {
+    int declickRemaining = mAmpSwitchDeClickSamplesRemaining.load(std::memory_order_relaxed);
+    if (declickRemaining > 0)
+    {
+      const int framesToSmooth = static_cast<int>(std::min(numFrames, static_cast<size_t>(declickRemaining)));
+      for (size_t c = 0; c < numChannelsInternal; ++c)
+      {
+        double prev = mAmpSwitchDeClickPrevSample[c];
+        int channelRemaining = declickRemaining;
+        for (int s = 0; s < framesToSmooth; ++s)
+        {
+          const double t = 1.0 - static_cast<double>(channelRemaining - 1) / static_cast<double>(kAmpSlotSwitchDeClickSamples);
+          const double blended = (1.0 - t) * prev + t * static_cast<double>(hpfPointers[c][s]);
+          hpfPointers[c][s] = static_cast<sample>(blended);
+          prev = blended;
+          --channelRemaining;
+        }
+        if (numFrames > static_cast<size_t>(framesToSmooth))
+          prev = static_cast<double>(hpfPointers[c][numFrames - 1]);
+        mAmpSwitchDeClickPrevSample[c] = prev;
+      }
+      declickRemaining -= framesToSmooth;
+      mAmpSwitchDeClickSamplesRemaining.store(std::max(0, declickRemaining), std::memory_order_relaxed);
+    }
+    else
+    {
+      for (size_t c = 0; c < numChannelsInternal; ++c)
+        mAmpSwitchDeClickPrevSample[c] = static_cast<double>(hpfPointers[c][numFrames - 1]);
+    }
+  }
+
   // restore previous floating point state
   std::feupdateenv(&fe_state);
 
@@ -1931,14 +1982,17 @@ void NeuralAmpModeler::OnUIOpen()
 {
   Plugin::OnUIOpen();
 
-  if (mNAMPath.GetLength())
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
   {
-    SendControlMsgFromDelegate(kCtrlTagModelFileBrowser, kMsgTagLoadedModel, mNAMPath.GetLength(), mNAMPath.Get());
-    // If it's not loaded yet, then mark as failed.
-    // If it's yet to be loaded, then the completion handler will set us straight once it runs.
-    if (mModel == nullptr && mStagedModel == nullptr)
-      SendControlMsgFromDelegate(kCtrlTagModelFileBrowser, kMsgTagLoadFailed);
+    const int ctrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
+    const WDL_String& slotPath = mAmpNAMPaths[slotIndex];
+    if (slotPath.GetLength())
+      SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadedModel, slotPath.GetLength(), slotPath.Get());
   }
+  // If it's not loaded yet, then mark active slot as failed.
+  // If it's yet to be loaded, then the completion handler will set us straight once it runs.
+  if (mAmpNAMPaths[mAmpSelectorIndex].GetLength() && mModel == nullptr && mStagedModel == nullptr)
+    SendControlMsgFromDelegate(_GetAmpModelCtrlTagForSlot(mAmpSelectorIndex), kMsgTagLoadFailed);
 
   if (mStompNAMPath.GetLength())
   {
@@ -2101,16 +2155,17 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
         {
           WDL_String fileName;
           WDL_String path;
-          if (mNAMPath.GetLength())
+          if (mAmpNAMPaths[mAmpSelectorIndex].GetLength())
           {
-            path.Set(mNAMPath.Get());
+            path.Set(mAmpNAMPaths[mAmpSelectorIndex].Get());
             path.remove_filepart();
           }
           pGraphics->PromptForFile(
             fileName, path, EFileAction::Open, "nam", [this](const WDL_String& chosenFileName, const WDL_String&) {
               if (chosenFileName.GetLength())
               {
-                const std::string msg = _StageModel(chosenFileName);
+                const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(mAmpSelectorIndex);
+                const std::string msg = _StageModel(chosenFileName, mAmpSelectorIndex, slotCtrlTag);
                 if (msg.size())
                 {
                   std::stringstream ss;
@@ -2145,7 +2200,24 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
 {
   switch (msgTag)
   {
-    case kMsgTagClearModel: mShouldRemoveModel = true; return true;
+    case kMsgTagClearModel:
+    {
+      const int slotIndex = _GetAmpSlotForModelCtrlTag(ctrlTag);
+      if (slotIndex < 0 || slotIndex >= static_cast<int>(mAmpNAMPaths.size()))
+      {
+        mNAMPath.Set("");
+        mShouldRemoveModel = true;
+        return true;
+      }
+
+      mAmpNAMPaths[slotIndex].Set("");
+      if (slotIndex == mAmpSelectorIndex)
+      {
+        mNAMPath.Set("");
+        mShouldRemoveModel = true;
+      }
+      return true;
+    }
     case kMsgTagClearStompModel: mShouldRemoveStompModel = true; return true;
     case kMsgTagClearIRLeft: mShouldRemoveIRLeft = true; return true;
     case kMsgTagClearIRRight: mShouldRemoveIRRight = true; return true;
@@ -2208,6 +2280,64 @@ void NeuralAmpModeler::_ToggleTopNavSectionBypass(const TopNavSection section)
   _RefreshTopNavControls();
 }
 
+int NeuralAmpModeler::_GetAmpModelCtrlTagForSlot(const int slotIndex) const
+{
+  switch (slotIndex)
+  {
+    case 0: return kCtrlTagModelFileBrowser;
+    case 1: return kCtrlTagModelFileBrowser2;
+    case 2: return kCtrlTagModelFileBrowser3;
+    default: return kCtrlTagModelFileBrowser;
+  }
+}
+
+int NeuralAmpModeler::_GetAmpSlotForModelCtrlTag(const int ctrlTag) const
+{
+  switch (ctrlTag)
+  {
+    case kCtrlTagModelFileBrowser: return 0;
+    case kCtrlTagModelFileBrowser2: return 1;
+    case kCtrlTagModelFileBrowser3: return 2;
+    default: return -1;
+  }
+}
+
+void NeuralAmpModeler::_SelectAmpSlot(int slotIndex)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  if (mAmpSelectorIndex == slotIndex)
+  {
+    _RefreshTopNavControls();
+    return;
+  }
+
+  mAmpSelectorIndex = slotIndex;
+  mAmpSwitchDeClickSamplesRemaining.store(kAmpSlotSwitchDeClickSamples, std::memory_order_relaxed);
+  const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
+  const WDL_String& slotPath = mAmpNAMPaths[slotIndex];
+  if (slotPath.GetLength())
+  {
+    const std::string msg = _StageModel(slotPath, slotIndex, slotCtrlTag);
+    if (msg.size() && GetParam(kModelToggle)->Bool())
+    {
+      GetParam(kModelToggle)->Set(0.0);
+      SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+    }
+  }
+  else
+  {
+    mNAMPath.Set("");
+    mShouldRemoveModel = true;
+    if (GetParam(kModelToggle)->Bool())
+    {
+      GetParam(kModelToggle)->Set(0.0);
+      SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+    }
+  }
+
+  _RefreshTopNavControls();
+}
+
 void NeuralAmpModeler::_RefreshTopNavControls()
 {
   if (auto* pGraphics = GetUI())
@@ -2235,8 +2365,17 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     updateIcon(kCtrlTagTopNavFx, TopNavSection::Fx);
     updateIcon(kCtrlTagTopNavTuner, TopNavSection::Tuner);
 
-    const char* backgroundResource = BACKGROUND_FN;
-    if (mTopNavActiveSection == TopNavSection::Stomp)
+    const char* backgroundResource = AMP2BACKGROUND_FN;
+    if (mTopNavActiveSection == TopNavSection::Amp)
+    {
+      if (mAmpSelectorIndex == 0)
+        backgroundResource = AMP1BACKGROUND_FN;
+      else if (mAmpSelectorIndex == 2)
+        backgroundResource = AMP3BACKGROUND_FN;
+      else
+        backgroundResource = AMP2BACKGROUND_FN;
+    }
+    else if (mTopNavActiveSection == TopNavSection::Stomp)
       backgroundResource = STOMPBACKGROUND_FN;
     else if (mTopNavActiveSection == TopNavSection::Cab)
       backgroundResource = CABBACKGROUND_FN;
@@ -2530,9 +2669,11 @@ void NeuralAmpModeler::_SetMasterGain()
   mMasterGain = DBToAmp(masterGainDB);
 }
 
-std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath)
+std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotIndex, const int slotCtrlTag)
 {
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
   WDL_String previousNAMPath = mNAMPath;
+  WDL_String previousSlotPath = mAmpNAMPaths[slotIndex];
   try
   {
     auto dspPath = std::filesystem::u8path(modelPath.Get());
@@ -2540,17 +2681,20 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath)
     std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
     temp->Reset(GetSampleRate(), GetBlockSize());
     mStagedModel = std::move(temp);
-    mNAMPath = modelPath;
-    SendControlMsgFromDelegate(kCtrlTagModelFileBrowser, kMsgTagLoadedModel, mNAMPath.GetLength(), mNAMPath.Get());
+    mAmpNAMPaths[slotIndex] = modelPath;
+    if (mAmpSelectorIndex == slotIndex)
+      mNAMPath = modelPath;
+    SendControlMsgFromDelegate(slotCtrlTag, kMsgTagLoadedModel, modelPath.GetLength(), modelPath.Get());
   }
   catch (std::runtime_error& e)
   {
-    SendControlMsgFromDelegate(kCtrlTagModelFileBrowser, kMsgTagLoadFailed);
+    SendControlMsgFromDelegate(slotCtrlTag, kMsgTagLoadFailed);
 
     if (mStagedModel != nullptr)
     {
       mStagedModel = nullptr;
     }
+    mAmpNAMPaths[slotIndex] = previousSlotPath;
     mNAMPath = previousNAMPath;
     std::cerr << "Failed to read DSP module" << std::endl;
     std::cerr << e.what() << std::endl;
