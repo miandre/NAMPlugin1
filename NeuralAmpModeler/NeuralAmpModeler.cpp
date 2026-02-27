@@ -1239,14 +1239,15 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const size_t numChannelsExternalIn = (size_t)NInChansConnected();
   const size_t numChannelsExternalOut = (size_t)NOutChansConnected();
   const bool inputStereoMode = GetParam(kInputStereoMode)->Bool();
+  const bool hasRightInputChannel = (inputs != nullptr) && (numChannelsExternalIn > 1) && (inputs[1] != nullptr);
   size_t numChannelsMonoCore = 1;
 #ifdef APP_API
 #if NAM_APP_STEREO_CORE_TEST
-  if (inputStereoMode)
+  if (inputStereoMode && hasRightInputChannel)
     numChannelsMonoCore = 2;
 #endif
 #else
-  if (inputStereoMode)
+  if (inputStereoMode && hasRightInputChannel)
     numChannelsMonoCore = 2;
 #endif
   const size_t numChannelsInternal = kNumChannelsInternal;
