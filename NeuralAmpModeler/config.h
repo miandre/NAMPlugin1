@@ -1,19 +1,19 @@
-#define PLUG_NAME "NeuralAmpModeler"
-#define PLUG_MFR "Steven Atkinson"
+#define PLUG_NAME "MND-AMP"
+#define PLUG_MFR "MND-AMPS"
 #define PLUG_VERSION_HEX 0x00000001
 #define PLUG_VERSION_STR "0.0.1"
-#define PLUG_UNIQUE_ID 'NMP1'
-#define PLUG_MFR_ID 'MIA1'
+#define PLUG_UNIQUE_ID 'MND1'
+#define PLUG_MFR_ID 'MND1'
 #define PLUG_URL_STR "https://github.com/sdatkinson/NeuralAmpModelerPlugin"
 #define PLUG_EMAIL_STR "spam@me.com"
 #define PLUG_COPYRIGHT_STR "Copyright 2022 Steven Atkinson"
 #define PLUG_CLASS_NAME NeuralAmpModeler
-#define BUNDLE_NAME "NeuralAmpModeler"
-#define BUNDLE_MFR "StevenAtkinson"
+#define BUNDLE_NAME "MND-AMPS"
+#define BUNDLE_MFR "MND-AMPS"
 #define BUNDLE_DOMAIN "com"
 #define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
 
-#define SHARED_RESOURCES_SUBPATH "NeuralAmpModeler"
+#define SHARED_RESOURCES_SUBPATH "MND-AMPS"
 
 #ifdef APP_API
   // Standalone host opens max channel count from this list.
