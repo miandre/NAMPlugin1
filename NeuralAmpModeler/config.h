@@ -11,7 +11,7 @@
 #define BUNDLE_NAME "NeuralAmpModeler"
 #define BUNDLE_MFR "StevenAtkinson"
 #define BUNDLE_DOMAIN "com"
-#define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
+#define NAM_STARTUP_TMPLOAD_DEFAULTS 0 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
 
 #define SHARED_RESOURCES_SUBPATH "NeuralAmpModeler"
 
@@ -19,6 +19,8 @@
   // Standalone host opens max channel count from this list.
   // Keep stereo input capability available for ASIO wrapper drivers that are unstable on mono input streams.
   #define PLUG_CHANNEL_IO "1-2 2-2"
+  // Temporary test toggle: 0 = mono core in standalone, 1 = true stereo core in standalone.
+  #define NAM_APP_STEREO_CORE_TEST 1
 #else
   #define PLUG_CHANNEL_IO "1-1 1-2 2-2"
 #endif
@@ -70,6 +72,8 @@
 #define MODEL_ICON_FN "ModelIcon.svg"
 #define IR_ICON_ON_FN "IRIconOn.svg"
 #define IR_ICON_OFF_FN "IRIconOff.svg"
+#define INPUT_MONO_SVG_FN "mono.svg"
+#define INPUT_STEREO_SVG_FN "stereo.svg"
 #define GLOBE_ICON_FN "Globe.svg"
 
 #define BACKGROUND_FN "Background.jpg"

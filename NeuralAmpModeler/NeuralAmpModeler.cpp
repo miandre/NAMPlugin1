@@ -171,6 +171,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kTunerActive)->InitBool("Tuner", false);
   GetParam(kTunerMonitorMode)->InitEnum("Tuner Monitor", 1, {"Mute", "Bypass", "Full"});
   GetParam(kTransposeSemitones)->InitDouble("Transpose", 0.0, -8.0, 8.0, 1.0, "");
+  GetParam(kInputStereoMode)->InitBool("Input Stereo", false);
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
   GetParam(kNoiseGateThreshold)->InitGain("Threshold", -50.0, -80.0, 0.0, 0.1);
   GetParam(kNoiseGateReleaseMs)->InitDouble("Gate Release", 40.0, 1.0, 100.0, 1.0, "");
@@ -254,6 +255,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto leftArrowSVG = pGraphics->LoadSVG(LEFT_ARROW_FN);
     const auto irIconOnSVG = pGraphics->LoadSVG(IR_ICON_ON_FN);
     const auto irIconOffSVG = pGraphics->LoadSVG(IR_ICON_OFF_FN);
+    const auto inputMonoSVG = pGraphics->LoadSVG(INPUT_MONO_SVG_FN);
+    const auto inputStereoSVG = pGraphics->LoadSVG(INPUT_STEREO_SVG_FN);
     const auto ampActiveSVG = pGraphics->LoadSVG(AMP_ACTIVE_SVG_FN);
     const auto stompActiveSVG = pGraphics->LoadSVG(STOMP_ACTIVE_SVG_FN);
     const auto cabActiveSVG = pGraphics->LoadSVG(CAB_ACTIVE_SVG_FN);
@@ -473,6 +476,16 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Top-bar filter controls live with input/output controls.
     const auto hpfKnobArea = makeKnobArea(leftFilterCenterX, topSideKnobTop);
     const auto lpfKnobArea = makeKnobArea(rightFilterCenterX, topSideKnobTop);
+    constexpr float kInputModeSwitchCenterXOffset = -80.0f;
+    constexpr float kInputModeSwitchCenterYOffset = 0.0f;
+    constexpr float kInputModeSwitchWidth = 38.0f;
+    constexpr float kInputModeSwitchHeight = 20.0f;
+    const float inputModeSwitchCenterX = leftTransposeCenterX + kInputModeSwitchCenterXOffset;
+    const float inputModeSwitchCenterY = topUtilityRowArea.MH() + kInputModeSwitchCenterYOffset;
+    const auto inputModeSwitchArea = IRECT(inputModeSwitchCenterX - 0.5f * kInputModeSwitchWidth,
+                                           inputModeSwitchCenterY - 0.5f * kInputModeSwitchHeight,
+                                           inputModeSwitchCenterX + 0.5f * kInputModeSwitchWidth,
+                                           inputModeSwitchCenterY + 0.5f * kInputModeSwitchHeight);
 
     constexpr float kSettingsIconHeight = 24.0f;
     constexpr float kSettingsRightPad = 8.0f;
@@ -829,6 +842,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->SetTooltip("Tuner");
     pGraphics->AttachControl(new NAMBitmapToggleControl(modelToggleArea, kModelToggle, switchOffBitmap, switchOnBitmap))
       ->SetTooltip("Model On/Off");
+    pGraphics->AttachControl(new ISVGSwitchControl(inputModeSwitchArea, {inputMonoSVG, inputStereoSVG}, kInputStereoMode))
+      ->SetTooltip("Input mode: Mono = input 1 only, Stereo = input 1+2");
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle), kCtrlTagIRToggle);
     pGraphics->AttachControl(new NAMFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Select cab IR L...", "wav",
                                                        loadIRLeftCompletionHandler, utilityStyle, fileSVG, crossSVG,
@@ -1132,9 +1147,16 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 {
   const size_t numChannelsExternalIn = (size_t)NInChansConnected();
   const size_t numChannelsExternalOut = (size_t)NOutChansConnected();
+  const bool inputStereoMode = GetParam(kInputStereoMode)->Bool();
   size_t numChannelsMonoCore = 1;
-#ifndef APP_API
-  numChannelsMonoCore = 2;
+#ifdef APP_API
+#if NAM_APP_STEREO_CORE_TEST
+  if (inputStereoMode)
+    numChannelsMonoCore = 2;
+#endif
+#else
+  if (inputStereoMode)
+    numChannelsMonoCore = 2;
 #endif
   const size_t numChannelsInternal = kNumChannelsInternal;
   const size_t numFrames = (size_t)nFrames;
@@ -1310,58 +1332,108 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   {
     const bool haveLeftIR = (mIR != nullptr);
     const bool haveRightIR = (mIRRight != nullptr);
+    auto processSingleChannelIR = [numFrames](dsp::ImpulseResponse* ir, sample* inChannel, sample* outChannel) {
+      if (ir == nullptr || inChannel == nullptr || outChannel == nullptr)
+      {
+        if (outChannel != nullptr)
+          std::fill(outChannel, outChannel + numFrames, 0.0f);
+        return;
+      }
+
+      sample* inPtrs[1] = {inChannel};
+      sample** irOutPointers = ir->Process(inPtrs, 1, numFrames);
+      if (irOutPointers == nullptr || irOutPointers[0] == nullptr)
+      {
+        std::fill(outChannel, outChannel + numFrames, 0.0f);
+        return;
+      }
+
+      for (size_t s = 0; s < numFrames; ++s)
+        outChannel[s] = irOutPointers[0][s];
+    };
+
     if (haveLeftIR && haveRightIR)
     {
-      sample** irLeftPointers = mIR->Process(toneStackOutPointers, numChannelsMonoCore, numFrames);
-      sample** irRightPointers = mIRRight->Process(toneStackOutPointers, numChannelsMonoCore, numFrames);
       const double blend = GetParam(kCabIRBlend)->Value() * 0.01;
       const double leftGain = 1.0 - blend;
       const double rightGain = blend;
-      for (size_t s = 0; s < numFrames; ++s)
+
+      if (numChannelsMonoCore == 1)
       {
-        if (numChannelsMonoCore == 1)
+        sample** irLeftPointers = mIR->Process(toneStackOutPointers, 1, numFrames);
+        sample** irRightPointers = mIRRight->Process(toneStackOutPointers, 1, numFrames);
+        for (size_t s = 0; s < numFrames; ++s)
         {
           const sample irLeft = irLeftPointers[0][s];
           const sample irRight = irRightPointers[0][s];
           mOutputArray[0][s] = static_cast<sample>(leftGain * irLeft + rightGain * irRight);
           mOutputArray[1][s] = static_cast<sample>(leftGain * irRight + rightGain * irLeft);
         }
-        else
+      }
+      else if (mIRChannel2 != nullptr && mIRRightChannel2 != nullptr)
+      {
+        processSingleChannelIR(mIR.get(), toneStackOutPointers[0], mInputArray[0].data());
+        processSingleChannelIR(mIRRight.get(), toneStackOutPointers[0], mOutputArray[0].data());
+        processSingleChannelIR(mIRChannel2.get(), toneStackOutPointers[1], mInputArray[1].data());
+        processSingleChannelIR(mIRRightChannel2.get(), toneStackOutPointers[1], mOutputArray[1].data());
+
+        for (size_t s = 0; s < numFrames; ++s)
         {
-          const sample irLeftL = irLeftPointers[0][s];
-          const sample irRightL = irRightPointers[0][s];
-          const sample irLeftR = irLeftPointers[1][s];
-          const sample irRightR = irRightPointers[1][s];
+          const sample irLeftL = mInputArray[0][s];
+          const sample irRightL = mOutputArray[0][s];
+          const sample irLeftR = mInputArray[1][s];
+          const sample irRightR = mOutputArray[1][s];
           mOutputArray[0][s] = static_cast<sample>(leftGain * irLeftL + rightGain * irRightL);
           mOutputArray[1][s] = static_cast<sample>(leftGain * irRightR + rightGain * irLeftR);
+        }
+      }
+      else
+      {
+        // If stereo IR state isn't ready yet, keep signal path alive.
+        for (size_t s = 0; s < numFrames; ++s)
+        {
+          mOutputArray[0][s] = toneStackOutPointers[0][s];
+          mOutputArray[1][s] = toneStackOutPointers[1][s];
         }
       }
       irPointers = mOutputPointers;
     }
     else if (haveLeftIR)
     {
-      sample** leftIRPointers = mIR->Process(toneStackOutPointers, numChannelsMonoCore, numFrames);
       if (numChannelsMonoCore == 1)
       {
+        sample** leftIRPointers = mIR->Process(toneStackOutPointers, 1, numFrames);
         copyMonoToStereo(leftIRPointers);
+        irPointers = mOutputPointers;
+      }
+      else if (mIRChannel2 != nullptr)
+      {
+        processSingleChannelIR(mIR.get(), toneStackOutPointers[0], mOutputArray[0].data());
+        processSingleChannelIR(mIRChannel2.get(), toneStackOutPointers[1], mOutputArray[1].data());
         irPointers = mOutputPointers;
       }
       else
       {
-        irPointers = leftIRPointers;
+        irPointers = toneStackOutPointers;
       }
     }
     else if (haveRightIR)
     {
-      sample** rightIRPointers = mIRRight->Process(toneStackOutPointers, numChannelsMonoCore, numFrames);
       if (numChannelsMonoCore == 1)
       {
+        sample** rightIRPointers = mIRRight->Process(toneStackOutPointers, 1, numFrames);
         copyMonoToStereo(rightIRPointers);
+        irPointers = mOutputPointers;
+      }
+      else if (mIRRightChannel2 != nullptr)
+      {
+        processSingleChannelIR(mIRRight.get(), toneStackOutPointers[0], mOutputArray[0].data());
+        processSingleChannelIR(mIRRightChannel2.get(), toneStackOutPointers[1], mOutputArray[1].data());
         irPointers = mOutputPointers;
       }
       else
       {
-        irPointers = rightIRPointers;
+        irPointers = toneStackOutPointers;
       }
     }
   }
@@ -2363,6 +2435,22 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
         pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight)->SetDisabled(!active);
         pGraphics->GetControlWithParamIdx(kCabIRBlend)->SetDisabled(!active);
         break;
+      case kInputStereoMode:
+        if (active)
+        {
+          // Promote mono-loaded assets into stereo-core instances if needed.
+          const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+          const WDL_String& activeSlotPath = mAmpNAMPaths[activeSlot];
+          if (mModelRight == nullptr && activeSlotPath.GetLength())
+            _StageModel(activeSlotPath, activeSlot, _GetAmpModelCtrlTagForSlot(activeSlot));
+          if (mStompModelRight == nullptr && mStompNAMPath.GetLength())
+            _StageStompModel(mStompNAMPath);
+          if (mIRChannel2 == nullptr && mIRPath.GetLength())
+            _StageIRLeft(mIRPath);
+          if (mIRRightChannel2 == nullptr && mIRPathRight.GetLength())
+            _StageIRRight(mIRPathRight);
+        }
+        break;
       case kModelToggle:
         if (mApplyingAmpSlotState)
           break;
@@ -2798,6 +2886,7 @@ void NeuralAmpModeler::_AllocateIOPointers(const size_t nChans)
 
 void NeuralAmpModeler::_ApplyDSPStaging()
 {
+  const bool inputStereoMode = GetParam(kInputStereoMode)->Bool();
   // Remove marked modules
   if (mShouldRemoveModel)
   {
@@ -2821,17 +2910,19 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   if (mShouldRemoveIRLeft)
   {
     mIR = nullptr;
+    mIRChannel2 = nullptr;
     mIRPath.Set("");
     mShouldRemoveIRLeft = false;
   }
   if (mShouldRemoveIRRight)
   {
     mIRRight = nullptr;
+    mIRRightChannel2 = nullptr;
     mIRPathRight.Set("");
     mShouldRemoveIRRight = false;
   }
   // Move things from staged to live
-  if (mStagedModel != nullptr)
+  if (mStagedModel != nullptr && (!inputStereoMode || mStagedModelRight != nullptr))
   {
     mModel = std::move(mStagedModel);
     mStagedModel = nullptr;
@@ -2842,7 +2933,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     _SetInputGain();
     _SetOutputGain();
   }
-  if (mStagedStompModel != nullptr)
+  if (mStagedStompModel != nullptr && (!inputStereoMode || mStagedStompModelRight != nullptr))
   {
     mStompModel = std::move(mStagedStompModel);
     mStagedStompModel = nullptr;
@@ -2850,15 +2941,19 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStagedStompModelRight = nullptr;
     _UpdateLatency();
   }
-  if (mStagedIR != nullptr)
+  if (mStagedIR != nullptr && (!inputStereoMode || mStagedIRChannel2 != nullptr))
   {
     mIR = std::move(mStagedIR);
     mStagedIR = nullptr;
+    mIRChannel2 = std::move(mStagedIRChannel2);
+    mStagedIRChannel2 = nullptr;
   }
-  if (mStagedIRRight != nullptr)
+  if (mStagedIRRight != nullptr && (!inputStereoMode || mStagedIRRightChannel2 != nullptr))
   {
     mIRRight = std::move(mStagedIRRight);
     mStagedIRRight = nullptr;
+    mIRRightChannel2 = std::move(mStagedIRRightChannel2);
+    mStagedIRRightChannel2 = nullptr;
   }
 }
 
@@ -2943,6 +3038,24 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
       mStagedIR = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
     }
   }
+  if (mStagedIRChannel2 != nullptr)
+  {
+    const double irSampleRate = mStagedIRChannel2->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mStagedIRChannel2->GetData();
+      mStagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  else if (mIRChannel2 != nullptr)
+  {
+    const double irSampleRate = mIRChannel2->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mIRChannel2->GetData();
+      mStagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
   if (mStagedIRRight != nullptr)
   {
     const double irSampleRate = mStagedIRRight->GetSampleRate();
@@ -2959,6 +3072,24 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
     {
       const auto irData = mIRRight->GetData();
       mStagedIRRight = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  if (mStagedIRRightChannel2 != nullptr)
+  {
+    const double irSampleRate = mStagedIRRightChannel2->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mStagedIRRightChannel2->GetData();
+      mStagedIRRightChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  else if (mIRRightChannel2 != nullptr)
+  {
+    const double irSampleRate = mIRRightChannel2->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mIRRightChannel2->GetData();
+      mStagedIRRightChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
     }
   }
 }
@@ -3027,12 +3158,11 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
       return temp;
     };
 
-    mStagedModel = loadResampledModel();
-#ifndef APP_API
-    mStagedModelRight = loadResampledModel();
-#else
-    mStagedModelRight = nullptr;
-#endif
+    auto stagedModel = loadResampledModel();
+    auto stagedModelRight = loadResampledModel();
+    // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
+    mStagedModelRight = std::move(stagedModelRight);
+    mStagedModel = std::move(stagedModel);
     mAmpNAMPaths[slotIndex] = modelPath;
     if (mAmpSelectorIndex == slotIndex)
       mNAMPath = modelPath;
@@ -3072,12 +3202,11 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
       return temp;
     };
 
-    mStagedStompModel = loadResampledStompModel();
-#ifndef APP_API
-    mStagedStompModelRight = loadResampledStompModel();
-#else
-    mStagedStompModelRight = nullptr;
-#endif
+    auto stagedStompModel = loadResampledStompModel();
+    auto stagedStompModelRight = loadResampledStompModel();
+    // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
+    mStagedStompModelRight = std::move(stagedStompModelRight);
+    mStagedStompModel = std::move(stagedStompModel);
     mStompNAMPath = modelPath;
     SendControlMsgFromDelegate(
       kCtrlTagStompModelFileBrowser, kMsgTagLoadedStompModel, mStompNAMPath.GetLength(), mStompNAMPath.Get());
@@ -3109,8 +3238,16 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
   try
   {
     auto irPathU8 = std::filesystem::u8path(irPath.Get());
-    mStagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
-    wavState = mStagedIR->GetWavState();
+    auto stagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+    wavState = stagedIR->GetWavState();
+    if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+    {
+      const auto irData = stagedIR->GetData();
+      auto stagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
+      mStagedIRChannel2 = std::move(stagedIRChannel2);
+      mStagedIR = std::move(stagedIR);
+    }
   }
   catch (std::runtime_error& e)
   {
@@ -3130,6 +3267,10 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
     {
       mStagedIR = nullptr;
     }
+    if (mStagedIRChannel2 != nullptr)
+    {
+      mStagedIRChannel2 = nullptr;
+    }
     mIRPath = previousIRPath;
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadFailed);
   }
@@ -3145,8 +3286,16 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
   try
   {
     auto irPathU8 = std::filesystem::u8path(irPath.Get());
-    mStagedIRRight = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
-    wavState = mStagedIRRight->GetWavState();
+    auto stagedIRRight = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+    wavState = stagedIRRight->GetWavState();
+    if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+    {
+      const auto irData = stagedIRRight->GetData();
+      auto stagedIRRightChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
+      mStagedIRRightChannel2 = std::move(stagedIRRightChannel2);
+      mStagedIRRight = std::move(stagedIRRight);
+    }
   }
   catch (std::runtime_error& e)
   {
@@ -3165,6 +3314,8 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
   {
     if (mStagedIRRight != nullptr)
       mStagedIRRight = nullptr;
+    if (mStagedIRRightChannel2 != nullptr)
+      mStagedIRRightChannel2 = nullptr;
     mIRPathRight = previousIRPath;
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserRight, kMsgTagLoadFailed);
   }
@@ -3241,40 +3392,50 @@ void NeuralAmpModeler::_ProcessInput(iplug::sample** inputs, const size_t nFrame
 
   if (nChansOut == 1)
   {
-    // On the standalone, we can probably assume that the user has plugged into only one input and they expect it to be
-    // carried straight through. Don't apply any division over nChansIn because we're just "catching anything out there."
-    // However, in a DAW, it's probably something providing stereo, and we want to take the average in order to avoid
-    // doubling the loudness. (This would change w/ double mono processing)
-    double gain = mInputGain;
-#ifndef APP_API
-    gain /= static_cast<double>(nChansIn);
-#endif
-    // Assume _PrepareBuffers() was already called
-    for (size_t c = 0; c < nChansIn; c++)
+    // Mono mode: use input 1 only (ignore input 2).
+    sample* monoInput = inputs[0];
+    if (monoInput == nullptr)
     {
-      if (inputs[c] == nullptr)
-        continue;
-      for (size_t s = 0; s < nFrames; s++)
-        if (c == 0)
-          mInputArray[0][s] = gain * inputs[c][s];
-        else
-          mInputArray[0][s] += gain * inputs[c][s];
+      for (size_t c = 1; c < nChansIn; ++c)
+      {
+        if (inputs[c] != nullptr)
+        {
+          monoInput = inputs[c];
+          break;
+        }
+      }
     }
+    if (monoInput == nullptr)
+      return;
+
+    const double gain = mInputGain;
+    for (size_t s = 0; s < nFrames; ++s)
+      mInputArray[0][s] = gain * monoInput[s];
     return;
   }
 
-  // Dual-mono ingest: L follows input 0, R follows input 1 (or duplicates L if unavailable).
+  // Stereo mode: L follows input 1 mapping, R follows input 2 mapping if available.
   const double gain = mInputGain;
   sample* inputLeft = (nChansIn > 0) ? inputs[0] : nullptr;
   sample* inputRight = (nChansIn > 1) ? inputs[1] : nullptr;
   if (inputLeft == nullptr)
+  {
+    for (size_t c = 1; c < nChansIn; ++c)
+    {
+      if (inputs[c] != nullptr)
+      {
+        inputLeft = inputs[c];
+        break;
+      }
+    }
+  }
+  if (inputLeft == nullptr)
     return;
-  if (inputRight == nullptr)
-    inputRight = inputLeft;
+
   for (size_t s = 0; s < nFrames; ++s)
   {
     mInputArray[0][s] = gain * inputLeft[s];
-    mInputArray[1][s] = gain * inputRight[s];
+    mInputArray[1][s] = (inputRight != nullptr) ? static_cast<sample>(gain * inputRight[s]) : 0.0f;
   }
 }
 

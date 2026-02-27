@@ -101,6 +101,8 @@ enum EParams
   kFXReverbLowCutHz,
   kFXReverbHighCutHz,
   kFXReverbMode,
+  // Input mode: mono uses only input 1, stereo uses input 1+2.
+  kInputStereoMode,
   kNumParams
 };
 
@@ -416,14 +418,20 @@ private:
   std::unique_ptr<ResamplingNAM> mStompModelRight;
   // And the IR
   std::unique_ptr<dsp::ImpulseResponse> mIR;
+  // Stereo core: right-channel state for left IR.
+  std::unique_ptr<dsp::ImpulseResponse> mIRChannel2;
   std::unique_ptr<dsp::ImpulseResponse> mIRRight;
+  // Stereo core: right-channel state for right IR.
+  std::unique_ptr<dsp::ImpulseResponse> mIRRightChannel2;
   // Manages switching what DSP is being used.
   std::unique_ptr<ResamplingNAM> mStagedModel;
   std::unique_ptr<ResamplingNAM> mStagedModelRight;
   std::unique_ptr<ResamplingNAM> mStagedStompModel;
   std::unique_ptr<ResamplingNAM> mStagedStompModelRight;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIR;
+  std::unique_ptr<dsp::ImpulseResponse> mStagedIRChannel2;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRRight;
+  std::unique_ptr<dsp::ImpulseResponse> mStagedIRRightChannel2;
   // Flags to take away the modules at a safe time.
   std::atomic<bool> mShouldRemoveModel = false;
   std::atomic<bool> mShouldRemoveStompModel = false;
