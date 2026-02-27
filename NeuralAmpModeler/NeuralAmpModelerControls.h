@@ -1027,7 +1027,7 @@ public:
     };
 
     auto clearFileFunc = [&](IControl* pCaller) {
-      pCaller->GetDelegate()->SendArbitraryMsgFromUI(mClearMsgTag);
+      pCaller->GetDelegate()->SendArbitraryMsgFromUI(mClearMsgTag, this->GetTag());
       mFileNameControl->SetLabelAndTooltip(mDefaultLabelStr.Get());
       SetBrowserState(NAMBrowserState::Empty);
       // FIXME disabling output mode...

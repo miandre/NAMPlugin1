@@ -11,7 +11,7 @@
 #define BUNDLE_NAME "NeuralAmpModeler"
 #define BUNDLE_MFR "StevenAtkinson"
 #define BUNDLE_DOMAIN "com"
-#define NAM_STARTUP_TMPLOAD_DEFAULTS 0 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
+#define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
 
 #define SHARED_RESOURCES_SUBPATH "NeuralAmpModeler"
 
@@ -30,7 +30,7 @@
 #define PLUG_DOES_MIDI_IN 0
 #define PLUG_DOES_MIDI_OUT 0
 #define PLUG_DOES_MPE 0
-#define PLUG_DOES_STATE_CHUNKS 0
+#define PLUG_DOES_STATE_CHUNKS 1
 #define PLUG_HAS_UI 1
 #define PLUG_WIDTH 1039
 #define PLUG_HEIGHT 666

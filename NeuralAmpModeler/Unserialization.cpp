@@ -61,16 +61,37 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
   OnParamReset(iplug::EParamSource::kPresetRecall);
   LEAVE_PARAMS_MUTEX
 
+  const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+  {
+    mAmpNAMPaths[slotIndex].Set("");
+    mAmpSlotStates[slotIndex].modelToggle = 0.0;
+    mAmpSlotStates[slotIndex].modelToggleTouched = true;
+    mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+    mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
+    mSlotLoadRequestId[slotIndex].fetch_add(1, std::memory_order_relaxed);
+    mShouldRemoveModelSlot[slotIndex].store(true, std::memory_order_relaxed);
+  }
+
   mNAMPath.Set(getStringOrEmpty("NAMPath").c_str());
   mIRPath.Set(getStringOrEmpty("IRPath").c_str());
 
   if (mNAMPath.GetLength())
   {
-    _StageModel(mNAMPath, mAmpSelectorIndex, _GetAmpModelCtrlTagForSlot(mAmpSelectorIndex));
+    mAmpNAMPaths[activeSlot] = mNAMPath;
+    _RequestModelLoadForSlot(mNAMPath, activeSlot, _GetAmpModelCtrlTagForSlot(activeSlot));
+    mAmpSlotStates[activeSlot].modelToggle = 1.0;
+    mAmpSlotStates[activeSlot].modelToggleTouched = true;
   }
+  mPendingAmpSlotSwitch.store(activeSlot, std::memory_order_relaxed);
+
   if (mIRPath.GetLength())
   {
     _StageIRLeft(mIRPath);
+  }
+  else
+  {
+    mShouldRemoveIRLeft = true;
   }
   auto irPathRightIt = config.find("IRPathRight");
   if (irPathRightIt != config.end() && irPathRightIt->is_string())

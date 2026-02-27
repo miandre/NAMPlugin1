@@ -2,7 +2,11 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
+#include <mutex>
+#include <thread>
 #include "../AudioDSPTools/dsp/ImpulseResponse.h"
 #include "../AudioDSPTools/dsp/NoiseGate.h"
 #include "../AudioDSPTools/dsp/dsp.h"
@@ -381,6 +385,10 @@ private:
   void _ApplyAmpSlotStateToToneStack(int slotIndex);
   void _ApplyCurrentAmpParamsToActiveToneStack();
   bool _IsAmpSlotManagedParam(int paramIdx) const;
+  void _RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag);
+  void _ModelLoadWorkerLoop();
+  void _StartModelLoadWorker();
+  void _StopModelLoadWorker();
 
   // Make sure that the latency is reported correctly.
   void _UpdateLatency();
@@ -413,6 +421,13 @@ private:
   std::unique_ptr<ResamplingNAM> mModel;
   // Plugin stereo core: right-channel model instance (independent state).
   std::unique_ptr<ResamplingNAM> mModelRight;
+  // Per-slot ready model bank (inactive slots + pending active swap source).
+  std::array<std::unique_ptr<ResamplingNAM>, 3> mAmpSlotModelCache;
+  std::array<std::unique_ptr<ResamplingNAM>, 3> mAmpSlotModelCacheRight;
+  // Worker->audio lock-free handoff (raw pointers exchanged atomically).
+  std::array<std::atomic<ResamplingNAM*>, 3> mPendingLoadedSlotModel;
+  std::array<std::atomic<ResamplingNAM*>, 3> mPendingLoadedSlotModelRight;
+  std::array<std::atomic<uint64_t>, 3> mPendingLoadedSlotRequestId;
   std::unique_ptr<ResamplingNAM> mStompModel;
   // Plugin stereo core: right-channel stomp model instance (independent state).
   std::unique_ptr<ResamplingNAM> mStompModelRight;
@@ -434,6 +449,7 @@ private:
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRRightChannel2;
   // Flags to take away the modules at a safe time.
   std::atomic<bool> mShouldRemoveModel = false;
+  std::array<std::atomic<bool>, 3> mShouldRemoveModelSlot;
   std::atomic<bool> mShouldRemoveStompModel = false;
   std::atomic<bool> mShouldRemoveIRLeft = false;
   std::atomic<bool> mShouldRemoveIRRight = false;
@@ -442,12 +458,33 @@ private:
   std::atomic<bool> mModelCleared = false;
   std::atomic<bool> mNoiseGateIsAttenuating = false;
   bool mNoiseGateLEDState = false;
+  // Active model ownership slot is updated on audio thread in _ApplyDSPStaging().
+  int mCurrentModelSlot = 1;
+  std::atomic<int> mPendingAmpSlotSwitch{-1};
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false};
   int mAmpSelectorIndex = 1;
   bool mApplyingAmpSlotState = false;
   bool mStartupDefaultLoadAttempted = false;
+  bool mStandaloneStateLoadAttempted = false;
   std::array<AmpSlotState, 3> mAmpSlotStates = {};
+  // 0=Empty, 1=Loading, 2=Ready, 3=Failed.
+  std::array<std::atomic<int>, 3> mAmpSlotModelState;
+  std::array<std::atomic<int>, 3> mSlotLoadUIEvent;
+  std::array<std::atomic<uint64_t>, 3> mSlotLoadRequestId;
+  struct ModelLoadJob
+  {
+    int slotIndex = 0;
+    uint64_t requestId = 0;
+    WDL_String modelPath;
+    double sampleRate = 48000.0;
+    int blockSize = 64;
+  };
+  std::thread mModelLoadWorker;
+  std::mutex mModelLoadMutex;
+  std::condition_variable mModelLoadCV;
+  std::deque<ModelLoadJob> mModelLoadJobs;
+  bool mModelLoadWorkerExit = false;
   std::atomic<int> mAmpSwitchDeClickSamplesRemaining = 0;
   std::array<double, kNumChannelsInternal> mAmpSwitchDeClickPrevSample = {};
   TunerAnalyzer mTunerAnalyzer;
