@@ -1651,9 +1651,13 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool fxDelayActive = GetParam(kFXDelayActive)->Bool() && !fxBypassed;
   if (mFXDelayBufferSamples > 2 && sampleRate > 0.0)
   {
-    const bool stereoCoreActive = (numChannelsMonoCore > 1) && (numChannelsInternal == 2);
+    const bool stereoFXBusActive = (numChannelsInternal == 2);
+    const bool monoSourceAtFX = (numChannelsMonoCore == 1);
     constexpr double kFXDelayFeedbackCrossStereo = 0.22;
     constexpr double kFXDelayWetCrossStereo = 0.16;
+    constexpr double kFXDelayWetWidthStereo = 1.28;
+    constexpr double kFXDelayMonoStereoTimeOffsetMs = 12.0;
+    constexpr double kFXDelayMonoStereoPingPongFeedback = 0.75;
     const double targetTimeSamples = std::clamp(
       GetParam(kFXDelayTimeMs)->Value() * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
     const double targetFeedback = std::clamp(GetParam(kFXDelayFeedback)->Value() * 0.01, 0.0, 0.80);
@@ -1684,6 +1688,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         smoothedHighCutHz = std::min(maxCutHz, smoothedLowCutHz + 20.0);
       const double lowCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedLowCutHz / sampleRate);
       const double highCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedHighCutHz / sampleRate);
+      const double monoStereoTimeOffsetSamples =
+        monoSourceAtFX ? (kFXDelayMonoStereoTimeOffsetMs * 0.001 * sampleRate) : 0.0;
       std::array<double, kNumChannelsInternal> drySamples = {};
       std::array<double, kNumChannelsInternal> filteredDelayedSamples = {};
       std::array<double, kNumChannelsInternal> feedbackDelayedSamples = {};
@@ -1695,7 +1701,17 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         const double dry = fxDelayPointers[c][s];
         drySamples[c] = dry;
 
-        double readPos = static_cast<double>(writeIndex) - smoothedTimeSamples;
+        double channelTimeSamples = smoothedTimeSamples;
+        if (monoSourceAtFX && stereoFXBusActive)
+        {
+          const double stereoOffsetSign = (c == 0) ? -1.0 : 1.0;
+          channelTimeSamples = std::clamp(
+            smoothedTimeSamples + stereoOffsetSign * monoStereoTimeOffsetSamples,
+            1.0,
+            static_cast<double>(mFXDelayBufferSamples - 2));
+        }
+
+        double readPos = static_cast<double>(writeIndex) - channelTimeSamples;
         if (readPos < 0.0)
           readPos += static_cast<double>(mFXDelayBufferSamples);
         const auto readIndex0 = static_cast<size_t>(readPos);
@@ -1714,22 +1730,37 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         wetDelayedSamples[c] = filteredDelayedSamples[c];
       }
 
-      if (stereoCoreActive)
+      if (stereoFXBusActive)
       {
+        const double feedbackCross = monoSourceAtFX ? 0.60 : kFXDelayFeedbackCrossStereo;
+        const double wetCross = monoSourceAtFX ? 0.26 : kFXDelayWetCrossStereo;
+        const double wetWidth = monoSourceAtFX ? 1.40 : kFXDelayWetWidthStereo;
         const double delayedL = filteredDelayedSamples[0];
         const double delayedR = filteredDelayedSamples[1];
         feedbackDelayedSamples[0] =
-          (1.0 - kFXDelayFeedbackCrossStereo) * delayedL + kFXDelayFeedbackCrossStereo * delayedR;
+          (1.0 - feedbackCross) * delayedL + feedbackCross * delayedR;
         feedbackDelayedSamples[1] =
-          (1.0 - kFXDelayFeedbackCrossStereo) * delayedR + kFXDelayFeedbackCrossStereo * delayedL;
-        wetDelayedSamples[0] = (1.0 - kFXDelayWetCrossStereo) * delayedL + kFXDelayWetCrossStereo * delayedR;
-        wetDelayedSamples[1] = (1.0 - kFXDelayWetCrossStereo) * delayedR + kFXDelayWetCrossStereo * delayedL;
+          (1.0 - feedbackCross) * delayedR + feedbackCross * delayedL;
+        wetDelayedSamples[0] = (1.0 - wetCross) * delayedL + wetCross * delayedR;
+        wetDelayedSamples[1] = (1.0 - wetCross) * delayedR + wetCross * delayedL;
+
+        const double wetMid = 0.5 * (wetDelayedSamples[0] + wetDelayedSamples[1]);
+        const double wetSide = 0.5 * (wetDelayedSamples[0] - wetDelayedSamples[1]) * wetWidth;
+        wetDelayedSamples[0] = wetMid + wetSide;
+        wetDelayedSamples[1] = wetMid - wetSide;
       }
 
       for (size_t c = 0; c < numChannelsInternal; ++c)
       {
         auto& delayBuffer = mFXDelayBuffer[c];
-        const double writeValue = drySamples[c] + smoothedFeedback * feedbackDelayedSamples[c];
+        double feedbackForWrite = feedbackDelayedSamples[c];
+        if (monoSourceAtFX && stereoFXBusActive)
+        {
+          const size_t otherChannel = 1 - c;
+          feedbackForWrite = (1.0 - kFXDelayMonoStereoPingPongFeedback) * feedbackDelayedSamples[c]
+                             + kFXDelayMonoStereoPingPongFeedback * feedbackDelayedSamples[otherChannel];
+        }
+        const double writeValue = drySamples[c] + smoothedFeedback * feedbackForWrite;
         delayBuffer[writeIndex] = static_cast<sample>(writeValue);
 
         if (fxDelayActive)
@@ -1753,8 +1784,12 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool fxReverbActive = GetParam(kFXReverbActive)->Bool() && !fxBypassed;
   if (fxReverbActive && sampleRate > 0.0 && mFXReverbPreDelayBufferSamples > 2)
   {
-    const bool stereoCoreActive = (numChannelsMonoCore > 1) && (numChannelsInternal == 2);
+    const bool stereoFXBusActive = (numChannelsInternal == 2);
+    const bool monoSourceAtFX = (numChannelsMonoCore == 1);
     constexpr double kFXReverbWetCrossStereo = 0.18;
+    constexpr double kFXReverbWetWidthStereoRoom = 1.14;
+    constexpr double kFXReverbWetWidthStereoHall = 1.34;
+    constexpr double kFXReverbMonoStereoPreDelaySkewMs = 3.0;
     const double targetMix = std::clamp(GetParam(kFXReverbMix)->Value() * 0.01, 0.0, 1.0);
     const double targetDecaySeconds = std::clamp(GetParam(kFXReverbDecay)->Value(), 0.1, 10.0);
     const double targetPreDelaySamples = std::clamp(
@@ -1862,6 +1897,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         smoothedPreDelaySamples + hallAmount * (kHallExtraPreDelayMs * 0.001 * sampleRate),
         0.0,
         static_cast<double>(mFXReverbPreDelayBufferSamples - 2));
+      const double monoStereoPreDelaySkewSamples =
+        monoSourceAtFX ? (kFXReverbMonoStereoPreDelaySkewMs * 0.001 * sampleRate) : 0.0;
       const double wetMix = std::pow(std::clamp(smoothedMix, 0.0, 1.0), 1.25);
       const double dryMix = std::sqrt(std::max(0.0, 1.0 - wetMix));
       const double wetGain = 1.5 * wetMix;
@@ -1911,7 +1948,17 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         earlyToneState += earlyToneAlpha * (early - earlyToneState);
         const double earlyShaped = earlyToneState * smoothedEarlyLevel;
 
-        double preReadPos = static_cast<double>(preDelayWriteIndex) - effectivePreDelaySamples;
+        double channelPreDelaySamples = effectivePreDelaySamples;
+        if (monoSourceAtFX && stereoFXBusActive)
+        {
+          const double stereoSkewSign = (c == 0) ? -1.0 : 1.0;
+          channelPreDelaySamples = std::clamp(
+            effectivePreDelaySamples + stereoSkewSign * monoStereoPreDelaySkewSamples,
+            0.0,
+            static_cast<double>(mFXReverbPreDelayBufferSamples - 2));
+        }
+
+        double preReadPos = static_cast<double>(preDelayWriteIndex) - channelPreDelaySamples;
         if (preReadPos < 0.0)
           preReadPos += static_cast<double>(mFXReverbPreDelayBufferSamples);
         const auto preReadIndex0 = static_cast<size_t>(preReadPos);
@@ -2018,12 +2065,22 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         wetSamples[c] = modeOutputTrim * highCutState + earlyDirect;
       }
 
-      if (stereoCoreActive)
+      if (stereoFXBusActive)
       {
+        const double wetCross = monoSourceAtFX ? 0.24 : kFXReverbWetCrossStereo;
+        const double roomWetWidth = monoSourceAtFX ? 1.26 : kFXReverbWetWidthStereoRoom;
+        const double hallWetWidth = monoSourceAtFX ? 1.50 : kFXReverbWetWidthStereoHall;
         const double wetL = wetSamples[0];
         const double wetR = wetSamples[1];
-        wetSamples[0] = (1.0 - kFXReverbWetCrossStereo) * wetL + kFXReverbWetCrossStereo * wetR;
-        wetSamples[1] = (1.0 - kFXReverbWetCrossStereo) * wetR + kFXReverbWetCrossStereo * wetL;
+        wetSamples[0] = (1.0 - wetCross) * wetL + wetCross * wetR;
+        wetSamples[1] = (1.0 - wetCross) * wetR + wetCross * wetL;
+
+        const double wetWidth =
+          roomAmount * roomWetWidth + hallAmount * hallWetWidth;
+        const double wetMid = 0.5 * (wetSamples[0] + wetSamples[1]);
+        const double wetSide = 0.5 * (wetSamples[0] - wetSamples[1]) * wetWidth;
+        wetSamples[0] = wetMid + wetSide;
+        wetSamples[1] = wetMid - wetSide;
       }
 
       for (size_t c = 0; c < numChannelsInternal; ++c)
