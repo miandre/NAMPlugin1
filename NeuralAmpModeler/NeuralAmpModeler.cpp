@@ -21,6 +21,7 @@
 #include "architecture.hpp"
 
 #include "NeuralAmpModelerControls.h"
+#include "IPopupMenuControl.h"
 
 #if __has_include("third_party/rubberband/single/RubberBandSingle.cpp")
 // Build Rubber Band as a single translation unit without modifying project files.
@@ -43,8 +44,16 @@ constexpr int kAmpSlotModelStateFailed = 3;
 constexpr int kSlotLoadUIEventNone = 0;
 constexpr int kSlotLoadUIEventLoaded = 1;
 constexpr int kSlotLoadUIEventFailed = 2;
-#ifdef APP_API
 constexpr const char* kStandaloneStateFileName = "plugin-state.bin";
+constexpr const char* kStandalonePresetDirName = "Presets";
+constexpr const char* kStandaloneUserPresetSubdirName = "User";
+constexpr const char* kStandaloneFactoryPresetSubdirName = "Factory";
+constexpr const char* kStandalonePresetExtension = "nampreset";
+constexpr const char* kStandalonePresetDefaultFileName = "Preset.nampreset";
+constexpr int kPresetMenuTagSave = 1;
+constexpr int kPresetMenuTagSaveAs = 2;
+constexpr int kPresetMenuTagUserBase = 1000;
+constexpr int kPresetMenuTagFactoryBase = 2000;
 constexpr std::streamoff kMaxStandaloneStateBytes = 16 * 1024 * 1024;
 
 std::filesystem::path GetStandaloneStateFilePath()
@@ -66,13 +75,45 @@ std::filesystem::path GetStandaloneStateFilePath()
 #endif
 }
 
-bool LoadStandaloneStateChunk(IByteChunk& chunk)
+std::filesystem::path GetStandalonePresetDirectoryPath()
 {
-  const auto stateFilePath = GetStandaloneStateFilePath();
-  if (stateFilePath.empty())
+  const auto statePath = GetStandaloneStateFilePath();
+  if (statePath.empty())
+    return {};
+  return statePath.parent_path() / kStandalonePresetDirName;
+}
+
+std::filesystem::path GetStandaloneUserPresetDirectoryPath()
+{
+  const auto presetDir = GetStandalonePresetDirectoryPath();
+  if (presetDir.empty())
+    return {};
+  return presetDir / kStandaloneUserPresetSubdirName;
+}
+
+std::filesystem::path GetStandaloneFactoryPresetDirectoryPath()
+{
+  const auto presetDir = GetStandalonePresetDirectoryPath();
+  if (presetDir.empty())
+    return {};
+  return presetDir / kStandaloneFactoryPresetSubdirName;
+}
+
+std::filesystem::path EnsureStandalonePresetExtension(std::filesystem::path filePath)
+{
+  if (filePath.empty())
+    return filePath;
+  if (filePath.extension() != ("." + std::string(kStandalonePresetExtension)))
+    filePath.replace_extension(kStandalonePresetExtension);
+  return filePath;
+}
+
+bool LoadChunkFromFile(const std::filesystem::path& filePath, IByteChunk& chunk)
+{
+  if (filePath.empty())
     return false;
 
-  std::ifstream input(stateFilePath, std::ios::binary | std::ios::ate);
+  std::ifstream input(filePath, std::ios::binary | std::ios::ate);
   if (!input.is_open())
     return false;
 
@@ -87,23 +128,34 @@ bool LoadStandaloneStateChunk(IByteChunk& chunk)
   return input.good();
 }
 
-void SaveStandaloneStateChunk(const IByteChunk& chunk)
+bool SaveChunkToFile(const std::filesystem::path& filePath, const IByteChunk& chunk)
 {
-  const auto stateFilePath = GetStandaloneStateFilePath();
-  if (stateFilePath.empty())
-    return;
+  if (filePath.empty())
+    return false;
 
   std::error_code ec;
-  std::filesystem::create_directories(stateFilePath.parent_path(), ec);
+  std::filesystem::create_directories(filePath.parent_path(), ec);
   if (ec)
-    return;
+    return false;
 
-  std::ofstream output(stateFilePath, std::ios::binary | std::ios::trunc);
+  std::ofstream output(filePath, std::ios::binary | std::ios::trunc);
   if (!output.is_open())
-    return;
+    return false;
 
   if (chunk.Size() > 0 && chunk.GetData() != nullptr)
     output.write(reinterpret_cast<const char*>(chunk.GetData()), chunk.Size());
+  return output.good();
+}
+
+#ifdef APP_API
+bool LoadStandaloneStateChunk(IByteChunk& chunk)
+{
+  return LoadChunkFromFile(GetStandaloneStateFilePath(), chunk);
+}
+
+void SaveStandaloneStateChunk(const IByteChunk& chunk)
+{
+  SaveChunkToFile(GetStandaloneStateFilePath(), chunk);
 }
 #endif
 
@@ -386,6 +438,17 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto topBarArea = IRECT(contentArea.L, contentArea.T, contentArea.R, contentArea.T + kTopBarHeight);
     const auto bottomBarArea = IRECT(contentArea.L, contentArea.B - kBottomBarHeight, contentArea.R, contentArea.B);
     const auto heroArea = IRECT(contentArea.L, topBarArea.B, contentArea.R, bottomBarArea.T);
+    pGraphics->AttachPopupMenuControl(
+      IText(13.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle));
+    if (auto* pPopupMenuControl = pGraphics->GetPopupMenuControl())
+    {
+      pPopupMenuControl->SetPanelColor(IColor(245, 24, 24, 28));
+      pPopupMenuControl->SetCellBackgroundColor(IColor(60, 255, 255, 255));
+      pPopupMenuControl->SetItemColor(COLOR_WHITE.WithOpacity(0.92f));
+      pPopupMenuControl->SetItemMouseoverColor(COLOR_WHITE);
+      pPopupMenuControl->SetDisabledItemColor(COLOR_GRAY.WithOpacity(0.78f));
+      pPopupMenuControl->SetSeparatorColor(IColor(70, 255, 255, 255));
+    }
     // Dedicated amp-face anchor region. Front-panel controls reference this instead of top bar sizing.
     const auto ampFaceArea = IRECT(contentArea.L + 66.0f, contentArea.T + 215.0f, contentArea.R - 66.0f, contentArea.T + 496.0f);
     // Phase 1 top layout: primary section row + compact utility row.
@@ -709,6 +772,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       if (fileName.GetLength())
       {
         _RequestModelLoadForSlot(fileName, slotIndex, ctrlTag);
+        _MarkStandalonePresetDirty();
         mAmpSlotStates[slotIndex].modelToggle = 1.0;
         mAmpSlotStates[slotIndex].modelToggleTouched = true;
         if (mAmpSelectorIndex == slotIndex)
@@ -743,6 +807,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         else
         {
           GetParam(kStompBoostActive)->Set(1.0);
+          _MarkStandalonePresetDirty();
         }
         SendParameterValueFromDelegate(kStompBoostActive, GetParam(kStompBoostActive)->GetNormalized(), true);
       }
@@ -762,6 +827,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
           _ShowMessageBox(GetUI(), message.str().c_str(), "Failed to load left IR!", kMB_OK);
         }
+        else
+        {
+          _MarkStandalonePresetDirty();
+        }
       }
     };
 
@@ -777,6 +846,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
           message << dsp::wav::GetMsgForLoadReturnCode(retCode);
 
           _ShowMessageBox(GetUI(), message.str().c_str(), "Failed to load right IR!", kMB_OK);
+        }
+        else
+        {
+          _MarkStandalonePresetDirty();
         }
       }
     };
@@ -803,65 +876,35 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       new NAMTunerMonitorControl(tunerMonitorArea, kTunerMonitorMode, utilityStyle),
                               kCtrlTagTunerMute)
       ->SetTooltip("Tuner monitor mode: Mute / Bypass / Full");
-    auto updatePresetLabel = [this](IGraphics* pG) {
-      if (auto* pText = dynamic_cast<ITextControl*>(pG->GetControlWithTag(kCtrlTagPresetLabel)))
-      {
-        if (NPresets() <= 0)
-        {
-          pText->SetStr("No Presets");
-          pText->SetDirty(false);
-          return;
-        }
-
-        const int presetIdx = std::clamp(GetCurrentPresetIdx(), 0, NPresets() - 1);
-        const char* presetName = GetPresetName(presetIdx);
-        WDL_String label;
-        if (presetName && std::strlen(presetName) > 0)
-          label.SetFormatted(256, "%d. %s", presetIdx + 1, presetName);
-        else
-          label.SetFormatted(64, "Preset %d", presetIdx + 1);
-        pText->SetStr(label.Get());
-        pText->SetDirty(false);
-      }
-    };
     pGraphics->AttachControl(new IPanelControl(presetStripArea, IColor(40, 255, 255, 255).WithOpacity(0.10f)));
-    pGraphics->AttachControl(new NAMSquareButtonControl(presetPrevArea, [this, updatePresetLabel](IControl*) {
-      if (NPresets() <= 0)
-        return;
-      const int count = NPresets();
-      int idx = GetCurrentPresetIdx();
-      if (idx < 0 || idx >= count)
-        idx = 0;
-      idx = (idx - 1 + count) % count;
-      RestorePreset(idx);
-      if (auto* pG = GetUI())
-        updatePresetLabel(pG);
+    pGraphics->AttachControl(new NAMSquareButtonControl(presetPrevArea, [this](IControl*) {
+      _SelectStandalonePresetRelative(-1);
     }, leftArrowSVG));
-    pGraphics->AttachControl(new NAMSquareButtonControl(presetNextArea, [this, updatePresetLabel](IControl*) {
-      if (NPresets() <= 0)
-        return;
-      const int count = NPresets();
-      int idx = GetCurrentPresetIdx();
-      if (idx < 0 || idx >= count)
-        idx = 0;
-      idx = (idx + 1) % count;
-      RestorePreset(idx);
-      if (auto* pG = GetUI())
-        updatePresetLabel(pG);
+    pGraphics->AttachControl(new NAMSquareButtonControl(presetNextArea, [this](IControl*) {
+      _SelectStandalonePresetRelative(1);
     }, rightArrowSVG));
-    pGraphics->AttachControl(new ITextControl(
-      presetLabelArea, "Preset", IText(13.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle)),
-                             kCtrlTagPresetLabel);
-    updatePresetLabel(pGraphics);
+    const IVStyle presetPickerStyle =
+      utilityStyle.WithShowValue(false)
+        .WithColor(EVColor::kBG, COLOR_TRANSPARENT)
+        .WithColor(EVColor::kOFF, COLOR_TRANSPARENT)
+        .WithColor(EVColor::kON, IColor(40, 255, 255, 255))
+        .WithColor(EVColor::kPR, IColor(28, 255, 255, 255))
+        .WithColor(EVColor::kFR, IColor(0, 255, 255, 255))
+        .WithColor(EVColor::kHL, IColor(30, 255, 255, 255))
+        .WithLabelText(IText(13.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle));
+    pGraphics->AttachControl(new IVButtonControl(presetLabelArea, SplashClickActionFunc, "Preset", presetPickerStyle), kCtrlTagPresetLabel)
+      ->SetAnimationEndActionFunction([this](IControl* pCaller) {
+        _ShowStandalonePresetMenu(pCaller->GetRECT());
+      });
+    _UpdatePresetLabel();
     pGraphics->AttachControl(new NAMSquareButtonControl(
                                tunerCloseArea,
                                [this](IControl*) {
                                  const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
                                  if (tunerIdx < mTopNavBypassed.size())
                                  {
-                                   mTopNavBypassed[tunerIdx] = true;
-                                   _SyncTunerParamToTopNav();
-                                   _RefreshTopNavControls();
+                                   if (!mTopNavBypassed[tunerIdx])
+                                     _ToggleTopNavSectionBypass(TopNavSection::Tuner);
                                  }
                                },
                                crossSVG),
@@ -889,24 +932,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(
       new NAMTopIconControl(topNavTunerArea, tunerActiveSVG, tunerActiveSVG, tunerActiveSVG,
                             [this]() {
-                              const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
-                              if (tunerIdx < mTopNavBypassed.size())
-                              {
-                                // Tuner behaves as a regular on/off toggle on normal click.
-                                mTopNavBypassed[tunerIdx] = !mTopNavBypassed[tunerIdx];
-                                _SyncTunerParamToTopNav();
-                                _RefreshTopNavControls();
-                              }
+                              // Tuner behaves as a regular on/off toggle on normal click.
+                              _ToggleTopNavSectionBypass(TopNavSection::Tuner);
                             },
                             [this]() {
-                              const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
-                              if (tunerIdx < mTopNavBypassed.size())
-                              {
-                                // Keep Ctrl/Right-click behavior consistent with left-click toggle.
-                                mTopNavBypassed[tunerIdx] = !mTopNavBypassed[tunerIdx];
-                                _SyncTunerParamToTopNav();
-                                _RefreshTopNavControls();
-                              }
+                              // Keep Ctrl/Right-click behavior consistent with left-click toggle.
+                              _ToggleTopNavSectionBypass(TopNavSection::Tuner);
                             },
                             false),
       kCtrlTagTopNavTuner)
@@ -2375,7 +2406,8 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
   chunk.PutStr(mIRPath.Get());
   chunk.PutStr(mIRPathRight.Get());
 
-  const int32_t topNavActiveSection = static_cast<int32_t>(mTopNavActiveSection);
+  // Presets should not force which UI section is visible.
+  const int32_t topNavActiveSection = static_cast<int32_t>(TopNavSection::Amp);
   chunk.Put(&topNavActiveSection);
 
   for (const bool bypassed : mTopNavBypassed)
@@ -2517,9 +2549,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     mIRPathRight = irRightPath;
     mAmpSlotStates = slotStates;
 
-    const int activeSectionIdx = std::clamp(
-      static_cast<int>(topNavActiveSection), 0, static_cast<int>(TopNavSection::Count) - 1);
-    mTopNavActiveSection = static_cast<TopNavSection>(activeSectionIdx);
+    (void) topNavActiveSection;
     mTopNavBypassed = bypassed;
 
     for (int slotIndex = 0; slotIndex < static_cast<int>(mToneStacks.size()); ++slotIndex)
@@ -2670,6 +2700,8 @@ void NeuralAmpModeler::OnUIOpen()
   }
 
   _RefreshTopNavControls();
+  _RefreshStandalonePresetList();
+  _UpdatePresetLabel();
 }
 
 void NeuralAmpModeler::OnParamChange(int paramIdx)
@@ -2704,6 +2736,9 @@ void NeuralAmpModeler::OnParamChange(int paramIdx)
 
 void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
 {
+  if (source == kUI)
+    _MarkStandalonePresetDirty();
+
   if (auto pGraphics = GetUI())
   {
     bool active = GetParam(paramIdx)->Bool();
@@ -2828,6 +2863,7 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
               {
                 const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(mAmpSelectorIndex);
                 _RequestModelLoadForSlot(chosenFileName, mAmpSelectorIndex, slotCtrlTag);
+                _MarkStandalonePresetDirty();
                 GetParam(kModelToggle)->Set(1.0);
               }
               else
@@ -2868,6 +2904,7 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
       mSlotLoadUIEvent[resolvedSlot].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
       mSlotLoadRequestId[resolvedSlot].fetch_add(1, std::memory_order_relaxed);
       mShouldRemoveModelSlot[resolvedSlot].store(true, std::memory_order_relaxed);
+      _MarkStandalonePresetDirty();
 
       if (resolvedSlot == mAmpSelectorIndex)
       {
@@ -2876,9 +2913,18 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
       }
       return true;
     }
-    case kMsgTagClearStompModel: mShouldRemoveStompModel = true; return true;
-    case kMsgTagClearIRLeft: mShouldRemoveIRLeft = true; return true;
-    case kMsgTagClearIRRight: mShouldRemoveIRRight = true; return true;
+    case kMsgTagClearStompModel:
+      mShouldRemoveStompModel = true;
+      _MarkStandalonePresetDirty();
+      return true;
+    case kMsgTagClearIRLeft:
+      mShouldRemoveIRLeft = true;
+      _MarkStandalonePresetDirty();
+      return true;
+    case kMsgTagClearIRRight:
+      mShouldRemoveIRRight = true;
+      _MarkStandalonePresetDirty();
+      return true;
     case kMsgTagHighlightColor:
     {
       mHighLightColor.Set((const char*)pData);
@@ -2903,6 +2949,367 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
     }
     default: return false;
   }
+}
+
+void NeuralAmpModeler::_UpdatePresetLabel()
+{
+  auto* pGraphics = GetUI();
+  if (pGraphics == nullptr)
+    return;
+
+  auto* pText = dynamic_cast<ITextControl*>(pGraphics->GetControlWithTag(kCtrlTagPresetLabel));
+  auto* pLabelButton = dynamic_cast<IVButtonControl*>(pGraphics->GetControlWithTag(kCtrlTagPresetLabel));
+  if (pText == nullptr && pLabelButton == nullptr)
+    return;
+
+  WDL_String label;
+  if (mStandalonePresetFilePath.GetLength() > 0)
+  {
+    std::filesystem::path presetPath(mStandalonePresetFilePath.Get());
+    const std::string presetName = presetPath.stem().string();
+    if (mStandalonePresetIndex >= 0 && mStandalonePresetIndex < static_cast<int>(mStandalonePresetPaths.size()))
+      label.SetFormatted(256, "%d. %s", mStandalonePresetIndex + 1, presetName.c_str());
+    else
+      label.SetFormatted(256, "%s", presetName.c_str());
+  }
+  else if (!mStandalonePresetPaths.empty())
+  {
+    label.Set("Unsaved");
+  }
+  else
+  {
+    label.Set("No Presets");
+  }
+  if (mStandalonePresetDirty && std::strcmp(label.Get(), "No Presets") != 0)
+    label.Append("*");
+
+  if (pText != nullptr)
+  {
+    pText->SetStr(label.Get());
+    pText->SetDirty(false);
+  }
+  if (pLabelButton != nullptr)
+  {
+    pLabelButton->SetLabelStr(label.Get());
+    pLabelButton->SetDirty(false);
+  }
+}
+
+void NeuralAmpModeler::_RefreshStandalonePresetList()
+{
+  mStandaloneUserPresetPaths.clear();
+  mStandaloneFactoryPresetPaths.clear();
+  mStandalonePresetPaths.clear();
+  mStandalonePresetIndex = -1;
+
+  const auto userPresetDir = GetStandaloneUserPresetDirectoryPath();
+  const auto factoryPresetDir = GetStandaloneFactoryPresetDirectoryPath();
+  if (userPresetDir.empty() || factoryPresetDir.empty())
+    return;
+
+  std::error_code ec;
+  if (!std::filesystem::exists(userPresetDir, ec))
+    std::filesystem::create_directories(userPresetDir, ec);
+  if (ec)
+    return;
+
+  auto scanPresetDirectory = [&ec](const std::filesystem::path& directory, std::vector<WDL_String>& outPaths) {
+    for (const auto& entry : std::filesystem::directory_iterator(directory, ec))
+    {
+      if (ec)
+        break;
+      if (!entry.is_regular_file())
+        continue;
+      if (entry.path().extension() != ("." + std::string(kStandalonePresetExtension)))
+        continue;
+
+      WDL_String path;
+      path.Set(entry.path().string().c_str());
+      outPaths.push_back(path);
+    }
+
+    std::sort(
+      outPaths.begin(),
+      outPaths.end(),
+      [](const WDL_String& a, const WDL_String& b) { return std::strcmp(a.Get(), b.Get()) < 0; });
+  };
+
+  scanPresetDirectory(userPresetDir, mStandaloneUserPresetPaths);
+
+  std::vector<std::filesystem::path> factorySearchDirs;
+  factorySearchDirs.push_back(factoryPresetDir);
+  factorySearchDirs.push_back(std::filesystem::path("NeuralAmpModeler") / "resources" / "Presets" / "Factory");
+  factorySearchDirs.push_back(std::filesystem::path("NeuralAmpModeler") / "resources" / "presets" / "factory");
+  factorySearchDirs.push_back(std::filesystem::path("resources") / "Presets" / "Factory");
+  factorySearchDirs.push_back(std::filesystem::path("resources") / "presets" / "factory");
+  factorySearchDirs.push_back(std::filesystem::path("Presets") / "Factory");
+  factorySearchDirs.push_back(std::filesystem::path("presets") / "factory");
+  WDL_String hostPath;
+  HostPath(hostPath, GetBundleID());
+  if (hostPath.GetLength() > 0)
+  {
+    const std::filesystem::path hostDir(hostPath.Get());
+    factorySearchDirs.push_back(hostDir / "Presets" / "Factory");
+    factorySearchDirs.push_back(hostDir / "resources" / "Presets" / "Factory");
+    factorySearchDirs.push_back(hostDir / "resources" / "presets" / "factory");
+  }
+
+  std::vector<std::filesystem::path> normalizedFactoryDirs;
+  for (auto factoryDir : factorySearchDirs)
+  {
+    std::error_code dirEc;
+    factoryDir = std::filesystem::absolute(factoryDir, dirEc);
+    if (dirEc || !std::filesystem::exists(factoryDir, dirEc) || dirEc)
+      continue;
+    bool duplicate = false;
+    for (const auto& existingDir : normalizedFactoryDirs)
+    {
+      if (existingDir == factoryDir)
+      {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate)
+      normalizedFactoryDirs.push_back(factoryDir);
+  }
+
+  for (const auto& factoryDir : normalizedFactoryDirs)
+    scanPresetDirectory(factoryDir, mStandaloneFactoryPresetPaths);
+
+  std::sort(
+    mStandaloneFactoryPresetPaths.begin(),
+    mStandaloneFactoryPresetPaths.end(),
+    [](const WDL_String& a, const WDL_String& b) { return std::strcmp(a.Get(), b.Get()) < 0; });
+  mStandaloneFactoryPresetPaths.erase(
+    std::unique(
+      mStandaloneFactoryPresetPaths.begin(),
+      mStandaloneFactoryPresetPaths.end(),
+      [](const WDL_String& a, const WDL_String& b) { return std::strcmp(a.Get(), b.Get()) == 0; }),
+    mStandaloneFactoryPresetPaths.end());
+
+  if (ec)
+    return;
+
+  for (const auto& path : mStandaloneUserPresetPaths)
+    mStandalonePresetPaths.push_back(path);
+  for (const auto& path : mStandaloneFactoryPresetPaths)
+    mStandalonePresetPaths.push_back(path);
+
+  if (mStandalonePresetFilePath.GetLength() > 0)
+  {
+    for (int i = 0; i < static_cast<int>(mStandalonePresetPaths.size()); ++i)
+    {
+      if (std::strcmp(mStandalonePresetPaths[i].Get(), mStandalonePresetFilePath.Get()) == 0)
+      {
+        mStandalonePresetIndex = i;
+        break;
+      }
+    }
+  }
+}
+
+bool NeuralAmpModeler::_LoadStandalonePresetFromFile(const WDL_String& filePath)
+{
+  std::filesystem::path path = EnsureStandalonePresetExtension(std::filesystem::path(filePath.Get()));
+  std::error_code ec;
+  path = std::filesystem::absolute(path, ec);
+  if (ec)
+    path = EnsureStandalonePresetExtension(std::filesystem::path(filePath.Get()));
+
+  IByteChunk chunk;
+  if (!LoadChunkFromFile(path, chunk))
+    return false;
+
+  const int unserializePos = UnserializeState(chunk, 0);
+  if (unserializePos < 0)
+    return false;
+
+  mStandalonePresetFilePath.Set(path.string().c_str());
+  _SetStandalonePresetDirty(false);
+  _RefreshStandalonePresetList();
+  _UpdatePresetLabel();
+  return true;
+}
+
+bool NeuralAmpModeler::_SaveStandalonePresetToFile(const WDL_String& filePath)
+{
+  std::filesystem::path path = EnsureStandalonePresetExtension(std::filesystem::path(filePath.Get()));
+  std::error_code ec;
+  path = std::filesystem::absolute(path, ec);
+  if (ec)
+    path = EnsureStandalonePresetExtension(std::filesystem::path(filePath.Get()));
+
+  IByteChunk chunk;
+  if (!SerializeState(chunk))
+    return false;
+
+  if (!SaveChunkToFile(path, chunk))
+    return false;
+
+  mStandalonePresetFilePath.Set(path.string().c_str());
+  _SetStandalonePresetDirty(false);
+  _RefreshStandalonePresetList();
+  _UpdatePresetLabel();
+  return true;
+}
+
+void NeuralAmpModeler::_PromptStandalonePresetSaveAs()
+{
+  if (auto* pGraphics = GetUI())
+  {
+    WDL_String fileName;
+    if (mStandalonePresetFilePath.GetLength() > 0)
+      fileName.Set(std::filesystem::path(mStandalonePresetFilePath.Get()).filename().string().c_str());
+    else
+      fileName.Set(kStandalonePresetDefaultFileName);
+    WDL_String path;
+    const auto userPresetDir = GetStandaloneUserPresetDirectoryPath();
+    if (!userPresetDir.empty())
+      path.Set(userPresetDir.string().c_str());
+    pGraphics->PromptForFile(fileName, path, EFileAction::Save, kStandalonePresetExtension, [this](const WDL_String& file, const WDL_String&) {
+      if (file.GetLength() == 0)
+        return;
+      if (!_SaveStandalonePresetToFile(file))
+        _ShowMessageBox(GetUI(), "Failed to save preset.", "Preset Save Error", kMB_OK);
+    });
+  }
+}
+
+void NeuralAmpModeler::_SelectStandalonePresetRelative(const int delta)
+{
+  _RefreshStandalonePresetList();
+  if (mStandalonePresetPaths.empty())
+    return;
+
+  int nextIndex = mStandalonePresetIndex;
+  if (nextIndex < 0 || nextIndex >= static_cast<int>(mStandalonePresetPaths.size()))
+    nextIndex = (delta < 0) ? static_cast<int>(mStandalonePresetPaths.size()) - 1 : 0;
+  else
+    nextIndex = (nextIndex + delta + static_cast<int>(mStandalonePresetPaths.size())) % static_cast<int>(mStandalonePresetPaths.size());
+
+  if (nextIndex < 0 || nextIndex >= static_cast<int>(mStandalonePresetPaths.size()))
+    return;
+
+  _LoadStandalonePresetFromFile(mStandalonePresetPaths[nextIndex]);
+}
+
+void NeuralAmpModeler::_ShowStandalonePresetMenu(const IRECT& anchorArea)
+{
+  auto* pGraphics = GetUI();
+  if (pGraphics == nullptr)
+    return;
+
+  _RefreshStandalonePresetList();
+
+  mStandalonePresetMenu.Clear();
+  mStandalonePresetMenu.SetFunction([this](IPopupMenu* pMenu) {
+    if (pMenu == nullptr)
+      return;
+    auto* pItem = pMenu->GetChosenItem();
+    if (pItem == nullptr)
+      return;
+
+    const int tag = pItem->GetTag();
+    if (tag == kPresetMenuTagSave)
+    {
+      if (mStandalonePresetFilePath.GetLength() > 0 && !_IsStandaloneFactoryPresetPath(mStandalonePresetFilePath))
+      {
+        _SaveStandalonePresetToFile(mStandalonePresetFilePath);
+      }
+      else
+      {
+        _PromptStandalonePresetSaveAs();
+      }
+      return;
+    }
+    if (tag == kPresetMenuTagSaveAs)
+    {
+      _PromptStandalonePresetSaveAs();
+      return;
+    }
+    if (tag >= kPresetMenuTagUserBase
+        && tag < kPresetMenuTagUserBase + static_cast<int>(mStandaloneUserPresetPaths.size()))
+    {
+      _LoadStandalonePresetFromFile(mStandaloneUserPresetPaths[tag - kPresetMenuTagUserBase]);
+      return;
+    }
+    if (tag >= kPresetMenuTagFactoryBase
+        && tag < kPresetMenuTagFactoryBase + static_cast<int>(mStandaloneFactoryPresetPaths.size()))
+    {
+      _LoadStandalonePresetFromFile(mStandaloneFactoryPresetPaths[tag - kPresetMenuTagFactoryBase]);
+      return;
+    }
+  });
+
+  mStandalonePresetMenu.AddItem(new IPopupMenu::Item("Save", IPopupMenu::Item::kNoFlags, kPresetMenuTagSave));
+  mStandalonePresetMenu.AddItem(new IPopupMenu::Item("Save As...", IPopupMenu::Item::kNoFlags, kPresetMenuTagSaveAs));
+  mStandalonePresetMenu.AddSeparator();
+
+  auto* pUserSubmenu = new IPopupMenu();
+  if (mStandaloneUserPresetPaths.empty())
+  {
+    pUserSubmenu->AddItem("No User Presets", -1, IPopupMenu::Item::kDisabled);
+  }
+  else
+  {
+    for (int i = 0; i < static_cast<int>(mStandaloneUserPresetPaths.size()); ++i)
+    {
+      const std::filesystem::path path(mStandaloneUserPresetPaths[i].Get());
+      const std::string name = path.stem().string();
+      const bool isCurrent = std::strcmp(mStandaloneUserPresetPaths[i].Get(), mStandalonePresetFilePath.Get()) == 0;
+      const int flags = isCurrent ? IPopupMenu::Item::kChecked : IPopupMenu::Item::kNoFlags;
+      pUserSubmenu->AddItem(new IPopupMenu::Item(name.c_str(), flags, kPresetMenuTagUserBase + i));
+    }
+  }
+
+  auto* pFactorySubmenu = new IPopupMenu();
+  if (mStandaloneFactoryPresetPaths.empty())
+  {
+    pFactorySubmenu->AddItem("No Factory Presets", -1, IPopupMenu::Item::kDisabled);
+  }
+  else
+  {
+    for (int i = 0; i < static_cast<int>(mStandaloneFactoryPresetPaths.size()); ++i)
+    {
+      const std::filesystem::path path(mStandaloneFactoryPresetPaths[i].Get());
+      const std::string name = path.stem().string();
+      const bool isCurrent = std::strcmp(mStandaloneFactoryPresetPaths[i].Get(), mStandalonePresetFilePath.Get()) == 0;
+      const int flags = isCurrent ? IPopupMenu::Item::kChecked : IPopupMenu::Item::kNoFlags;
+      pFactorySubmenu->AddItem(new IPopupMenu::Item(name.c_str(), flags, kPresetMenuTagFactoryBase + i));
+    }
+  }
+
+  mStandalonePresetMenu.AddItem("User Presets", pUserSubmenu);
+  mStandalonePresetMenu.AddItem("Factory Presets", pFactorySubmenu);
+  auto* pPresetControl = pGraphics->GetControlWithTag(kCtrlTagPresetLabel);
+  if (pPresetControl == nullptr)
+    return;
+  pGraphics->CreatePopupMenu(*pPresetControl, mStandalonePresetMenu, anchorArea);
+}
+
+bool NeuralAmpModeler::_IsStandaloneFactoryPresetPath(const WDL_String& filePath) const
+{
+  for (const auto& factoryPath : mStandaloneFactoryPresetPaths)
+  {
+    if (std::strcmp(factoryPath.Get(), filePath.Get()) == 0)
+      return true;
+  }
+  return false;
+}
+
+void NeuralAmpModeler::_SetStandalonePresetDirty(const bool isDirty)
+{
+  if (mStandalonePresetDirty == isDirty)
+    return;
+
+  mStandalonePresetDirty = isDirty;
+  _UpdatePresetLabel();
+}
+
+void NeuralAmpModeler::_MarkStandalonePresetDirty()
+{
+  _SetStandalonePresetDirty(true);
 }
 
 // Private methods ============================================================
@@ -2932,7 +3339,10 @@ void NeuralAmpModeler::_ToggleTopNavSectionBypass(const TopNavSection section)
   if (idx >= mTopNavBypassed.size())
     return;
 
+  const bool previous = mTopNavBypassed[idx];
   mTopNavBypassed[idx] = !mTopNavBypassed[idx];
+  if (mTopNavBypassed[idx] != previous)
+    _MarkStandalonePresetDirty();
 
   _SyncTunerParamToTopNav();
   _RefreshTopNavControls();
@@ -3091,6 +3501,7 @@ void NeuralAmpModeler::_SelectAmpSlot(int slotIndex)
 
   _CaptureAmpSlotState(mAmpSelectorIndex);
   mAmpSelectorIndex = slotIndex;
+  _MarkStandalonePresetDirty();
   mPendingAmpSlotSwitch.store(slotIndex, std::memory_order_relaxed);
 
   const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
