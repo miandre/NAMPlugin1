@@ -569,6 +569,7 @@ private:
   double mFXReverbSmoothedMode = 1.0;
   std::array<double, kNumChannelsInternal> mFXReverbLowCutLPState = {};
   std::array<double, kNumChannelsInternal> mFXReverbHighCutLPState = {};
+  bool mFXReverbWasActive = false;
   // Keep this as a dedicated DC blocker.
   recursive_linear_filter::HighPass mHighPass;
   //  recursive_linear_filter::LowPass mLowPass;
