@@ -389,6 +389,16 @@ private:
   void _ModelLoadWorkerLoop();
   void _StartModelLoadWorker();
   void _StopModelLoadWorker();
+  void _UpdatePresetLabel();
+  void _RefreshStandalonePresetList();
+  bool _LoadStandalonePresetFromFile(const WDL_String& filePath);
+  bool _SaveStandalonePresetToFile(const WDL_String& filePath);
+  void _PromptStandalonePresetSaveAs();
+  void _SelectStandalonePresetRelative(int delta);
+  void _ShowStandalonePresetMenu(const iplug::igraphics::IRECT& anchorArea);
+  bool _IsStandaloneFactoryPresetPath(const WDL_String& filePath) const;
+  void _SetStandalonePresetDirty(bool isDirty);
+  void _MarkStandalonePresetDirty();
 
   // Make sure that the latency is reported correctly.
   void _UpdateLatency();
@@ -467,6 +477,13 @@ private:
   bool mApplyingAmpSlotState = false;
   bool mStartupDefaultLoadAttempted = false;
   bool mStandaloneStateLoadAttempted = false;
+  std::vector<WDL_String> mStandaloneUserPresetPaths;
+  std::vector<WDL_String> mStandaloneFactoryPresetPaths;
+  std::vector<WDL_String> mStandalonePresetPaths;
+  int mStandalonePresetIndex = -1;
+  WDL_String mStandalonePresetFilePath;
+  bool mStandalonePresetDirty = false;
+  iplug::igraphics::IPopupMenu mStandalonePresetMenu;
   std::array<AmpSlotState, 3> mAmpSlotStates = {};
   // 0=Empty, 1=Loading, 2=Ready, 3=Failed.
   std::array<std::atomic<int>, 3> mAmpSlotModelState;
