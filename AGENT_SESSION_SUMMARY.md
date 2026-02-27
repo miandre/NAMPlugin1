@@ -1,6 +1,6 @@
 # AGENT_SESSION_SUMMARY.md
 
-Last updated: 2026-02-26
+Last updated: 2026-02-27
 
 Purpose: concise handoff for new agents so work can continue without replaying full chat history.
 
@@ -12,77 +12,80 @@ Purpose: concise handoff for new agents so work can continue without replaying f
 ## Current repository state
 - Branch: `main`
 - Remote: `origin` = `https://github.com/miandre/NAMPlugin1.git`
-- `main` is synced to `origin/main` at commit `73c276f`.
-- Working tree: clean.
+- `main` is synced to `origin/main` at commit `f33f9b8`.
+- Working tree was clean right after merge/push of `f33f9b8`.
 
 ## Submodule state (important)
-- `iPlug2` submodule URL is now your fork:
+- `iPlug2` remote is your fork:
   - `https://github.com/miandre/iPlug2.git`
-- Superproject pins `iPlug2` to commit:
+- Superproject pins `iPlug2` to:
   - `b54bf7af6b15f84b9bd7593e63bdf75e70d658db`
-- In your forked `iPlug2`, fix branch used:
-  - `nam/sonarworks-asio-and-input-routing`
 
-## What was completed in this session context
-### 1) Startup test asset convenience (tmpLoad)
-- Added startup defaults to auto-load local test assets for faster iteration (test-only workflow).
-- Related commit already on `main`:
-  - `e1a1f7f`: startup tmpLoad defaults with compile-time toggle.
+## Baseline commits to preserve
+- `596b97a` Fix top-nav Amp/Cab bypass to gate DSP sections
+- `ae5e65e` Submodule pointer update to forked iPlug2
+- `73c276f` Null-buffer hardening + APP IO config
+- `b37dd5b` Phase 1: mono-core to stereo bus and output routing
+- `06239f9` Phase 2: plugin dual-mono core for stereo input processing
+- `4c6ad96` Phase 2: stereo input mode UI + stereo-safe model/IR loading
+- `f33f9b8` Fix state recall and async amp slot model loading
 
-### 2) Top-nav bypass bug fixes
-- Fixed top icon menu section bypass/deactivate so Amp and Cab section deactivate behaves like section bypass controls.
-- Related commit on `main`:
-  - `596b97a`: top-nav Amp/Cab bypass now gates DSP sections.
+## What was completed in this wave
+### 1) Stereo work (Phase 1 + 2)
+- Plugin/app now support stereo output path with stereo-capable routing.
+- Plugin stereo input mode implemented (dual-mono model cores) with mono mode retained.
+- Standalone stereo input test support kept, with default behavior still mono-friendly.
+- Mono/stereo input mode is user-toggleable in GUI (top section) and default is mono (`Input 2` off behavior in practice).
+- Stereo-mode load/routing bugs were fixed so models/IRs load and apply correctly in both mono and stereo input modes.
 
-### 3) Sonarworks ASIO wrapper crash investigation + fix path
-Observed crash:
-- Access violation executing `0x0000000000000000`.
-- Call stack remained inside `SonarworksASIODriver.dll` and `SSLUSBDriverasio_x64.dll`.
+### 2) Slot behavior + model loading robustness
+- Non-active slot clear now targets the correct slot via control tag.
+- Amp slot switching and model loading moved to async/background workflow:
+  - background worker loads NAM models,
+  - lock-free atomic handoff to audio thread,
+  - audio thread owns final swap of active slot model.
+- Goal achieved: avoid synchronous slot-load stalls and avoid previous transient blend/volume jump behavior during slot switch.
 
-Effective fix path implemented in `iPlug2` and pinned via submodule:
-- `Dependencies/IPlug/RTAudio/RtAudio.cpp`
-  - Added `bufferSwitchTimeInfo` callback shim.
-  - Set `asioCallbacks.bufferSwitchTimeInfo = &bufferSwitchTimeInfo`.
-  - `kAsioSupportsTimeInfo` now returns `1` (was `0`).
-- `IPlug/APP/IPlugAPP_host.cpp`
-  - More robust stream init/channel count handling.
-  - Uses actual opened channel counts; null-safe pointer wiring.
-  - Uses callback `nFrames` correctly.
-- `IPlug/APP/IPlugAPP.cpp`
-  - Processes using incoming frame count (`nFrames`) instead of assumed block size.
-- `IPlug/APP/IPlugAPP_dialog.cpp`
-  - Input routing UI improvements: right input can be set to `off`.
-  - Removed legacy TEMP behavior that forced coupled stereo selection.
-- `IPlug/APP/IPlugAPP_host.h`
-  - Added opened-channel state fields; later cleaned dead legacy `mBufIndex` usage.
+### 3) State recall overhaul
+- State chunks are enabled (`PLUG_DOES_STATE_CHUNKS 1`).
+- New state schema includes:
+  - active amp slot,
+  - all 3 amp slot model paths,
+  - stomp/IR paths,
+  - top-nav active section + bypass states,
+  - per-slot amp state payload,
+  - full parameter payload.
+- Legacy state loading paths preserved/fallback handled.
+- Session reopen + DAW preset recall now restore slot/model behavior correctly (user-verified).
 
-Submodule commit containing these iPlug2 fixes:
-- `b54bf7af6`: `APP/ASIO: fix Sonarworks callback crash and honor input channel routing`.
+### 4) Standalone state persistence
+- Standalone now persists/restores state to local app data (`plugin-state.bin`), so reopening the EXE can restore previous state.
 
-### 4) Superproject hardening
-- `NeuralAmpModeler/NeuralAmpModeler.cpp`
-  - Added null guards in input/output/meter paths to tolerate null channel pointers safely.
-- `NeuralAmpModeler/config.h`
-  - APP channel IO set to `"1-2 2-2"` to keep stereo input capability available in standalone.
+## Practical behavior status (user-verified)
+- Sonarworks ASIO crash fix baseline still good.
+- Standalone allows disabling right input (`Audio In R = off`).
+- Mono and stereo input routing/load behavior works in standalone and plugin.
+- Session open/close and DAW preset recall now restore expected state.
 
-Related commit on `main`:
-- `73c276f`: `Standalone: harden null buffer handling and expose 2-2 APP IO config`.
+## Open issue to investigate next
+1. CPU inefficiency case:
+   - Repro: run standalone (mono input) or plugin on mono track, then set plugin input mode to stereo.
+   - Observation: heavy models can start crackling/clicking in stereo mode even though only one real input is available.
+   - Hypothesis: redundant dual-path processing is still running when effective input is mono.
+   - Next agent should validate signal-path gating and add an optimization path for "effective mono input" while keeping stereo mode semantics intact.
 
-### 5) Submodule pointer + fork URL update
-- `.gitmodules` updated to your iPlug2 fork URL.
-- Superproject now points `iPlug2` submodule to `b54bf7af6`.
-- Related commit on `main`:
-  - `ae5e65e`: `Submodule: point iPlug2 to fork and pin Sonarworks/IO fix commit`.
-
-## Practical behavior status after fixes
-- Sonarworks-wrapped ASIO no longer crashes in user verification.
-- Standalone input routing now allows disabling right input (`Audio In R = off`).
-- Feeding interface input 2 can be effectively disabled from app settings.
+## Requested upcoming features
+1. Built-in preset system for standalone app:
+   - There is a preset menu but no full create/save workflow yet.
+   - Add save/new/overwrite UX and state serialization integration.
+2. Stereo FX improvements:
+   - Revisit delay/reverb with proper stereo implementations (not just dual-mono mirror where avoidable).
+   - Keep RT-safe DSP and minimal UI disruption unless requested.
 
 ## Verification reminders
 - Validate in `Release|x64` only.
 - Run standalone via `Ctrl+F5` in Visual Studio (not under debugger for DSP/perf judgments).
-- User preference: do not run builds from agent unless explicitly asked.
+- User preference: do not run builds unless explicitly requested by user.
 
 ## Starter prompt for next agent (copy/paste)
 You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
@@ -102,9 +105,17 @@ Current baseline to preserve:
   - `596b97a` (top-nav Amp/Cab bypass fix)
   - `ae5e65e` (iPlug2 forked submodule pointer update)
   - `73c276f` (null-buffer hardening + APP IO config)
+  - `b37dd5b` (stereo Phase 1 routing)
+  - `06239f9` (stereo Phase 2 dual-mono core)
+  - `4c6ad96` (stereo input mode UI + stereo-safe load/routing)
+  - `f33f9b8` (state recall + async model bank loading)
 - `iPlug2` is pinned to `b54bf7af6` from `https://github.com/miandre/iPlug2.git`.
-- Sonarworks ASIO crash is currently fixed in this baseline.
-- Standalone `Audio In R` can be set to `off`.
+- Sonarworks ASIO crash fix should remain intact.
+
+New tasks:
+1) Investigate/fix CPU issue: in stereo input mode with effectively mono input source, avoid redundant dual-path heavy processing that causes crackle on CPU-heavy models.
+2) Design + implement built-in standalone preset save/create workflow (existing preset menu currently lacks full authoring flow).
+3) Propose and implement a proper stereo reverb/delay strategy (minimal diff first, RT-safe, then iterate).
 
 Task style requirements:
 - Propose minimal diffs first.
