@@ -1651,6 +1651,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool fxDelayActive = GetParam(kFXDelayActive)->Bool() && !fxBypassed;
   if (mFXDelayBufferSamples > 2 && sampleRate > 0.0)
   {
+    const bool stereoCoreActive = (numChannelsMonoCore > 1) && (numChannelsInternal == 2);
+    constexpr double kFXDelayFeedbackCrossStereo = 0.22;
+    constexpr double kFXDelayWetCrossStereo = 0.16;
     const double targetTimeSamples = std::clamp(
       GetParam(kFXDelayTimeMs)->Value() * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
     const double targetFeedback = std::clamp(GetParam(kFXDelayFeedback)->Value() * 0.01, 0.0, 0.80);
@@ -1681,11 +1684,16 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         smoothedHighCutHz = std::min(maxCutHz, smoothedLowCutHz + 20.0);
       const double lowCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedLowCutHz / sampleRate);
       const double highCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedHighCutHz / sampleRate);
+      std::array<double, kNumChannelsInternal> drySamples = {};
+      std::array<double, kNumChannelsInternal> filteredDelayedSamples = {};
+      std::array<double, kNumChannelsInternal> feedbackDelayedSamples = {};
+      std::array<double, kNumChannelsInternal> wetDelayedSamples = {};
 
       for (size_t c = 0; c < numChannelsInternal; ++c)
       {
         auto& delayBuffer = mFXDelayBuffer[c];
         const double dry = fxDelayPointers[c][s];
+        drySamples[c] = dry;
 
         double readPos = static_cast<double>(writeIndex) - smoothedTimeSamples;
         if (readPos < 0.0)
@@ -1701,14 +1709,32 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         lowCutState += lowCutAlpha * (delayed - lowCutState);
         const double lowCutDelayed = delayed - lowCutState;
         highCutState += highCutAlpha * (lowCutDelayed - highCutState);
-        const double filteredDelayed = highCutState;
+        filteredDelayedSamples[c] = highCutState;
+        feedbackDelayedSamples[c] = filteredDelayedSamples[c];
+        wetDelayedSamples[c] = filteredDelayedSamples[c];
+      }
 
-        const double writeValue = dry + smoothedFeedback * filteredDelayed;
+      if (stereoCoreActive)
+      {
+        const double delayedL = filteredDelayedSamples[0];
+        const double delayedR = filteredDelayedSamples[1];
+        feedbackDelayedSamples[0] =
+          (1.0 - kFXDelayFeedbackCrossStereo) * delayedL + kFXDelayFeedbackCrossStereo * delayedR;
+        feedbackDelayedSamples[1] =
+          (1.0 - kFXDelayFeedbackCrossStereo) * delayedR + kFXDelayFeedbackCrossStereo * delayedL;
+        wetDelayedSamples[0] = (1.0 - kFXDelayWetCrossStereo) * delayedL + kFXDelayWetCrossStereo * delayedR;
+        wetDelayedSamples[1] = (1.0 - kFXDelayWetCrossStereo) * delayedR + kFXDelayWetCrossStereo * delayedL;
+      }
+
+      for (size_t c = 0; c < numChannelsInternal; ++c)
+      {
+        auto& delayBuffer = mFXDelayBuffer[c];
+        const double writeValue = drySamples[c] + smoothedFeedback * feedbackDelayedSamples[c];
         delayBuffer[writeIndex] = static_cast<sample>(writeValue);
 
         if (fxDelayActive)
           // "Amount" behavior: keep dry at unity and add wet signal.
-          fxDelayPointers[c][s] = static_cast<sample>(dry + filteredDelayed * smoothedMix);
+          fxDelayPointers[c][s] = static_cast<sample>(drySamples[c] + wetDelayedSamples[c] * smoothedMix);
       }
 
       ++writeIndex;
@@ -1727,6 +1753,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool fxReverbActive = GetParam(kFXReverbActive)->Bool() && !fxBypassed;
   if (fxReverbActive && sampleRate > 0.0 && mFXReverbPreDelayBufferSamples > 2)
   {
+    const bool stereoCoreActive = (numChannelsMonoCore > 1) && (numChannelsInternal == 2);
+    constexpr double kFXReverbWetCrossStereo = 0.18;
     const double targetMix = std::clamp(GetParam(kFXReverbMix)->Value() * 0.01, 0.0, 1.0);
     const double targetDecaySeconds = std::clamp(GetParam(kFXReverbDecay)->Value(), 0.1, 10.0);
     const double targetPreDelaySamples = std::clamp(
@@ -1855,6 +1883,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         if (combModPhase[i] >= 2.0 * kPi)
           combModPhase[i] -= 2.0 * kPi;
       }
+      std::array<double, kNumChannelsInternal> drySamples = {};
+      std::array<double, kNumChannelsInternal> wetSamples = {};
 
       for (size_t c = 0; c < numChannelsInternal; ++c)
       {
@@ -1984,8 +2014,21 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         const double lowCutWet = rawWet - lowCutState;
         highCutState += wetHighCutAlpha * (lowCutWet - highCutState);
         const double earlyDirect = earlyShaped * earlyDirectMix;
-        fxReverbPointers[c][s] =
-          static_cast<sample>(mixNormalize * (dryMix * dry + wetGain * (modeOutputTrim * highCutState + earlyDirect)));
+        drySamples[c] = dry;
+        wetSamples[c] = modeOutputTrim * highCutState + earlyDirect;
+      }
+
+      if (stereoCoreActive)
+      {
+        const double wetL = wetSamples[0];
+        const double wetR = wetSamples[1];
+        wetSamples[0] = (1.0 - kFXReverbWetCrossStereo) * wetL + kFXReverbWetCrossStereo * wetR;
+        wetSamples[1] = (1.0 - kFXReverbWetCrossStereo) * wetR + kFXReverbWetCrossStereo * wetL;
+      }
+
+      for (size_t c = 0; c < numChannelsInternal; ++c)
+      {
+        fxReverbPointers[c][s] = static_cast<sample>(mixNormalize * (dryMix * drySamples[c] + wetGain * wetSamples[c]));
       }
 
       ++preDelayWriteIndex;
