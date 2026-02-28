@@ -1934,6 +1934,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       const double sizeFromDecay = std::pow(decayKnobNorm, 0.82);
       const double sizeMacro = std::clamp(0.28 + 0.92 * sizeFromDecay + 0.18 * hallAmount, 0.25, 1.30);
       const double combDelayScale = std::clamp(0.95 + 1.10 * sizeMacro, 0.95, 2.38);
+      const double longDelayNorm = std::clamp((combDelayScale - 1.05) / 1.20, 0.0, 1.0);
       const double earlyTapScaleRoom = std::clamp(0.90 + 0.70 * sizeMacro, 0.80, 2.00);
       const double earlyTapScaleHall = std::clamp(1.00 + 0.80 * sizeMacro, 0.90, 2.20);
       const double sizePreDelaySamples = (0.8 + 5.8 * sizeMacro) * 0.001 * sampleRate;
@@ -1962,13 +1963,14 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       const double wetMakeupGain = 1.0 + (wetMakeupTargetGain - 1.0) * wetMakeupCurve;
       const double toneCutoffHz = std::clamp((2000.0 + smoothedTone * 12000.0) * toneTilt, 1000.0, 16000.0);
       const double toneAlpha = 1.0 - std::exp(-2.0 * kPi * toneCutoffHz / sampleRate);
+      const double lowDecayDamping = std::clamp((0.55 - decayKnobNorm) / 0.55, 0.0, 1.0);
       const double highDecayStabilizer = std::clamp((decayKnobNorm - 0.90) / 0.10, 0.0, 1.0) * (0.4 + 0.6 * hallAmount);
-      const double feedbackAirDecayTilt = 1.0 - 0.020 * highDecayStabilizer;
+      const double feedbackAirDecayTilt = 1.0 - 0.15 * lowDecayDamping - 0.020 * highDecayStabilizer;
       const double feedbackAirCutoffHz =
         std::clamp((4800.0 + smoothedTone * 9000.0) * combDampTilt * feedbackAirDecayTilt, 2200.0, 15000.0);
       const double feedbackAirAlpha = 1.0 - std::exp(-2.0 * kPi * feedbackAirCutoffHz / sampleRate);
       const double dynamicLateDiffusionGain =
-        std::clamp(lateDiffusionGain + 0.05 * sizeMacro + 0.04 * highDecayStabilizer, 0.14, 0.52);
+        std::clamp(lateDiffusionGain + 0.06 * sizeMacro + 0.08 * longDelayNorm + 0.04 * highDecayStabilizer, 0.14, 0.58);
       const double effectiveLateInputGain = lateInputGain;
       const double wetLowCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedLowCutHz / sampleRate);
       const double wetHighCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedHighCutHz / sampleRate);
@@ -2176,8 +2178,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       if (stereoFXBusActive)
       {
         const double wetCross = monoSourceAtFX ? 0.14 : kFXReverbWetCrossStereo;
-        const double roomWetWidth = monoSourceAtFX ? 1.40 : (1.25 + 0.35 * sizeMacro);
-        const double hallWetWidth = monoSourceAtFX ? 1.75 : (1.35 + 0.45 * sizeMacro);
+        const double widthFromDecay = std::pow(decayKnobNorm, 0.90);
+        const double roomWetWidth = monoSourceAtFX ? 1.40 : (1.20 + 0.38 * sizeMacro + 0.20 * widthFromDecay);
+        const double hallWetWidth = monoSourceAtFX ? 1.75 : (1.30 + 0.48 * sizeMacro + 0.28 * widthFromDecay);
         const double wetL = wetSamples[0];
         const double wetR = wetSamples[1];
         wetSamples[0] = (1.0 - wetCross) * wetL + wetCross * wetR;
