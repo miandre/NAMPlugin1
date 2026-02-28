@@ -1809,6 +1809,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       mFXReverbEarlyToneState[c] = 0.0;
       mFXReverbLowCutLPState[c] = 0.0;
       mFXReverbHighCutLPState[c] = 0.0;
+      mFXReverbStereoDecorrelatorState[c] = 0.0;
     }
   };
 
@@ -1869,6 +1870,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     double smoothedLowCutHz = mFXReverbSmoothedLowCutHz;
     double smoothedHighCutHz = mFXReverbSmoothedHighCutHz;
     size_t preDelayWriteIndex = mFXReverbPreDelayWriteIndex;
+    std::array<double, kNumChannelsInternal> stereoDecorrelatorState = mFXReverbStereoDecorrelatorState;
 
     constexpr double kRoomWetGain = 0.95;
     constexpr double kHallWetGain = 1.18;
@@ -2186,6 +2188,19 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         wetSamples[0] = (1.0 - wetCross) * wetL + wetCross * wetR;
         wetSamples[1] = (1.0 - wetCross) * wetR + wetCross * wetL;
 
+        // Subtle pre-width decorrelation to increase perceived stereo spread.
+        constexpr std::array<double, 2> kStereoDecorrelatorCoeff = {0.42, -0.36};
+        const double decorMix = std::clamp(0.10 + 0.20 * sizeMacro + 0.16 * widthFromDecay, 0.0, 0.52);
+        for (size_t c = 0; c < 2; ++c)
+        {
+          const double in = wetSamples[c];
+          const double g = kStereoDecorrelatorCoeff[c];
+          auto& state = stereoDecorrelatorState[c];
+          const double decorrelated = finiteClamp(-g * in + state, kReverbStateLimit);
+          state = finiteClamp(in + g * decorrelated, kReverbStateLimit);
+          wetSamples[c] = finiteClamp((1.0 - decorMix) * in + decorMix * decorrelated, kReverbStateLimit);
+        }
+
         const double wetWidth =
           roomAmount * roomWetWidth + hallAmount * hallWetWidth;
         const double wetMid = 0.5 * (wetSamples[0] + wetSamples[1]);
@@ -2215,6 +2230,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     mFXReverbSmoothedLowCutHz = smoothedLowCutHz;
     mFXReverbSmoothedHighCutHz = smoothedHighCutHz;
     mFXReverbPreDelayWriteIndex = preDelayWriteIndex;
+    mFXReverbStereoDecorrelatorState = stereoDecorrelatorState;
     mFXReverbCombModPhase = combModPhase;
   }
 
@@ -2508,6 +2524,7 @@ void NeuralAmpModeler::OnReset()
     std::clamp(std::max(GetParam(kFXReverbHighCutHz)->Value(), mFXReverbSmoothedLowCutHz + 20.0), 20.0, maxReverbCutHz);
   mFXReverbLowCutLPState.fill(0.0);
   mFXReverbHighCutLPState.fill(0.0);
+  mFXReverbStereoDecorrelatorState.fill(0.0);
   mFXReverbWasActive = false;
   _UpdateLatency();
 }
