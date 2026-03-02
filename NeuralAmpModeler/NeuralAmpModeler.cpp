@@ -1933,8 +1933,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       const double earlyGain = roomAmount * kRoomEarlyGain + hallAmount * kHallEarlyGain;
       const double preDiffAllpassGain = roomAmount * kRoomPreDiffAllpassGain + hallAmount * kHallPreDiffAllpassGain;
       const double decayKnobNorm = std::clamp((smoothedDecaySeconds - 0.1) / 9.9, 0.0, 1.0);
-      const double decaySpanCompression = 1.0 - 0.40 * decayKnobNorm * decayKnobNorm;
-      const double shapedDecaySeconds = 0.20 + 11.8 * std::pow(decayKnobNorm, 1.30) * decaySpanCompression;
+      const double decaySpanCompression = 1.0 - 0.32 * decayKnobNorm * decayKnobNorm;
+      const double shapedDecaySeconds = 0.20 + 9.4 * std::pow(decayKnobNorm, 1.65) * decaySpanCompression;
       const double sizeFromDecay = std::pow(decayKnobNorm, 0.82);
       const double sizeMacro = std::clamp(0.28 + 0.92 * sizeFromDecay + 0.18 * hallAmount, 0.25, 1.30);
       const double combDelayScale = std::clamp(0.95 + 1.10 * sizeMacro, 0.95, 2.38);
@@ -1963,8 +1963,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       const double dryMix = std::cos(0.5 * kPi * wetMixShaped);
       const double wetGain = std::sin(0.5 * kPi * wetMixShaped);
       const double decayWetCompShape = std::pow(decayKnobNorm, 1.18);
-      const double baseWetMakeupTargetGain = roomAmount * 1.66 + hallAmount * 1.86;
-      const double decayWetCompGain = roomAmount * (0.34 * decayWetCompShape) + hallAmount * (0.20 * decayWetCompShape);
+      const double baseWetMakeupTargetGain = roomAmount * 1.84 + hallAmount * 1.92;
+      const double decayWetCompGain = roomAmount * (0.78 * decayWetCompShape) + hallAmount * (0.24 * decayWetCompShape);
       const double wetMakeupTargetGain = baseWetMakeupTargetGain + decayWetCompGain;
       const double wetMakeupCurve = std::pow(wetMixShaped, 2.35);
       const double wetMakeupGain = 1.0 + (wetMakeupTargetGain - 1.0) * wetMakeupCurve;
