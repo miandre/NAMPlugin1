@@ -104,7 +104,6 @@ enum EParams
   kFXDelayHighCutHz,
   kFXReverbLowCutHz,
   kFXReverbHighCutHz,
-  kFXReverbMode,
   // Input mode: mono uses only input 1, stereo uses input 1+2.
   kInputStereoMode,
   kNumParams
@@ -566,7 +565,6 @@ private:
   double mFXReverbSmoothedEarlyToneHz = 3200.0;
   double mFXReverbSmoothedLowCutHz = 20.0;
   double mFXReverbSmoothedHighCutHz = 20000.0;
-  double mFXReverbSmoothedMode = 1.0;
   std::array<double, kNumChannelsInternal> mFXReverbLowCutLPState = {};
   std::array<double, kNumChannelsInternal> mFXReverbHighCutLPState = {};
   std::array<double, kNumChannelsInternal> mFXReverbStereoDecorrelatorState = {};
