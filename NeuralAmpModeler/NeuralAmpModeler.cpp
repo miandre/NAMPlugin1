@@ -1919,7 +1919,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       smoothedHighCutHz += cutAlphaParam * (targetHighCutHz - smoothedHighCutHz);
       if (smoothedHighCutHz < smoothedLowCutHz + 20.0)
         smoothedHighCutHz = std::min(maxCutHz, smoothedLowCutHz + 20.0);
-      const double hallAmount = std::clamp(smoothedMode, 0.0, 1.0);
+      const double hallAmountFromMode = std::clamp(smoothedMode, 0.0, 1.0);
+      constexpr bool kUseSingleRoomReverbVoicing = true;
+      const double hallAmount = kUseSingleRoomReverbVoicing ? 0.0 : hallAmountFromMode;
       const double roomAmount = 1.0 - hallAmount;
       const double targetEarlyLevel = roomAmount * kRoomEarlyLevelBase + hallAmount * kHallEarlyLevelBase;
       smoothedEarlyLevel += earlyLevelAlpha * (targetEarlyLevel - smoothedEarlyLevel);
@@ -1960,7 +1962,10 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       const double wetMixShaped = std::pow(wetMix, 1.48);
       const double dryMix = std::cos(0.5 * kPi * wetMixShaped);
       const double wetGain = std::sin(0.5 * kPi * wetMixShaped);
-      const double wetMakeupTargetGain = roomAmount * 1.70 + hallAmount * 1.88;
+      const double decayWetCompShape = std::pow(decayKnobNorm, 1.18);
+      const double baseWetMakeupTargetGain = roomAmount * 1.66 + hallAmount * 1.86;
+      const double decayWetCompGain = roomAmount * (0.34 * decayWetCompShape) + hallAmount * (0.20 * decayWetCompShape);
+      const double wetMakeupTargetGain = baseWetMakeupTargetGain + decayWetCompGain;
       const double wetMakeupCurve = std::pow(wetMixShaped, 2.35);
       const double wetMakeupGain = 1.0 + (wetMakeupTargetGain - 1.0) * wetMakeupCurve;
       const double toneCutoffHz = std::clamp((2000.0 + smoothedTone * 12000.0) * toneTilt, 1000.0, 16000.0);
@@ -1972,7 +1977,11 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         std::clamp((4800.0 + smoothedTone * 9000.0) * combDampTilt * feedbackAirDecayTilt, 2200.0, 15000.0);
       const double feedbackAirAlpha = 1.0 - std::exp(-2.0 * kPi * feedbackAirCutoffHz / sampleRate);
       const double dynamicLateDiffusionGain =
-        std::clamp(lateDiffusionGain + 0.06 * sizeMacro + 0.08 * longDelayNorm + 0.04 * highDecayStabilizer, 0.14, 0.58);
+        std::clamp(
+          lateDiffusionGain + 0.06 * sizeMacro + 0.08 * longDelayNorm + 0.05 * decayKnobNorm
+            + 0.04 * highDecayStabilizer,
+          0.14,
+          0.58);
       const double effectiveLateInputGain = lateInputGain;
       const double wetLowCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedLowCutHz / sampleRate);
       const double wetHighCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedHighCutHz / sampleRate);
@@ -2163,7 +2172,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         const double tonedWet = finiteClamp(mFXReverbToneState[c] * wetCoreGain, kReverbStateLimit);
         const double earlyWetScale = std::clamp(1.0 - wetMix, 0.0, 1.0);
         const double earlyLateBlend = earlyWetScale * earlyWetScale;
-        const double rawWet = tonedWet + earlyShapedSamples[c] * earlyGain * earlyLateBlend;
+        const double highDecayEarlyTrim = std::clamp(1.0 - 0.18 * std::pow(decayKnobNorm, 1.20), 0.78, 1.0);
+        const double rawWet = tonedWet + earlyShapedSamples[c] * earlyGain * earlyLateBlend * highDecayEarlyTrim;
         auto& lowCutState = mFXReverbLowCutLPState[c];
         auto& highCutState = mFXReverbHighCutLPState[c];
         lowCutState = finiteOrZero(lowCutState);
@@ -2181,7 +2191,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       {
         const double wetCross = monoSourceAtFX ? 0.14 : kFXReverbWetCrossStereo;
         const double widthFromDecay = std::pow(decayKnobNorm, 0.90);
-        const double roomWetWidth = monoSourceAtFX ? 1.40 : (1.20 + 0.38 * sizeMacro + 0.20 * widthFromDecay);
+        const double roomWetWidth = monoSourceAtFX ? 1.40 : (1.20 + 0.38 * sizeMacro + 0.26 * widthFromDecay);
         const double hallWetWidth = monoSourceAtFX ? 1.75 : (1.30 + 0.48 * sizeMacro + 0.28 * widthFromDecay);
         const double wetL = wetSamples[0];
         const double wetR = wetSamples[1];
