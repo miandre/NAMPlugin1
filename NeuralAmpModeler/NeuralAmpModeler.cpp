@@ -2177,6 +2177,8 @@ void NeuralAmpModeler::OnReset()
   }
 #endif
 
+  _ApplyInputStereoAutoDefaultIfNeeded();
+
   // Tail is because the HPF DC blocker has a decay.
   // 10 cycles should be enough to pass the VST3 tests checking tail behavior.
   // I'm ignoring the model & IR, but it's not the end of the world.
@@ -2291,6 +2293,8 @@ void NeuralAmpModeler::OnReset()
 
 void NeuralAmpModeler::OnIdle()
 {
+  _ApplyInputStereoAutoDefaultIfNeeded();
+
   mInputSender.TransmitData(*this);
   mOutputSender.TransmitData(*this);
 
@@ -2383,6 +2387,29 @@ void NeuralAmpModeler::OnIdle()
   }
 }
 
+void NeuralAmpModeler::_ApplyInputStereoAutoDefaultIfNeeded()
+{
+#ifdef APP_API
+  return;
+#else
+  if (mInputStereoAutoDefaultApplied || mStateRestoredFromChunk)
+    return;
+
+  if (NInChansConnected() <= 1)
+    return;
+
+  if (auto* inputStereoParam = GetParam(kInputStereoMode); inputStereoParam != nullptr)
+  {
+    if (!inputStereoParam->Bool())
+    {
+      inputStereoParam->Set(1.0);
+      SendParameterValueFromDelegate(kInputStereoMode, inputStereoParam->GetNormalized(), true);
+    }
+    mInputStereoAutoDefaultApplied = true;
+  }
+#endif
+}
+
 bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 {
   constexpr int32_t kStateSchemaVersion = 2;
@@ -2445,7 +2472,15 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 
   const char* kExpectedHeader = "###NeuralAmpModeler###";
   if (strcmp(header.Get(), kExpectedHeader) != 0)
-    return _UnserializeStateWithUnknownVersion(chunk, startPos);
+  {
+    const int restoredPos = _UnserializeStateWithUnknownVersion(chunk, startPos);
+    if (restoredPos > startPos)
+    {
+      mStateRestoredFromChunk = true;
+      mInputStereoAutoDefaultApplied = true;
+    }
+    return restoredPos;
+  }
 
   WDL_String version;
   const int versionPos = chunk.GetStr(version, pos);
@@ -2539,7 +2574,15 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 
     const int paramsPos = UnserializeParams(chunk, statePos);
     if (paramsPos < 0)
-      return _UnserializeStateWithKnownVersion(chunk, pos);
+    {
+      const int restoredPos = _UnserializeStateWithKnownVersion(chunk, pos);
+      if (restoredPos > startPos)
+      {
+        mStateRestoredFromChunk = true;
+        mInputStereoAutoDefaultApplied = true;
+      }
+      return restoredPos;
+    }
 
     mAmpSelectorIndex = std::clamp(static_cast<int>(activeSlot), 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     mAmpNAMPaths = ampPaths;
@@ -2589,6 +2632,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     _ApplyAmpSlotState(mAmpSelectorIndex);
     _SyncTunerParamToTopNav();
     _RefreshTopNavControls();
+    mStateRestoredFromChunk = true;
+    mInputStereoAutoDefaultApplied = true;
 
     return paramsPos;
   }
@@ -2608,7 +2653,15 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
   {
     const int paramsPos = UnserializeParams(chunk, legacyPos);
     if (paramsPos < 0)
-      return _UnserializeStateWithKnownVersion(chunk, pos);
+    {
+      const int restoredPos = _UnserializeStateWithKnownVersion(chunk, pos);
+      if (restoredPos > startPos)
+      {
+        mStateRestoredFromChunk = true;
+        mInputStereoAutoDefaultApplied = true;
+      }
+      return restoredPos;
+    }
     mNAMPath = legacyNAMPath;
     mIRPath = legacyIRPath;
     mIRPathRight = legacyIRRightPath;
@@ -2637,10 +2690,18 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     _ApplyAmpSlotState(mAmpSelectorIndex);
     _SyncTunerParamToTopNav();
     _RefreshTopNavControls();
+    mStateRestoredFromChunk = true;
+    mInputStereoAutoDefaultApplied = true;
     return paramsPos;
   }
 
-  return _UnserializeStateWithKnownVersion(chunk, pos);
+  const int restoredPos = _UnserializeStateWithKnownVersion(chunk, pos);
+  if (restoredPos > startPos)
+  {
+    mStateRestoredFromChunk = true;
+    mInputStereoAutoDefaultApplied = true;
+  }
+  return restoredPos;
 }
 
 void NeuralAmpModeler::OnUIOpen()
@@ -2752,7 +2813,7 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       case kStompBoostActive:
         if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
           pBoostOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        if (active && (mStompModel == nullptr) && (mStagedStompModel == nullptr))
+        if (source == kUI && active && (mStompModel == nullptr) && (mStagedStompModel == nullptr))
         {
           WDL_String fileName;
           WDL_String path;
@@ -2847,7 +2908,7 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       case kModelToggle:
         if (mApplyingAmpSlotState)
           break;
-        if (active && (mModel == nullptr)
+        if (source == kUI && active && (mModel == nullptr)
             && (mAmpSlotModelState[mAmpSelectorIndex].load(std::memory_order_relaxed) != kAmpSlotModelStateLoading))
         {
           WDL_String fileName;

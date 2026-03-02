@@ -22,7 +22,7 @@
   // Temporary test toggle: 0 = mono core in standalone, 1 = true stereo core in standalone.
   #define NAM_APP_STEREO_CORE_TEST 1
 #else
-  #define PLUG_CHANNEL_IO "1-1 1-2 2-2"
+  #define PLUG_CHANNEL_IO "2-2 1-2 1-1"
 #endif
 
 #define PLUG_LATENCY 0

@@ -399,6 +399,7 @@ private:
   bool _IsStandaloneFactoryPresetPath(const WDL_String& filePath) const;
   void _SetStandalonePresetDirty(bool isDirty);
   void _MarkStandalonePresetDirty();
+  void _ApplyInputStereoAutoDefaultIfNeeded();
 
   // Make sure that the latency is reported correctly.
   void _UpdateLatency();
@@ -477,6 +478,8 @@ private:
   bool mApplyingAmpSlotState = false;
   bool mStartupDefaultLoadAttempted = false;
   bool mStandaloneStateLoadAttempted = false;
+  bool mStateRestoredFromChunk = false;
+  bool mInputStereoAutoDefaultApplied = false;
   std::vector<WDL_String> mStandaloneUserPresetPaths;
   std::vector<WDL_String> mStandaloneFactoryPresetPaths;
   std::vector<WDL_String> mStandalonePresetPaths;
