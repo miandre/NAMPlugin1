@@ -391,8 +391,10 @@ private:
   void _UpdatePresetLabel();
   void _RefreshStandalonePresetList();
   bool _LoadStandalonePresetFromFile(const WDL_String& filePath);
+  bool _LoadDefaultPreset();
   bool _SaveStandalonePresetToFile(const WDL_String& filePath);
   void _PromptStandalonePresetSaveAs();
+  void _PromptStandalonePresetDelete();
   void _SelectStandalonePresetRelative(int delta);
   void _ShowStandalonePresetMenu(const iplug::igraphics::IRECT& anchorArea);
   bool _IsStandaloneFactoryPresetPath(const WDL_String& filePath) const;
@@ -485,12 +487,22 @@ private:
   int mStandalonePresetIndex = -1;
   WDL_String mStandalonePresetFilePath;
   bool mStandalonePresetDirty = false;
+  bool mStandalonePresetNameEntryReopenPending = false;
+  WDL_String mStandalonePresetNameEntryPendingText;
+  bool mDefaultPresetActive = true;
+  bool mLoadingDefaultPreset = false;
+  bool mDefaultPresetPostLoadSyncPending = false;
+  bool mDefaultPresetCapturedFromStartup = false;
+  bool mHasDefaultPresetState = false;
+  iplug::IByteChunk mDefaultPresetStateChunk;
   iplug::igraphics::IPopupMenu mStandalonePresetMenu;
   std::array<AmpSlotState, 3> mAmpSlotStates = {};
   // 0=Empty, 1=Loading, 2=Ready, 3=Failed.
   std::array<std::atomic<int>, 3> mAmpSlotModelState;
   std::array<std::atomic<int>, 3> mSlotLoadUIEvent;
   std::array<std::atomic<uint64_t>, 3> mSlotLoadRequestId;
+  WDL_String mLastSentIRPath;
+  WDL_String mLastSentIRPathRight;
   struct ModelLoadJob
   {
     int slotIndex = 0;
