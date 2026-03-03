@@ -1118,6 +1118,13 @@ public:
         SetBrowserState(NAMBrowserState::Loaded);
       }
       break;
+      case kMsgTagClearModel:
+      case kMsgTagClearStompModel:
+      case kMsgTagClearIRLeft:
+      case kMsgTagClearIRRight:
+        mFileNameControl->SetLabelAndTooltip(mDefaultLabelStr.Get());
+        SetBrowserState(NAMBrowserState::Empty);
+        break;
       default: break;
     }
   }
