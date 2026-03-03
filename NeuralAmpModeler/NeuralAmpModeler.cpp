@@ -56,6 +56,7 @@ constexpr int kPresetMenuTagDefault = 0;
 constexpr int kPresetMenuTagSave = 1;
 constexpr int kPresetMenuTagSaveAs = 2;
 constexpr int kPresetMenuTagDelete = 3;
+constexpr int kPresetMenuTagRename = 4;
 constexpr int kPresetMenuTagUserBase = 1000;
 constexpr int kPresetMenuTagFactoryBase = 2000;
 constexpr int kCtrlTagStandalonePresetNameEntryProxy = 91000;
@@ -3894,6 +3895,74 @@ void NeuralAmpModeler::_PromptStandalonePresetSaveAs()
   pGraphics->CreateTextEntry(*pProxyControl, pPresetLabelControl->GetText(), pPresetLabelControl->GetRECT(), suggestedName.c_str());
 }
 
+void NeuralAmpModeler::_PromptStandalonePresetRename()
+{
+  auto* pGraphics = GetUI();
+  if (pGraphics == nullptr || mStandalonePresetFilePath.GetLength() <= 0)
+    return;
+  if (_IsStandaloneFactoryPresetPath(mStandalonePresetFilePath))
+    return;
+
+  auto* pPresetLabelControl = pGraphics->GetControlWithTag(kCtrlTagPresetLabel);
+  auto* pProxyControl =
+    dynamic_cast<StandalonePresetNameEntryControl*>(pGraphics->GetControlWithTag(kCtrlTagStandalonePresetNameEntryProxy));
+  if (pPresetLabelControl == nullptr || pProxyControl == nullptr)
+    return;
+
+  const std::filesystem::path sourcePath(mStandalonePresetFilePath.Get());
+  const std::string suggestedName = sourcePath.stem().string();
+  pProxyControl->SetCompletionHandler([this, sourcePath](const char* enteredText) {
+    const std::string sanitizedName = SanitizeStandalonePresetName(enteredText != nullptr ? enteredText : "");
+    const std::filesystem::path targetPath = EnsureStandalonePresetExtension(sourcePath.parent_path() / sanitizedName);
+    std::error_code equivalentEc;
+    if (std::filesystem::equivalent(sourcePath, targetPath, equivalentEc))
+      return;
+
+    std::error_code ec;
+    const bool targetExists = std::filesystem::exists(targetPath, ec);
+    if (ec)
+    {
+      _ShowMessageBox(GetUI(), "Failed to access preset path.", "Preset Rename Error", kMB_OK);
+      return;
+    }
+
+    if (targetExists)
+    {
+      std::string confirmMessage = "Preset \"";
+      confirmMessage += targetPath.stem().string();
+      confirmMessage += "\" already exists. Overwrite?";
+      const EMsgBoxResult overwriteResult = _ShowMessageBox(GetUI(), confirmMessage.c_str(), "Overwrite Preset", kMB_YESNO);
+      if (overwriteResult != kYES)
+      {
+        mStandalonePresetNameEntryPendingText.Set(sanitizedName.c_str());
+        mStandalonePresetNameEntryReopenPending = true;
+        return;
+      }
+
+      std::filesystem::remove(targetPath, ec);
+      if (ec)
+      {
+        _ShowMessageBox(GetUI(), "Failed to overwrite preset.", "Preset Rename Error", kMB_OK);
+        return;
+      }
+    }
+
+    std::filesystem::rename(sourcePath, targetPath, ec);
+    if (ec)
+    {
+      _ShowMessageBox(GetUI(), "Failed to rename preset.", "Preset Rename Error", kMB_OK);
+      return;
+    }
+
+    mStandalonePresetFilePath.Set(targetPath.string().c_str());
+    mDefaultPresetActive = false;
+    _RefreshStandalonePresetList();
+    _UpdatePresetLabel();
+  });
+
+  pGraphics->CreateTextEntry(*pProxyControl, pPresetLabelControl->GetText(), pPresetLabelControl->GetRECT(), suggestedName.c_str());
+}
+
 void NeuralAmpModeler::_PromptStandalonePresetDelete()
 {
   auto* pGraphics = GetUI();
@@ -4006,6 +4075,11 @@ void NeuralAmpModeler::_ShowStandalonePresetMenu(const IRECT& anchorArea)
       _PromptStandalonePresetSaveAs();
       return;
     }
+    if (tag == kPresetMenuTagRename)
+    {
+      _PromptStandalonePresetRename();
+      return;
+    }
     if (tag == kPresetMenuTagDelete)
     {
       _PromptStandalonePresetDelete();
@@ -4032,6 +4106,10 @@ void NeuralAmpModeler::_ShowStandalonePresetMenu(const IRECT& anchorArea)
   mStandalonePresetMenu.AddSeparator();
   mStandalonePresetMenu.AddItem(new IPopupMenu::Item("Save", IPopupMenu::Item::kNoFlags, kPresetMenuTagSave));
   mStandalonePresetMenu.AddItem(new IPopupMenu::Item("Save As...", IPopupMenu::Item::kNoFlags, kPresetMenuTagSaveAs));
+  const bool canRenamePreset =
+    (mStandalonePresetFilePath.GetLength() > 0) && !_IsStandaloneFactoryPresetPath(mStandalonePresetFilePath);
+  const int renameFlags = canRenamePreset ? IPopupMenu::Item::kNoFlags : IPopupMenu::Item::kDisabled;
+  mStandalonePresetMenu.AddItem(new IPopupMenu::Item("Rename Preset", renameFlags, kPresetMenuTagRename));
   const bool canDeletePreset =
     (mStandalonePresetFilePath.GetLength() > 0) && !_IsStandaloneFactoryPresetPath(mStandalonePresetFilePath);
   const int deleteFlags = canDeletePreset ? IPopupMenu::Item::kNoFlags : IPopupMenu::Item::kDisabled;

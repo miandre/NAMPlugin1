@@ -394,6 +394,7 @@ private:
   bool _LoadDefaultPreset();
   bool _SaveStandalonePresetToFile(const WDL_String& filePath);
   void _PromptStandalonePresetSaveAs();
+  void _PromptStandalonePresetRename();
   void _PromptStandalonePresetDelete();
   void _SelectStandalonePresetRelative(int delta);
   void _ShowStandalonePresetMenu(const iplug::igraphics::IRECT& anchorArea);
