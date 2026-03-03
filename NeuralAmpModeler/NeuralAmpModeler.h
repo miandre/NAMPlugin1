@@ -490,6 +490,10 @@ private:
   bool mStandalonePresetDirty = false;
   bool mStandalonePresetNameEntryReopenPending = false;
   WDL_String mStandalonePresetNameEntryPendingText;
+  // Dynamic stereo-core optimization: collapse to mono only for sustained near-identical L/R input.
+  bool mEffectiveMonoCollapseActive = false;
+  size_t mEffectiveMonoCandidateSamples = 0;
+  size_t mEffectiveStereoCandidateSamples = 0;
   bool mDefaultPresetActive = true;
   bool mLoadingDefaultPreset = false;
   bool mDefaultPresetPostLoadSyncPending = false;

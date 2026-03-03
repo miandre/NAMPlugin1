@@ -61,6 +61,85 @@ constexpr int kPresetMenuTagUserBase = 1000;
 constexpr int kPresetMenuTagFactoryBase = 2000;
 constexpr int kCtrlTagStandalonePresetNameEntryProxy = 91000;
 constexpr std::streamoff kMaxStandaloneStateBytes = 16 * 1024 * 1024;
+constexpr double kEffectiveMonoMaxPeakDiff = 3.0e-5;
+constexpr double kEffectiveMonoMaxRelativeDiff = 1.0e-7;
+constexpr double kEffectiveMonoSilenceMidEnergy = 1.0e-14;
+constexpr double kEffectiveMonoOneSidedEnergyRatio = 1.0e-6;
+constexpr double kEffectiveMonoEngageSeconds = 0.25;
+constexpr double kEffectiveMonoReleaseSeconds = 0.03;
+
+struct EffectiveMonoInputAnalysis
+{
+  bool isEffectivelyMono = false;
+  int monoSourceChannel = 0; // 0 = left, 1 = right
+};
+
+EffectiveMonoInputAnalysis AnalyzeEffectiveMonoInputBlock(const sample* inputLeft, const sample* inputRight,
+                                                          const size_t numFrames)
+{
+  EffectiveMonoInputAnalysis result{};
+  if (inputLeft == nullptr || inputRight == nullptr || numFrames == 0)
+    return result;
+  if (inputLeft == inputRight)
+  {
+    result.isEffectivelyMono = true;
+    result.monoSourceChannel = 0;
+    return result;
+  }
+
+  double diffEnergy = 0.0;
+  double midEnergy = 0.0;
+  double leftEnergy = 0.0;
+  double rightEnergy = 0.0;
+  double maxAbsDiff = 0.0;
+  for (size_t s = 0; s < numFrames; ++s)
+  {
+    const double left = static_cast<double>(inputLeft[s]);
+    const double right = static_cast<double>(inputRight[s]);
+    const double diff = left - right;
+    const double mid = 0.5 * (left + right);
+    diffEnergy += diff * diff;
+    midEnergy += mid * mid;
+    leftEnergy += left * left;
+    rightEnergy += right * right;
+    maxAbsDiff = std::max(maxAbsDiff, std::abs(diff));
+  }
+
+  const double silenceEnergy = kEffectiveMonoSilenceMidEnergy * static_cast<double>(numFrames);
+  const double louderEnergy = std::max(leftEnergy, rightEnergy);
+  const double quieterEnergy = std::min(leftEnergy, rightEnergy);
+  if (louderEnergy <= silenceEnergy)
+  {
+    result.isEffectivelyMono = true;
+    result.monoSourceChannel = 0;
+    return result;
+  }
+
+  if (quieterEnergy <= louderEnergy * kEffectiveMonoOneSidedEnergyRatio)
+  {
+    result.isEffectivelyMono = true;
+    result.monoSourceChannel = (rightEnergy > leftEnergy) ? 1 : 0;
+    return result;
+  }
+
+  if (maxAbsDiff > kEffectiveMonoMaxPeakDiff)
+    return result;
+
+  if (midEnergy <= kEffectiveMonoSilenceMidEnergy)
+  {
+    result.isEffectivelyMono = true;
+    result.monoSourceChannel = 0;
+    return result;
+  }
+
+  const double relativeDiff = diffEnergy / (midEnergy + 1.0e-30);
+  if (relativeDiff <= kEffectiveMonoMaxRelativeDiff)
+  {
+    result.isEffectivelyMono = true;
+    result.monoSourceChannel = (rightEnergy > leftEnergy) ? 1 : 0;
+  }
+  return result;
+}
 
 class StandalonePresetNameEntryControl : public ITextControl
 {
@@ -1338,21 +1417,88 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 {
   const size_t numChannelsExternalIn = (size_t)NInChansConnected();
   const size_t numChannelsExternalOut = (size_t)NOutChansConnected();
-  const bool inputStereoMode = GetParam(kInputStereoMode)->Bool();
-  const bool hasRightInputChannel = (inputs != nullptr) && (numChannelsExternalIn > 1) && (inputs[1] != nullptr);
-  size_t numChannelsMonoCore = 1;
-#ifdef APP_API
-#if NAM_APP_STEREO_CORE_TEST
-  if (inputStereoMode && hasRightInputChannel)
-    numChannelsMonoCore = 2;
-#endif
-#else
-  if (inputStereoMode && hasRightInputChannel)
-    numChannelsMonoCore = 2;
-#endif
-  const size_t numChannelsInternal = kNumChannelsInternal;
   const size_t numFrames = (size_t)nFrames;
   const double sampleRate = GetSampleRate();
+  const bool inputStereoMode = GetParam(kInputStereoMode)->Bool();
+  const bool hasRightInputChannel = (inputs != nullptr) && (numChannelsExternalIn > 1) && (inputs[1] != nullptr);
+  bool stereoCoreRequested = false;
+  int effectiveMonoSourceChannel = 0;
+#ifdef APP_API
+#if NAM_APP_STEREO_CORE_TEST
+  stereoCoreRequested = inputStereoMode && hasRightInputChannel;
+#endif
+#else
+  stereoCoreRequested = inputStereoMode && hasRightInputChannel;
+#endif
+
+  if (stereoCoreRequested)
+  {
+    sample* inputLeft = (inputs != nullptr && numChannelsExternalIn > 0) ? inputs[0] : nullptr;
+    if (inputLeft == nullptr && inputs != nullptr)
+    {
+      for (size_t c = 1; c < numChannelsExternalIn; ++c)
+      {
+        if (inputs[c] != nullptr)
+        {
+          inputLeft = inputs[c];
+          break;
+        }
+      }
+    }
+    sample* inputRight = (inputs != nullptr && numChannelsExternalIn > 1) ? inputs[1] : nullptr;
+    const auto effectiveMonoAnalysis = AnalyzeEffectiveMonoInputBlock(inputLeft, inputRight, numFrames);
+    const bool blockEffectivelyMono = effectiveMonoAnalysis.isEffectivelyMono;
+    effectiveMonoSourceChannel = effectiveMonoAnalysis.monoSourceChannel;
+    const double safeSampleRate = std::max(1.0, sampleRate);
+    const size_t monoEngageSamples =
+      std::max<size_t>(1, static_cast<size_t>(std::ceil(kEffectiveMonoEngageSeconds * safeSampleRate)));
+    const size_t stereoReleaseSamples =
+      std::max<size_t>(1, static_cast<size_t>(std::ceil(kEffectiveMonoReleaseSeconds * safeSampleRate)));
+    if (blockEffectivelyMono)
+    {
+      mEffectiveMonoCandidateSamples = std::min(monoEngageSamples, mEffectiveMonoCandidateSamples + numFrames);
+      mEffectiveStereoCandidateSamples = 0;
+      if (mEffectiveMonoCandidateSamples >= monoEngageSamples)
+        mEffectiveMonoCollapseActive = true;
+    }
+    else
+    {
+      mEffectiveMonoCandidateSamples = 0;
+      if (mEffectiveMonoCollapseActive)
+      {
+        mEffectiveStereoCandidateSamples =
+          std::min(stereoReleaseSamples, mEffectiveStereoCandidateSamples + numFrames);
+        if (mEffectiveStereoCandidateSamples >= stereoReleaseSamples)
+        {
+          mEffectiveMonoCollapseActive = false;
+          mEffectiveStereoCandidateSamples = 0;
+        }
+      }
+      else
+      {
+        mEffectiveStereoCandidateSamples = 0;
+      }
+    }
+  }
+  else
+  {
+    mEffectiveMonoCollapseActive = false;
+    mEffectiveMonoCandidateSamples = 0;
+    mEffectiveStereoCandidateSamples = 0;
+  }
+
+  const size_t numChannelsMonoCore = (stereoCoreRequested && !mEffectiveMonoCollapseActive) ? 2 : 1;
+  const size_t numChannelsInternal = kNumChannelsInternal;
+  sample* remappedMonoInput[1] = {nullptr};
+  sample** processInputs = inputs;
+  size_t processNumChannelsExternalIn = numChannelsExternalIn;
+  if (numChannelsMonoCore == 1 && stereoCoreRequested && effectiveMonoSourceChannel == 1 && inputs != nullptr
+      && numChannelsExternalIn > 1 && inputs[1] != nullptr)
+  {
+    remappedMonoInput[0] = inputs[1];
+    processInputs = remappedMonoInput;
+    processNumChannelsExternalIn = 1;
+  }
 
   // Disable floating point denormals
   std::fenv_t fe_state;
@@ -1361,7 +1507,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
   _PrepareBuffers(numChannelsInternal, numFrames);
   // Input enters the amp core as mono (standalone) or dual-mono (plugin stereo input).
-  _ProcessInput(inputs, numFrames, numChannelsExternalIn, numChannelsMonoCore);
+  _ProcessInput(processInputs, numFrames, processNumChannelsExternalIn, numChannelsMonoCore);
   _ApplyDSPStaging();
   const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
   auto* activeToneStack = mToneStacks[activeSlot].get();
@@ -2580,6 +2726,9 @@ void NeuralAmpModeler::OnReset()
   mFXReverbHighCutLPState.fill(0.0);
   mFXReverbStereoDecorrelatorState.fill(0.0);
   mFXReverbWasActive = false;
+  mEffectiveMonoCollapseActive = false;
+  mEffectiveMonoCandidateSamples = 0;
+  mEffectiveStereoCandidateSamples = 0;
   _UpdateLatency();
 }
 
