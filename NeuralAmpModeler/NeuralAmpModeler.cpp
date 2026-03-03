@@ -67,6 +67,7 @@ constexpr double kEffectiveMonoSilenceMidEnergy = 1.0e-14;
 constexpr double kEffectiveMonoOneSidedEnergyRatio = 1.0e-6;
 constexpr double kEffectiveMonoEngageSeconds = 0.25;
 constexpr double kEffectiveMonoReleaseSeconds = 0.03;
+constexpr size_t kMinInternalPreparedFrames = 16384;
 
 struct EffectiveMonoInputAnalysis
 {
@@ -1547,7 +1548,46 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   std::feholdexcept(&fe_state);
   disable_denormals();
 
-  _PrepareBuffers(numChannelsInternal, numFrames);
+  if (!_PrepareBuffers(numChannelsInternal, numFrames, false))
+  {
+    // Fail-safe: never grow buffers in the audio callback. Pass through external input (or silence) for this block.
+    if (outputs != nullptr)
+    {
+      for (size_t outChannel = 0; outChannel < numChannelsExternalOut; ++outChannel)
+      {
+        auto* out = outputs[outChannel];
+        if (out == nullptr)
+          continue;
+
+        sample* source = nullptr;
+        if (inputs != nullptr && numChannelsExternalIn > 0)
+        {
+          const size_t mappedInput = std::min(outChannel, numChannelsExternalIn - 1);
+          source = inputs[mappedInput];
+          if (source == nullptr)
+          {
+            for (size_t inChannel = 0; inChannel < numChannelsExternalIn; ++inChannel)
+            {
+              if (inputs[inChannel] != nullptr)
+              {
+                source = inputs[inChannel];
+                break;
+              }
+            }
+          }
+        }
+
+        if (source != nullptr)
+          std::copy_n(source, numFrames, out);
+        else
+          std::fill(out, out + numFrames, 0.0f);
+      }
+    }
+
+    std::feupdateenv(&fe_state);
+    _UpdateMeters(inputs, outputs, numFrames, numChannelsExternalIn, numChannelsExternalOut);
+    return;
+  }
   // Input enters the amp core as mono (standalone) or dual-mono (plugin stereo input).
   _ProcessInput(processInputs, numFrames, processNumChannelsExternalIn, numChannelsMonoCore);
   _ApplyDSPStaging();
@@ -2674,9 +2714,9 @@ void NeuralAmpModeler::OnReset()
       mToneStacks[slotIndex]->Reset(sampleRate, maxBlockSize);
     _ApplyAmpSlotStateToToneStack(slotIndex);
   }
-  // Pre-size internal stereo-capable buffers to the current host max block size.
-  // ProcessBlock() should then only write/clear active frames.
-  _PrepareBuffers(kNumChannelsInternal, (size_t)maxBlockSize);
+  // Pre-size internal buffers outside ProcessBlock() to avoid callback-time growth.
+  const size_t preparedFrames = std::max<size_t>(static_cast<size_t>(std::max(1, maxBlockSize)), kMinInternalPreparedFrames);
+  _PrepareBuffers(kNumChannelsInternal, preparedFrames, true);
   for (size_t band = 0; band < mFXEQSmoothedGainDB.size(); ++band)
     mFXEQSmoothedGainDB[band] = GetParam(kFXEQParamIdx[band])->Value();
   mFXEQSmoothedOutputGain = DBToAmp(GetParam(kFXEQOutputGain)->Value());
@@ -5481,10 +5521,13 @@ void NeuralAmpModeler::_InitToneStack()
   for (auto& toneStack : mToneStacks)
     toneStack = std::make_unique<dsp::tone_stack::BasicNamToneStack>();
 }
-void NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t numFrames)
+bool NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t numFrames, const bool allowGrowth)
 {
   const bool updateChannels = numChannels != _GetBufferNumChannels();
   const bool growFrames = updateChannels || (_GetBufferNumFrames() < numFrames);
+
+  if (!allowGrowth && (updateChannels || growFrames))
+    return false;
 
   if (updateChannels)
   {
@@ -5510,6 +5553,7 @@ void NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t nu
     mInputPointers[c] = mInputArray[c].data();
   for (auto c = 0; c < mOutputArray.size(); c++)
     mOutputPointers[c] = mOutputArray[c].data();
+  return true;
 }
 
 void NeuralAmpModeler::_PrepareIOPointers(const size_t numChannels)

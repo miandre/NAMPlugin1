@@ -354,7 +354,7 @@ private:
 
   bool _HaveModel() const { return this->mModel != nullptr; };
   // Prepare the input & output buffers
-  void _PrepareBuffers(const size_t numChannels, const size_t numFrames);
+  bool _PrepareBuffers(const size_t numChannels, const size_t numFrames, const bool allowGrowth);
   // Manage pointers
   void _PrepareIOPointers(const size_t nChans);
   // Copy the input buffer to the object, applying input level.
