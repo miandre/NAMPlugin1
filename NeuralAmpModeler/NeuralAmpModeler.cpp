@@ -439,6 +439,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     shouldRemoveSlotModel.store(false, std::memory_order_relaxed);
   for (auto& slotState : mAmpSlotModelState)
     slotState.store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+  for (auto& slotHasLoudness : mAmpSlotHasLoudness)
+    slotHasLoudness.store(false, std::memory_order_relaxed);
+  for (auto& slotHasCalibration : mAmpSlotHasCalibration)
+    slotHasCalibration.store(false, std::memory_order_relaxed);
+  mStompHasLoudness.store(false, std::memory_order_relaxed);
+  mStompHasCalibration.store(false, std::memory_order_relaxed);
   for (auto& uiEvent : mSlotLoadUIEvent)
     uiEvent.store(kSlotLoadUIEventNone, std::memory_order_relaxed);
   for (auto& requestId : mSlotLoadRequestId)
@@ -808,6 +814,21 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto settingsAmpModelArea2 = settingsAmpModelArea1.GetTranslated(0.0f, 56.0f);
     const auto settingsAmpModelArea3 = settingsAmpModelArea2.GetTranslated(0.0f, 56.0f);
     const auto settingsStompModelArea = settingsAmpModelArea3.GetTranslated(0.0f, 56.0f);
+    constexpr float kModelCapabilityTopPad = 2.0f;
+    constexpr float kModelCapabilityRowHeight = 11.0f;
+    constexpr float kModelCapabilityRowGap = 1.0f;
+    auto makeCapabilityArea = [=](const IRECT& pickerArea, const int row) {
+      const float top = pickerArea.B + kModelCapabilityTopPad + row * (kModelCapabilityRowHeight + kModelCapabilityRowGap);
+      return IRECT(pickerArea.L + 8.0f, top, pickerArea.R - 8.0f, top + kModelCapabilityRowHeight);
+    };
+    const auto settingsAmp1HasLoudnessArea = makeCapabilityArea(settingsAmpModelArea1, 0);
+    const auto settingsAmp1HasCalibrationArea = makeCapabilityArea(settingsAmpModelArea1, 1);
+    const auto settingsAmp2HasLoudnessArea = makeCapabilityArea(settingsAmpModelArea2, 0);
+    const auto settingsAmp2HasCalibrationArea = makeCapabilityArea(settingsAmpModelArea2, 1);
+    const auto settingsAmp3HasLoudnessArea = makeCapabilityArea(settingsAmpModelArea3, 0);
+    const auto settingsAmp3HasCalibrationArea = makeCapabilityArea(settingsAmpModelArea3, 1);
+    const auto settingsStompHasLoudnessArea = makeCapabilityArea(settingsStompModelArea, 0);
+    const auto settingsStompHasCalibrationArea = makeCapabilityArea(settingsStompModelArea, 1);
     const float tunerPanelWidth = 700.0f;
     const float tunerPanelHeight = 150.0f;
     const float tunerPanelTop = topUtilityRowArea.B + 90.0f;
@@ -1363,6 +1384,29 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                 loadStompModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
                                 fileBackgroundBitmap),
       kCtrlTagStompModelFileBrowser);
+    const IVStyle capabilityStyle = utilityStyle.WithLabelText(
+      IText(12.0f, PluginColors::HELP_TEXT, "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle));
+    pSettingsBox->AddChildControl(
+      new NAMReadOnlyCheckboxControl(settingsAmp1HasLoudnessArea, "Has Loudness", capabilityStyle), kCtrlTagAmp1HasLoudness);
+    pSettingsBox->AddChildControl(
+      new NAMReadOnlyCheckboxControl(settingsAmp1HasCalibrationArea, "Has Calibration", capabilityStyle),
+      kCtrlTagAmp1HasCalibration);
+    pSettingsBox->AddChildControl(
+      new NAMReadOnlyCheckboxControl(settingsAmp2HasLoudnessArea, "Has Loudness", capabilityStyle), kCtrlTagAmp2HasLoudness);
+    pSettingsBox->AddChildControl(
+      new NAMReadOnlyCheckboxControl(settingsAmp2HasCalibrationArea, "Has Calibration", capabilityStyle),
+      kCtrlTagAmp2HasCalibration);
+    pSettingsBox->AddChildControl(
+      new NAMReadOnlyCheckboxControl(settingsAmp3HasLoudnessArea, "Has Loudness", capabilityStyle), kCtrlTagAmp3HasLoudness);
+    pSettingsBox->AddChildControl(
+      new NAMReadOnlyCheckboxControl(settingsAmp3HasCalibrationArea, "Has Calibration", capabilityStyle),
+      kCtrlTagAmp3HasCalibration);
+    pSettingsBox->AddChildControl(
+      new NAMReadOnlyCheckboxControl(settingsStompHasLoudnessArea, "Has Loudness", capabilityStyle),
+      kCtrlTagStompHasLoudness);
+    pSettingsBox->AddChildControl(
+      new NAMReadOnlyCheckboxControl(settingsStompHasCalibrationArea, "Has Calibration", capabilityStyle),
+      kCtrlTagStompHasCalibration);
     pSettingsBox->HideAnimated(true);
 
     pGraphics->ForAllControlsFunc([](IControl* pControl) {
@@ -2735,6 +2779,7 @@ void NeuralAmpModeler::OnReset()
 void NeuralAmpModeler::OnIdle()
 {
   _ApplyInputStereoAutoDefaultIfNeeded();
+  _RefreshModelCapabilityIndicators();
 
   if (mStandalonePresetNameEntryReopenPending)
   {
@@ -2870,11 +2915,13 @@ void NeuralAmpModeler::OnIdle()
   mInputSender.TransmitData(*this);
   mOutputSender.TransmitData(*this);
 
+  bool refreshModelCapabilityIndicators = false;
   for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
   {
     const int event = mSlotLoadUIEvent[slotIndex].exchange(kSlotLoadUIEventNone, std::memory_order_relaxed);
     if (event == kSlotLoadUIEventLoaded)
     {
+      refreshModelCapabilityIndicators = true;
       const int ctrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
       const auto& slotPath = mAmpNAMPaths[slotIndex];
       if (slotPath.GetLength())
@@ -2882,6 +2929,8 @@ void NeuralAmpModeler::OnIdle()
     }
     else if (event == kSlotLoadUIEventFailed)
     {
+      refreshModelCapabilityIndicators = true;
+      _ClearAmpSlotCapabilityState(slotIndex);
       mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateFailed, std::memory_order_relaxed);
       const int ctrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
       SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadFailed);
@@ -2894,6 +2943,8 @@ void NeuralAmpModeler::OnIdle()
       }
     }
   }
+  if (refreshModelCapabilityIndicators)
+    _RefreshModelCapabilityIndicators();
 
   if (auto* pGraphics = GetUI())
   {
@@ -2941,9 +2992,8 @@ void NeuralAmpModeler::OnIdle()
   {
     if (auto* pGraphics = GetUI())
     {
-      // FIXME -- need to disable only the "normalized" model
-      // pGraphics->GetControlWithTag(kCtrlTagOutputMode)->SetDisabled(false);
       static_cast<NAMSettingsPageControl*>(pGraphics->GetControlWithTag(kCtrlTagSettingsBox))->ClearModelInfo();
+      _RefreshOutputModeControlSupport();
       const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
       const int activeSlotState = mAmpSlotModelState[activeSlot].load(std::memory_order_relaxed);
       const bool shouldForceToggleOff =
@@ -3323,6 +3373,8 @@ void NeuralAmpModeler::OnUIOpen()
   {
     _UpdateControlsFromModel();
   }
+  _RefreshOutputModeControlSupport();
+  _RefreshModelCapabilityIndicators();
 
   // If no model is available, force model toggle to OFF.
   if (mModel == nullptr && activeSlotModelState != kAmpSlotModelStateLoading && GetParam(kModelToggle)->Bool())
@@ -3551,6 +3603,8 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
       mSlotLoadUIEvent[resolvedSlot].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
       mSlotLoadRequestId[resolvedSlot].fetch_add(1, std::memory_order_relaxed);
       mShouldRemoveModelSlot[resolvedSlot].store(true, std::memory_order_relaxed);
+      _ClearAmpSlotCapabilityState(resolvedSlot);
+      _RefreshModelCapabilityIndicators();
       _MarkStandalonePresetDirty();
 
       if (resolvedSlot == mAmpSelectorIndex)
@@ -3562,6 +3616,8 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
     }
     case kMsgTagClearStompModel:
       mShouldRemoveStompModel = true;
+      _ClearStompCapabilityState();
+      _RefreshModelCapabilityIndicators();
       _MarkStandalonePresetDirty();
       return true;
     case kMsgTagClearIRLeft:
@@ -4435,6 +4491,7 @@ void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int
   mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
   const uint64_t requestId = mSlotLoadRequestId[slotIndex].fetch_add(1, std::memory_order_relaxed) + 1;
   mShouldRemoveModelSlot[slotIndex].store(true, std::memory_order_release);
+  _ClearAmpSlotCapabilityState(slotIndex);
 
   {
     std::lock_guard<std::mutex> lock(mModelLoadMutex);
@@ -4478,6 +4535,8 @@ void NeuralAmpModeler::_ModelLoadWorkerLoop()
       continue;
 
     bool success = false;
+    bool hasLoudness = false;
+    bool hasCalibration = false;
     std::unique_ptr<ResamplingNAM> loadedModel;
     std::unique_ptr<ResamplingNAM> loadedModelRight;
     try
@@ -4495,6 +4554,11 @@ void NeuralAmpModeler::_ModelLoadWorkerLoop()
       loadedModel = loadResampledModel();
       loadedModelRight = loadResampledModel();
       success = (loadedModel != nullptr) && (loadedModelRight != nullptr);
+      if (success)
+      {
+        hasLoudness = loadedModel->HasLoudness();
+        hasCalibration = loadedModel->HasOutputLevel();
+      }
     }
     catch (...)
     {
@@ -4506,6 +4570,7 @@ void NeuralAmpModeler::_ModelLoadWorkerLoop()
 
     if (success)
     {
+      _SetAmpSlotCapabilityState(slotIndex, hasLoudness, hasCalibration);
       mPendingLoadedSlotRequestId[slotIndex].store(job.requestId, std::memory_order_release);
       if (auto* oldPtr =
             mPendingLoadedSlotModelRight[slotIndex].exchange(loadedModelRight.release(), std::memory_order_acq_rel))
@@ -4516,6 +4581,7 @@ void NeuralAmpModeler::_ModelLoadWorkerLoop()
     }
     else
     {
+      _ClearAmpSlotCapabilityState(slotIndex);
       mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventFailed, std::memory_order_relaxed);
     }
   }
@@ -4550,6 +4616,7 @@ void NeuralAmpModeler::_SelectAmpSlot(int slotIndex)
     mShouldRemoveModelSlot[slotIndex].store(true, std::memory_order_relaxed);
     mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
     mSlotLoadRequestId[slotIndex].fetch_add(1, std::memory_order_relaxed);
+    _ClearAmpSlotCapabilityState(slotIndex);
     mAmpSlotStates[slotIndex].modelToggle = 0.0;
     mAmpSlotStates[slotIndex].modelToggleTouched = true;
   }
@@ -4814,6 +4881,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     if (!mShouldRemoveModelSlot[slotIndex].exchange(false, std::memory_order_acq_rel))
       continue;
 
+    _ClearAmpSlotCapabilityState(slotIndex);
     mAmpSlotModelCache[slotIndex] = nullptr;
     mAmpSlotModelCacheRight[slotIndex] = nullptr;
     if (mAmpSlotModelState[slotIndex].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
@@ -4908,6 +4976,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
       }
       else
       {
+        _ClearAmpSlotCapabilityState(targetSlot);
         mModel = nullptr;
         mModelRight = nullptr;
         if (mAmpSlotModelState[targetSlot].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
@@ -4922,6 +4991,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   // Remove marked modules
   if (mShouldRemoveModel)
   {
+    _ClearAmpSlotCapabilityState(mCurrentModelSlot);
     mModel = nullptr;
     mModelRight = nullptr;
     mNAMPath.Set("");
@@ -4932,6 +5002,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   }
   if (mShouldRemoveStompModel)
   {
+    _ClearStompCapabilityState();
     mStompModel = nullptr;
     mStompModelRight = nullptr;
     mStompNAMPath.Set("");
@@ -4961,6 +5032,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStagedModelRight = nullptr;
     mCurrentModelSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     mAmpSlotModelState[mCurrentModelSlot].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
+    _SetAmpSlotCapabilityState(mCurrentModelSlot, mModel->HasLoudness(), mModel->HasOutputLevel());
     mNewModelLoadedInDSP = true;
     updateActiveModelGainsAndLatency();
   }
@@ -4970,6 +5042,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStagedStompModel = nullptr;
     mStompModelRight = std::move(mStagedStompModelRight);
     mStagedStompModelRight = nullptr;
+    _SetStompCapabilityState(mStompModel->HasLoudness(), mStompModel->HasOutputLevel());
     _UpdateLatency();
   }
   if (mStagedIR != nullptr && (!inputStereoMode || mStagedIRChannel2 != nullptr))
@@ -5191,6 +5264,10 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
 
     auto stagedModel = loadResampledModel();
     auto stagedModelRight = loadResampledModel();
+    _SetAmpSlotCapabilityState(
+      slotIndex, (stagedModel != nullptr) && stagedModel->HasLoudness(),
+      (stagedModel != nullptr) && stagedModel->HasOutputLevel());
+    _RefreshModelCapabilityIndicators();
     // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
     mStagedModelRight = std::move(stagedModelRight);
     mStagedModel = std::move(stagedModel);
@@ -5211,6 +5288,14 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
     {
       mStagedModelRight = nullptr;
     }
+    if (slotIndex == mCurrentModelSlot && mModel != nullptr)
+      _SetAmpSlotCapabilityState(slotIndex, mModel->HasLoudness(), mModel->HasOutputLevel());
+    else if (mAmpSlotModelCache[slotIndex] != nullptr)
+      _SetAmpSlotCapabilityState(
+        slotIndex, mAmpSlotModelCache[slotIndex]->HasLoudness(), mAmpSlotModelCache[slotIndex]->HasOutputLevel());
+    else
+      _ClearAmpSlotCapabilityState(slotIndex);
+    _RefreshModelCapabilityIndicators();
     mAmpNAMPaths[slotIndex] = previousSlotPath;
     mNAMPath = previousNAMPath;
     std::cerr << "Failed to read DSP module" << std::endl;
@@ -5235,9 +5320,13 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
 
     auto stagedStompModel = loadResampledStompModel();
     auto stagedStompModelRight = loadResampledStompModel();
+    const bool hasLoudness = (stagedStompModel != nullptr) && stagedStompModel->HasLoudness();
+    const bool hasCalibration = (stagedStompModel != nullptr) && stagedStompModel->HasOutputLevel();
     // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
     mStagedStompModelRight = std::move(stagedStompModelRight);
     mStagedStompModel = std::move(stagedStompModel);
+    _SetStompCapabilityState(hasLoudness, hasCalibration);
+    _RefreshModelCapabilityIndicators();
     mStompNAMPath = modelPath;
     SendControlMsgFromDelegate(
       kCtrlTagStompModelFileBrowser, kMsgTagLoadedStompModel, mStompNAMPath.GetLength(), mStompNAMPath.Get());
@@ -5251,6 +5340,11 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
     if (mStagedStompModelRight != nullptr)
       mStagedStompModelRight = nullptr;
 
+    if (mStompModel != nullptr)
+      _SetStompCapabilityState(mStompModel->HasLoudness(), mStompModel->HasOutputLevel());
+    else
+      _ClearStompCapabilityState();
+    _RefreshModelCapabilityIndicators();
     mStompNAMPath = previousNAMPath;
     std::cerr << "Failed to read stomp DSP module" << std::endl;
     std::cerr << e.what() << std::endl;
@@ -5573,11 +5667,66 @@ void NeuralAmpModeler::_UpdateControlsFromModel()
     const bool disableInputCalibrationControls = !mModel->HasInputLevel();
     pGraphics->GetControlWithTag(kCtrlTagCalibrateInput)->SetDisabled(disableInputCalibrationControls);
     pGraphics->GetControlWithTag(kCtrlTagInputCalibrationLevel)->SetDisabled(disableInputCalibrationControls);
-    {
-      auto* c = static_cast<OutputModeControl*>(pGraphics->GetControlWithTag(kCtrlTagOutputMode));
-      c->SetNormalizedDisable(!mModel->HasLoudness());
-      c->SetCalibratedDisable(!mModel->HasOutputLevel());
-    }
+  }
+  _RefreshOutputModeControlSupport();
+}
+
+void NeuralAmpModeler::_RefreshOutputModeControlSupport()
+{
+  if (auto* pGraphics = GetUI())
+  {
+    auto* outputModeControl = dynamic_cast<OutputModeControl*>(pGraphics->GetControlWithTag(kCtrlTagOutputMode));
+    if (outputModeControl == nullptr)
+      return;
+
+    const bool normalizedSupported = (mModel != nullptr) && mModel->HasLoudness();
+    const bool calibratedSupported = (mModel != nullptr) && mModel->HasOutputLevel();
+    outputModeControl->SetNormalizedDisable(!normalizedSupported);
+    outputModeControl->SetCalibratedDisable(!calibratedSupported);
+  }
+}
+
+void NeuralAmpModeler::_SetAmpSlotCapabilityState(const int slotIndex, const bool hasLoudness, const bool hasCalibration)
+{
+  const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotHasLoudness.size()) - 1);
+  mAmpSlotHasLoudness[clampedSlot].store(hasLoudness, std::memory_order_relaxed);
+  mAmpSlotHasCalibration[clampedSlot].store(hasCalibration, std::memory_order_relaxed);
+}
+
+void NeuralAmpModeler::_ClearAmpSlotCapabilityState(const int slotIndex)
+{
+  _SetAmpSlotCapabilityState(slotIndex, false, false);
+}
+
+void NeuralAmpModeler::_SetStompCapabilityState(const bool hasLoudness, const bool hasCalibration)
+{
+  mStompHasLoudness.store(hasLoudness, std::memory_order_relaxed);
+  mStompHasCalibration.store(hasCalibration, std::memory_order_relaxed);
+}
+
+void NeuralAmpModeler::_ClearStompCapabilityState()
+{
+  _SetStompCapabilityState(false, false);
+}
+
+void NeuralAmpModeler::_RefreshModelCapabilityIndicators()
+{
+  if (auto* pGraphics = GetUI())
+  {
+    auto updateCheck = [pGraphics](const int ctrlTag, const bool checked) {
+      auto* checkControl = dynamic_cast<NAMReadOnlyCheckboxControl*>(pGraphics->GetControlWithTag(ctrlTag));
+      if (checkControl != nullptr)
+        checkControl->SetChecked(checked);
+    };
+
+    updateCheck(kCtrlTagAmp1HasLoudness, mAmpSlotHasLoudness[0].load(std::memory_order_relaxed));
+    updateCheck(kCtrlTagAmp1HasCalibration, mAmpSlotHasCalibration[0].load(std::memory_order_relaxed));
+    updateCheck(kCtrlTagAmp2HasLoudness, mAmpSlotHasLoudness[1].load(std::memory_order_relaxed));
+    updateCheck(kCtrlTagAmp2HasCalibration, mAmpSlotHasCalibration[1].load(std::memory_order_relaxed));
+    updateCheck(kCtrlTagAmp3HasLoudness, mAmpSlotHasLoudness[2].load(std::memory_order_relaxed));
+    updateCheck(kCtrlTagAmp3HasCalibration, mAmpSlotHasCalibration[2].load(std::memory_order_relaxed));
+    updateCheck(kCtrlTagStompHasLoudness, mStompHasLoudness.load(std::memory_order_relaxed));
+    updateCheck(kCtrlTagStompHasCalibration, mStompHasCalibration.load(std::memory_order_relaxed));
   }
 }
 

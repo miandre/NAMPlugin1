@@ -65,6 +65,7 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
   for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
   {
     mAmpNAMPaths[slotIndex].Set("");
+    _ClearAmpSlotCapabilityState(slotIndex);
     mAmpSlotStates[slotIndex].modelToggle = 0.0;
     mAmpSlotStates[slotIndex].modelToggleTouched = true;
     mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
@@ -75,6 +76,7 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
 
   mNAMPath.Set(getStringOrEmpty("NAMPath").c_str());
   mIRPath.Set(getStringOrEmpty("IRPath").c_str());
+  _ClearStompCapabilityState();
 
   if (mNAMPath.GetLength())
   {

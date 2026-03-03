@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <sstream> // std::stringstream
+#include <string>
 #include <unordered_map> // std::unordered_map
 #include <utility>
 #include "IControls.h"
@@ -649,6 +650,58 @@ public:
 
     g.DrawBitmap(mBitmap, r, 0, 0, nullptr);
   }
+};
+
+class NAMReadOnlyCheckboxControl : public IControl
+{
+public:
+  NAMReadOnlyCheckboxControl(const IRECT& bounds, const char* label, const IVStyle& style)
+  : IControl(bounds)
+  , mLabel(label != nullptr ? label : "")
+  , mLabelText(style.labelText.WithAlign(EAlign::Near))
+  {
+    mIgnoreMouse = true;
+  }
+
+  void SetChecked(const bool checked)
+  {
+    if (mChecked == checked)
+      return;
+    mChecked = checked;
+    SetDirty(false);
+  }
+
+  bool IsChecked() const { return mChecked; }
+
+  void Draw(IGraphics& g) override
+  {
+    const float boxSize = std::min(11.0f, std::max(8.0f, mRECT.H() - 2.0f));
+    const float boxTop = mRECT.MH() - 0.5f * boxSize;
+    const IRECT boxBounds(mRECT.L + 2.0f, boxTop, mRECT.L + 2.0f + boxSize, boxTop + boxSize);
+
+    g.FillRoundRect(COLOR_BLACK.WithOpacity(0.7f), boxBounds, 2.0f, &mBlend);
+    g.DrawRoundRect(PluginColors::NAM_THEMECOLOR.WithOpacity(0.8f), boxBounds, 2.0f, &mBlend, 1.0f);
+
+    if (mChecked)
+    {
+      const float x1 = boxBounds.L + 2.0f;
+      const float y1 = boxBounds.MH() + 0.5f;
+      const float x2 = boxBounds.L + 4.5f;
+      const float y2 = boxBounds.B - 2.5f;
+      const float x3 = boxBounds.R - 2.0f;
+      const float y3 = boxBounds.T + 2.5f;
+      g.DrawLine(PluginColors::NAM_THEMECOLOR, x1, y1, x2, y2, &mBlend, 1.6f);
+      g.DrawLine(PluginColors::NAM_THEMECOLOR, x2, y2, x3, y3, &mBlend, 1.6f);
+    }
+
+    const IRECT textBounds(boxBounds.R + 5.0f, mRECT.T, mRECT.R, mRECT.B);
+    g.DrawText(mLabelText, mLabel.c_str(), textBounds, &mBlend);
+  }
+
+private:
+  std::string mLabel;
+  IText mLabelText;
+  bool mChecked = false;
 };
 
 class NAMBlendSliderControl : public IVSliderControl
@@ -1336,32 +1389,36 @@ private:
 class OutputModeControl : public IVRadioButtonControl
 {
 public:
+  static constexpr int kNormalizedIndex = 1;
+  static constexpr int kCalibratedIndex = 2;
+
   OutputModeControl(const IRECT& bounds, int paramIdx, const IVStyle& style, float buttonSize)
   : IVRadioButtonControl(
       bounds, paramIdx, {}, "Output Mode", style, EVShape::Ellipse, EDirection::Vertical, buttonSize) {};
 
   void SetNormalizedDisable(const bool disable)
   {
-    // HACK non-DRY string and hard-coded indices
-    std::stringstream ss;
-    ss << "Normalized";
-    if (disable)
-    {
-      ss << " [Not supported by model]";
-    }
-    mTabLabels.Get(1)->Set(ss.str().c_str());
+    SetSupportLabel(kNormalizedIndex, "Normalized", disable);
   };
   void SetCalibratedDisable(const bool disable)
   {
-    // HACK non-DRY string and hard-coded indices
+    SetSupportLabel(kCalibratedIndex, "Calibrated", disable);
+  };
+
+private:
+  void SetSupportLabel(const int labelIndex, const char* modeName, const bool disable)
+  {
+    if (labelIndex < 0 || labelIndex >= mTabLabels.GetSize() || mTabLabels.Get(labelIndex) == nullptr)
+      return;
+
     std::stringstream ss;
-    ss << "Calibrated";
+    ss << modeName;
     if (disable)
     {
       ss << " [Not supported by model]";
     }
-    mTabLabels.Get(2)->Set(ss.str().c_str());
-  };
+    mTabLabels.Get(labelIndex)->Set(ss.str().c_str());
+  }
 };
 
 class NAMSettingsPageControl : public IContainerBaseWithNamedChildren
