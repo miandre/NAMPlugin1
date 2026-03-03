@@ -1,6 +1,6 @@
 # AGENT_SESSION_SUMMARY.md
 
-Last updated: 2026-02-27
+Last updated: 2026-03-02
 
 Purpose: concise handoff for new agents so work can continue without replaying full chat history.
 
@@ -11,83 +11,104 @@ Purpose: concise handoff for new agents so work can continue without replaying f
 
 ## Current repository state
 - Branch: `main`
-- Remote: `origin` = `https://github.com/miandre/NAMPlugin1.git`
-- `main` is synced to `origin/main` at commit `f33f9b8`.
-- Working tree was clean right after merge/push of `f33f9b8`.
+- Remote:
+  - `origin` = `https://github.com/miandre/NAMPlugin1.git`
+  - `upstream` = `https://github.com/sdatkinson/NeuralAmpModelerPlugin.git` (push disabled)
+- Current HEAD on `main`: `a375ec7`
+- Recent commits on `main`:
+  - `a375ec7` FX reverb: remove mode toggle and finalize room-only algorithm
+  - `2e54238` FX reverb: raise wet level and tighten decay-size response
+  - `ae84e79` FX reverb: lock single-room voicing baseline and width/diffusion polish
+  - `5634f2c` FX reverb: add adaptive stereo decorrelator with stronger mix
+  - `410ef64` FX reverb checkpoint: stereo width shaping and damping/diffusion tuning
+  - `bc54c55` FX reverb baseline: room-size macro, decay/predelay/mix tuning
+  - `11dbbc1` FX reverb tuning checkpoint: stable tail, stereo image, decay mapping
+  - `aa97503` FX: mono-source stereo imaging for delay/reverb bus
+  - `a449619` FX: add minimal stereo delay/reverb coupling pass
+  - `0409fcc` Minor bug fixes (channel and preset issues)
+  - `b9b87cc` Merge feature/standalone-presets-workflow: preset management 1.0
+  - `97bd4b1` Preset menu 1.0: unified dropdown workflow and dirty tracking
+  - `4dc756a` Optimize stereo mode for effective mono input
 
 ## Submodule state (important)
-- `iPlug2` remote is your fork:
-  - `https://github.com/miandre/iPlug2.git`
-- Superproject pins `iPlug2` to:
+- `iPlug2` remote:
+  - `origin` = `https://github.com/miandre/iPlug2.git`
+- Superproject currently pins `iPlug2` to:
   - `b54bf7af6b15f84b9bd7593e63bdf75e70d658db`
 
-## Baseline commits to preserve
-- `596b97a` Fix top-nav Amp/Cab bypass to gate DSP sections
-- `ae5e65e` Submodule pointer update to forked iPlug2
-- `73c276f` Null-buffer hardening + APP IO config
-- `b37dd5b` Phase 1: mono-core to stereo bus and output routing
-- `06239f9` Phase 2: plugin dual-mono core for stereo input processing
-- `4c6ad96` Phase 2: stereo input mode UI + stereo-safe model/IR loading
-- `f33f9b8` Fix state recall and async amp slot model loading
+## Build/config baseline to preserve
+- `Release | x64` is the only valid mode for DSP/perf judgment.
+- Standalone should be tested via `Ctrl+F5` (no debugger for DSP judgments).
+- Current `config.h` highlights:
+  - `PLUG_NAME "MND-AMP"` (temporary naming in progress)
+  - `BUNDLE_NAME "MND-AMPS"`
+  - Plugin channel layouts (`APP_API` off): `PLUG_CHANNEL_IO "2-2 1-2 1-1"`
+  - Standalone channel layouts (`APP_API` on): `PLUG_CHANNEL_IO "1-2 2-2"`
+  - `NAM_APP_STEREO_CORE_TEST 1`
 
-## What was completed in this wave
-### 1) Stereo work (Phase 1 + 2)
-- Plugin/app now support stereo output path with stereo-capable routing.
-- Plugin stereo input mode implemented (dual-mono model cores) with mono mode retained.
-- Standalone stereo input test support kept, with default behavior still mono-friendly.
-- Mono/stereo input mode is user-toggleable in GUI (top section) and default is mono (`Input 2` off behavior in practice).
-- Stereo-mode load/routing bugs were fixed so models/IRs load and apply correctly in both mono and stereo input modes.
+## What was completed in this cycle
 
-### 2) Slot behavior + model loading robustness
-- Non-active slot clear now targets the correct slot via control tag.
-- Amp slot switching and model loading moved to async/background workflow:
-  - background worker loads NAM models,
-  - lock-free atomic handoff to audio thread,
-  - audio thread owns final swap of active slot model.
-- Goal achieved: avoid synchronous slot-load stalls and avoid previous transient blend/volume jump behavior during slot switch.
+### 1) Stereo and host-compat behavior
+- Effective-mono optimization in stereo input mode was added (`4dc756a`) to avoid redundant heavy dual-path processing when input is effectively mono.
+- Channel layout ordering and host behavior were tuned so VST3 appears/loads correctly on stereo tracks across hosts.
+- Auto input-mode defaulting was adjusted for host differences (LUNA/Reaper behavior), then stabilized.
 
-### 3) State recall overhaul
-- State chunks are enabled (`PLUG_DOES_STATE_CHUNKS 1`).
-- New state schema includes:
-  - active amp slot,
-  - all 3 amp slot model paths,
-  - stomp/IR paths,
-  - top-nav active section + bypass states,
-  - per-slot amp state payload,
-  - full parameter payload.
-- Legacy state loading paths preserved/fallback handled.
-- Session reopen + DAW preset recall now restore slot/model behavior correctly (user-verified).
+### 2) Preset management 1.0 (standalone and plugin integration)
+- Unified dropdown-style preset workflow implemented with structured menus and user/factory organization.
+- Dirty-state indicator (`*`) implemented for changed presets.
+- Preset label/menu styling and geometry improved.
+- Plugin path was wired to the same intended preset behavior (not just generic host dropdown).
+- Prompting bugs fixed:
+  - loading presets no longer incorrectly opens `.nam` file dialogs (prompt is now UI-action gated).
+- Active UI section is no longer serialized as preset state (loading presets does not force section switches).
+- Dirty tracking now also reacts to top-nav bypass/section related changes that affect sound state.
 
-### 4) Standalone state persistence
-- Standalone now persists/restores state to local app data (`plugin-state.bin`), so reopening the EXE can restore previous state.
+### 3) FX (delay/reverb) major iteration
+- Delay path reached good stereo behavior; ping-pong was deferred as a possible future switch/feature.
+- Reverb went through many tuning passes:
+  - early/late balance reshaping
+  - damping/diffusion tuning
+  - high-decay stabilization
+  - stereo decorrelation and width shaping
+  - wet loudness compensation and decay-span tuning
+- Final direction:
+  - single room-based reverb mode (room at low decay, hall-like at higher decay)
+  - removed visible Room/Hall toggle from UI
+  - removed hall-branch DSP logic and related smoothing state for cleaner room-only processing
 
-## Practical behavior status (user-verified)
-- Sonarworks ASIO crash fix baseline still good.
-- Standalone allows disabling right input (`Audio In R = off`).
-- Mono and stereo input routing/load behavior works in standalone and plugin.
-- Session open/close and DAW preset recall now restore expected state.
+### 4) Branch and merge flow completed
+- FX work was finalized on `feature/stereo-fx-strategy`, pushed, then merged fast-forward into `main`.
+- `origin/main` currently includes full preset 1.0 + stereo/host fixes + latest room-only reverb work.
 
-## Open issue to investigate next
-1. CPU inefficiency case:
-   - Repro: run standalone (mono input) or plugin on mono track, then set plugin input mode to stereo.
-   - Observation: heavy models can start crackling/clicking in stereo mode even though only one real input is available.
-   - Hypothesis: redundant dual-path processing is still running when effective input is mono.
-   - Next agent should validate signal-path gating and add an optimization path for "effective mono input" while keeping stereo mode semantics intact.
+## Non-negotiable guardrails (must follow)
+- Audio-thread (`ProcessBlock` and callees) rules:
+  - no heap allocation
+  - no locks/waits/sleeps
+  - no file/network/UI/logging
+  - no throwing exceptions across callback
+- Keep diffs minimal and reviewable.
+- Keep style consistent; avoid unrelated refactors/reformatting.
+- Prefer append-only param enum changes unless explicitly approved otherwise.
+- Do not run builds/tests unless user explicitly requests it.
+- If uncertain whether code is on audio thread, assume it is and keep it RT-safe.
 
-## Requested upcoming features
-1. Built-in preset system for standalone app:
-   - There is a preset menu but no full create/save workflow yet.
-   - Add save/new/overwrite UX and state serialization integration.
-2. Stereo FX improvements:
-   - Revisit delay/reverb with proper stereo implementations (not just dual-mono mirror where avoidable).
-   - Keep RT-safe DSP and minimal UI disruption unless requested.
+## Known practical status
+- Stereo path and dual-mono core behavior are in place and working.
+- Preset workflow is much more complete and modern than the old load/save-file-only flow.
+- Reverb currently sounds good per user feedback and is in a solid room-only baseline.
 
-## Verification reminders
-- Validate in `Release|x64` only.
-- Run standalone via `Ctrl+F5` in Visual Studio (not under debugger for DSP/perf judgments).
-- User preference: do not run builds unless explicitly requested by user.
+## Potential next work areas (not yet committed as a roadmap)
+1. Reverb cleanup pass:
+   - further factorization of long `ProcessBlock` reverb section for readability/maintenance without sound change.
+2. Optional FX features:
+   - ping-pong delay mode switch
+   - additional stereo width/decorrelation control (if desired by user).
+3. Productization:
+   - naming/branding cleanup (plugin/manufacturer strings, assets) and consistency.
+4. Cross-host UX polish:
+   - verify behavior in LUNA/Reaper/other DAWs around defaults and plugin listing labels.
 
-## Starter prompt for next agent (copy/paste)
+## Starter prompt for the next agent (copy/paste)
 You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
 
 Read first, in this exact order:
@@ -97,28 +118,32 @@ Read first, in this exact order:
 
 Then confirm current git/submodule state before editing:
 - `git status --short`
+- `git branch --show-current`
 - `git submodule status iPlug2`
 - `git -C iPlug2 remote -v`
 
+After reading instructions, briefly summarize the most important guardrails you will follow:
+- RT safety in audio thread
+- minimal-diff policy
+- parameter/index compatibility policy
+- build/test policy (no builds unless explicitly requested)
+
 Current baseline to preserve:
-- `main` includes:
-  - `596b97a` (top-nav Amp/Cab bypass fix)
-  - `ae5e65e` (iPlug2 forked submodule pointer update)
-  - `73c276f` (null-buffer hardening + APP IO config)
-  - `b37dd5b` (stereo Phase 1 routing)
-  - `06239f9` (stereo Phase 2 dual-mono core)
-  - `4c6ad96` (stereo input mode UI + stereo-safe load/routing)
-  - `f33f9b8` (state recall + async model bank loading)
+- `main` includes full stereo routing/core work, preset management 1.0, and room-only reverb finalization.
+- Latest head: `a375ec7`.
 - `iPlug2` is pinned to `b54bf7af6` from `https://github.com/miandre/iPlug2.git`.
-- Sonarworks ASIO crash fix should remain intact.
 
-New tasks:
-1) Investigate/fix CPU issue: in stereo input mode with effectively mono input source, avoid redundant dual-path heavy processing that causes crackle on CPU-heavy models.
-2) Design + implement built-in standalone preset save/create workflow (existing preset menu currently lacks full authoring flow).
-3) Propose and implement a proper stereo reverb/delay strategy (minimal diff first, RT-safe, then iterate).
+Task request:
+1) Inspect current code state and identify the top 3-5 highest-value next steps.
+2) For each step, provide:
+   - expected user impact
+   - technical risk
+   - files/symbols likely touched
+   - RT-safety concerns to watch.
+3) Recommend an execution order (smallest/lowest-risk first).
 
-Task style requirements:
+Style requirements:
 - Propose minimal diffs first.
-- Keep parameter enum additions append-only.
-- Preserve audio-thread safety (no alloc/locks/I/O/logging in callback path).
-- Do not run builds unless explicitly requested by user.
+- Keep changes RT-safe.
+- Keep enum/serialization stability in mind.
+- Do not run builds unless explicitly asked by user.
