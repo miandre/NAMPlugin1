@@ -2576,6 +2576,7 @@ void NeuralAmpModeler::OnIdle()
 
   if (mStandalonePresetNameEntryReopenPending)
   {
+    bool reopened = false;
     if (auto* pGraphics = GetUI())
     {
       auto* pPresetLabelControl = pGraphics->GetControlWithTag(kCtrlTagPresetLabel);
@@ -2585,9 +2586,14 @@ void NeuralAmpModeler::OnIdle()
         pGraphics->CreateTextEntry(
           *pProxyControl, pPresetLabelControl->GetText(), pPresetLabelControl->GetRECT(),
           mStandalonePresetNameEntryPendingText.Get());
+        reopened = true;
       }
     }
-    mStandalonePresetNameEntryReopenPending = false;
+    if (reopened)
+    {
+      mStandalonePresetNameEntryReopenPending = false;
+      mStandalonePresetNameEntryPendingText.Set("");
+    }
   }
 
   if (mDefaultPresetPostLoadSyncPending && mDefaultPresetActive)
