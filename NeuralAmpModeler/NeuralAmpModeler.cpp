@@ -168,6 +168,14 @@ std::string SanitizeStandalonePresetName(std::string rawName)
   return rawName;
 }
 
+IText MakePresetNameEntryText(const IText& sourceText)
+{
+  IText text = sourceText;
+  text.mSize = 18.0f;
+  text.mVAlign = EVAlign::Middle;
+  return text;
+}
+
 bool LoadChunkFromFile(const std::filesystem::path& filePath, IByteChunk& chunk)
 {
   if (filePath.empty())
@@ -499,7 +507,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto bottomBarArea = IRECT(contentArea.L, contentArea.B - kBottomBarHeight, contentArea.R, contentArea.B);
     const auto heroArea = IRECT(contentArea.L, topBarArea.B, contentArea.R, bottomBarArea.T);
     pGraphics->AttachPopupMenuControl(
-      IText(13.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle));
+      IText(18.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle));
     if (auto* pPopupMenuControl = pGraphics->GetPopupMenuControl())
     {
       pPopupMenuControl->SetPanelColor(IColor(245, 24, 24, 28));
@@ -759,15 +767,19 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       IRECT(
         tunerToolLeft, topToolRowTop, tunerToolLeft + topNavTunerWidth, topToolRowTop + kTunerToolIconHeight);
     // Preset strip in utility row (centered), with previous/next buttons and current preset text.
-    constexpr float kPresetStripWidth = 340.0f;
-    constexpr float kPresetStripHeight = 25.0f;
-    constexpr float kPresetButtonSize = 22.0f;
+    constexpr float kPresetStripWidth = 310.0f;
+    constexpr float kPresetStripHeight = 37.0f;
+    constexpr float kPresetButtonSize = 25.0f;
     const float presetStripLeft = topUtilityRowArea.MW() - 0.5f * kPresetStripWidth;
     const float presetStripTop = topUtilityRowArea.MH() - 0.5f * kPresetStripHeight;
     const auto presetStripArea = IRECT(
       presetStripLeft, presetStripTop, presetStripLeft + kPresetStripWidth, presetStripTop + kPresetStripHeight);
-    const auto presetPrevArea = presetStripArea.GetFromLeft(kPresetButtonSize);
-    const auto presetNextArea = presetStripArea.GetFromRight(kPresetButtonSize);
+    constexpr float kPresetArrowYOffset = 1.0f;
+    const float presetArrowTop = presetStripArea.MH() - 0.5f * kPresetButtonSize + kPresetArrowYOffset;
+    const auto presetPrevArea = IRECT(
+      presetStripArea.L, presetArrowTop, presetStripArea.L + kPresetButtonSize, presetArrowTop + kPresetButtonSize);
+    const auto presetNextArea = IRECT(
+      presetStripArea.R - kPresetButtonSize, presetArrowTop, presetStripArea.R, presetArrowTop + kPresetButtonSize);
     const auto presetLabelArea = IRECT(presetPrevArea.R + 10.0f,
                                        presetStripArea.T,
                                        presetNextArea.L - 10.0f,
@@ -943,7 +955,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         .WithColor(EVColor::kPR, IColor(28, 255, 255, 255))
         .WithColor(EVColor::kFR, IColor(0, 255, 255, 255))
         .WithColor(EVColor::kHL, IColor(30, 255, 255, 255))
-        .WithLabelText(IText(13.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle));
+        .WithLabelText(IText(18.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle));
     pGraphics->AttachControl(new IVButtonControl(presetLabelArea, SplashClickActionFunc, "Preset", presetPickerStyle), kCtrlTagPresetLabel)
       ->SetAnimationEndActionFunction([this](IControl* pCaller) {
         _ShowStandalonePresetMenu(pCaller->GetRECT());
@@ -2584,8 +2596,9 @@ void NeuralAmpModeler::OnIdle()
       auto* pProxyControl = pGraphics->GetControlWithTag(kCtrlTagStandalonePresetNameEntryProxy);
       if (pPresetLabelControl != nullptr && pProxyControl != nullptr)
       {
+        const IText entryText = MakePresetNameEntryText(pPresetLabelControl->GetText());
         pGraphics->CreateTextEntry(
-          *pProxyControl, pPresetLabelControl->GetText(), pPresetLabelControl->GetRECT(),
+          *pProxyControl, entryText, pPresetLabelControl->GetRECT(),
           mStandalonePresetNameEntryPendingText.Get());
         reopened = true;
       }
@@ -3452,10 +3465,7 @@ void NeuralAmpModeler::_UpdatePresetLabel()
   {
     std::filesystem::path presetPath(mStandalonePresetFilePath.Get());
     const std::string presetName = presetPath.stem().string();
-    if (mStandalonePresetIndex >= 0 && mStandalonePresetIndex < static_cast<int>(mStandalonePresetPaths.size()))
-      label.SetFormatted(256, "%d. %s", mStandalonePresetIndex + 1, presetName.c_str());
-    else
-      label.SetFormatted(256, "%s", presetName.c_str());
+    label.SetFormatted(256, "%s", presetName.c_str());
   }
   else if (mDefaultPresetActive)
   {
@@ -3892,7 +3902,8 @@ void NeuralAmpModeler::_PromptStandalonePresetSaveAs()
       _ShowMessageBox(GetUI(), "Failed to save preset.", "Preset Save Error", kMB_OK);
   });
 
-  pGraphics->CreateTextEntry(*pProxyControl, pPresetLabelControl->GetText(), pPresetLabelControl->GetRECT(), suggestedName.c_str());
+  const IText entryText = MakePresetNameEntryText(pPresetLabelControl->GetText());
+  pGraphics->CreateTextEntry(*pProxyControl, entryText, pPresetLabelControl->GetRECT(), suggestedName.c_str());
 }
 
 void NeuralAmpModeler::_PromptStandalonePresetRename()
@@ -3960,7 +3971,8 @@ void NeuralAmpModeler::_PromptStandalonePresetRename()
     _UpdatePresetLabel();
   });
 
-  pGraphics->CreateTextEntry(*pProxyControl, pPresetLabelControl->GetText(), pPresetLabelControl->GetRECT(), suggestedName.c_str());
+  const IText entryText = MakePresetNameEntryText(pPresetLabelControl->GetText());
+  pGraphics->CreateTextEntry(*pProxyControl, entryText, pPresetLabelControl->GetRECT(), suggestedName.c_str());
 }
 
 void NeuralAmpModeler::_PromptStandalonePresetDelete()
@@ -4150,8 +4162,8 @@ void NeuralAmpModeler::_ShowStandalonePresetMenu(const IRECT& anchorArea)
     }
   }
 
-  mStandalonePresetMenu.AddItem("User Presets", pUserSubmenu);
   mStandalonePresetMenu.AddItem("Factory Presets", pFactorySubmenu);
+  mStandalonePresetMenu.AddItem("User Presets", pUserSubmenu);
   auto* pPresetControl = pGraphics->GetControlWithTag(kCtrlTagPresetLabel);
   if (pPresetControl == nullptr)
     return;
