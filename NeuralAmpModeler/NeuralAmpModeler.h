@@ -145,6 +145,14 @@ enum ECtrlTags
   kCtrlTagFXEQOnLED,
   kCtrlTagFXDelayOnLED,
   kCtrlTagFXReverbOnLED,
+  kCtrlTagAmp1HasLoudness,
+  kCtrlTagAmp1HasCalibration,
+  kCtrlTagAmp2HasLoudness,
+  kCtrlTagAmp2HasCalibration,
+  kCtrlTagAmp3HasLoudness,
+  kCtrlTagAmp3HasCalibration,
+  kCtrlTagStompHasLoudness,
+  kCtrlTagStompHasCalibration,
   kNumCtrlTags
 };
 
@@ -374,6 +382,12 @@ private:
 
   // Update all controls that depend on a model
   void _UpdateControlsFromModel();
+  void _RefreshOutputModeControlSupport();
+  void _RefreshModelCapabilityIndicators();
+  void _SetAmpSlotCapabilityState(int slotIndex, bool hasLoudness, bool hasCalibration);
+  void _ClearAmpSlotCapabilityState(int slotIndex);
+  void _SetStompCapabilityState(bool hasLoudness, bool hasCalibration);
+  void _ClearStompCapabilityState();
   // Top icon-strip state handling
   void _SetTopNavActiveSection(TopNavSection section);
   void _ToggleTopNavSectionBypass(TopNavSection section);
@@ -502,6 +516,10 @@ private:
   iplug::IByteChunk mDefaultPresetStateChunk;
   iplug::igraphics::IPopupMenu mStandalonePresetMenu;
   std::array<AmpSlotState, 3> mAmpSlotStates = {};
+  std::array<std::atomic<bool>, 3> mAmpSlotHasLoudness;
+  std::array<std::atomic<bool>, 3> mAmpSlotHasCalibration;
+  std::atomic<bool> mStompHasLoudness{false};
+  std::atomic<bool> mStompHasCalibration{false};
   // 0=Empty, 1=Loading, 2=Ready, 3=Failed.
   std::array<std::atomic<int>, 3> mAmpSlotModelState;
   std::array<std::atomic<int>, 3> mSlotLoadUIEvent;
