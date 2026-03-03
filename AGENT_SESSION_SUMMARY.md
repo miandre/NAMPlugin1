@@ -1,8 +1,8 @@
 # AGENT_SESSION_SUMMARY.md
 
-Last updated: 2026-03-02
+Last updated: 2026-03-03
 
-Purpose: concise handoff for new agents so work can continue without replaying full chat history.
+Purpose: concise handoff so a new agent can continue work without replaying full chat history.
 
 ## Read order for new agents
 1. `AGENTS.md`
@@ -14,21 +14,17 @@ Purpose: concise handoff for new agents so work can continue without replaying f
 - Remote:
   - `origin` = `https://github.com/miandre/NAMPlugin1.git`
   - `upstream` = `https://github.com/sdatkinson/NeuralAmpModelerPlugin.git` (push disabled)
-- Current HEAD on `main`: `a375ec7`
+- Current HEAD on `main`: `25a9c25`
+- Working tree baseline: clean on `main` at `25a9c25` before editing this handover file
 - Recent commits on `main`:
+  - `25a9c25` Optimize stereo core with robust effective-mono collapse
+  - `3a6e643` ui(presets): polish strip layout and menu/text-entry consistency
+  - `b2bb902` presets: add inline rename flow for user presets
+  - `c0d20ff` presets: keep save-as name entry active after overwrite cancel
+  - `1dc0030` presets: add default preset and inline save-as/delete flow
+  - `e928f0a` ui(file-browser): handle explicit clear messages
+  - `ac9ca1e` Update handover
   - `a375ec7` FX reverb: remove mode toggle and finalize room-only algorithm
-  - `2e54238` FX reverb: raise wet level and tighten decay-size response
-  - `ae84e79` FX reverb: lock single-room voicing baseline and width/diffusion polish
-  - `5634f2c` FX reverb: add adaptive stereo decorrelator with stronger mix
-  - `410ef64` FX reverb checkpoint: stereo width shaping and damping/diffusion tuning
-  - `bc54c55` FX reverb baseline: room-size macro, decay/predelay/mix tuning
-  - `11dbbc1` FX reverb tuning checkpoint: stable tail, stereo image, decay mapping
-  - `aa97503` FX: mono-source stereo imaging for delay/reverb bus
-  - `a449619` FX: add minimal stereo delay/reverb coupling pass
-  - `0409fcc` Minor bug fixes (channel and preset issues)
-  - `b9b87cc` Merge feature/standalone-presets-workflow: preset management 1.0
-  - `97bd4b1` Preset menu 1.0: unified dropdown workflow and dirty tracking
-  - `4dc756a` Optimize stereo mode for effective mono input
 
 ## Submodule state (important)
 - `iPlug2` remote:
@@ -48,37 +44,44 @@ Purpose: concise handoff for new agents so work can continue without replaying f
 
 ## What was completed in this cycle
 
-### 1) Stereo and host-compat behavior
-- Effective-mono optimization in stereo input mode was added (`4dc756a`) to avoid redundant heavy dual-path processing when input is effectively mono.
-- Channel layout ordering and host behavior were tuned so VST3 appears/loads correctly on stereo tracks across hosts.
-- Auto input-mode defaulting was adjusted for host differences (LUNA/Reaper behavior), then stabilized.
+### 1) Preset workflow UX and authoring flow
+- Built-in standalone preset authoring flow is now in place (menu-driven, no Windows file picker for normal preset ops).
+- Added inline Save As text-entry popup (same UI style as menu).
+- Added preset delete flow from preset menu.
+- Added preset rename flow from preset menu.
+- Save As collision behavior changed:
+  - prompt asks to overwrite existing preset name instead of auto suffixing.
+  - if overwrite is declined, text entry reopens with focus retained for quick rename.
+- Added and integrated `Default` preset:
+  - shown at top of preset menu.
+  - selected by default on first startup/new track if no restored state.
+- Preset strip/menu polish:
+  - larger/more readable typography (font 18 where applicable).
+  - arrow alignment fixes.
+  - removed numeric prefix in displayed preset label.
+  - submenu order adjusted: Factory first, User below.
 
-### 2) Preset management 1.0 (standalone and plugin integration)
-- Unified dropdown-style preset workflow implemented with structured menus and user/factory organization.
-- Dirty-state indicator (`*`) implemented for changed presets.
-- Preset label/menu styling and geometry improved.
-- Plugin path was wired to the same intended preset behavior (not just generic host dropdown).
-- Prompting bugs fixed:
-  - loading presets no longer incorrectly opens `.nam` file dialogs (prompt is now UI-action gated).
-- Active UI section is no longer serialized as preset state (loading presets does not force section switches).
-- Dirty tracking now also reacts to top-nav bypass/section related changes that affect sound state.
+### 2) Default preset/state behavior fixes
+- Startup tuner default corrected to inactive.
+- Default preset load path fixed so selected startup assets are actually active, not only visually selected.
+- Fixed staged/default recall behavior so amp models are correctly re-armed/toggled during default recall.
+- Fixed missing Boost/Cab default load behavior in default preset flow.
+- Cab default load is now confirmed working for `Default` preset.
 
-### 3) FX (delay/reverb) major iteration
-- Delay path reached good stereo behavior; ping-pong was deferred as a possible future switch/feature.
-- Reverb went through many tuning passes:
-  - early/late balance reshaping
-  - damping/diffusion tuning
-  - high-decay stabilization
-  - stereo decorrelation and width shaping
-  - wet loudness compensation and decay-span tuning
-- Final direction:
-  - single room-based reverb mode (room at low decay, hall-like at higher decay)
-  - removed visible Room/Hall toggle from UI
-  - removed hall-branch DSP logic and related smoothing state for cleaner room-only processing
+### 3) Stereo CPU optimization hardening
+- Effective-mono optimization was strengthened in `ProcessBlock`:
+  - strict near-identical stereo detection.
+  - one-sided input detection (L silent/R active or R silent/L active) treated as effective mono.
+  - hysteresis windows to avoid rapid mono/stereo flapping.
+- Collapsed-mono path still re-expands before IR stage, so stereo IR behavior remains intact.
+- Committed and merged:
+  - `25a9c25` Optimize stereo core with robust effective-mono collapse
+  - branch used: `feature/effective-mono-collapse-hardening` (already merged to `main`)
 
-### 4) Branch and merge flow completed
-- FX work was finalized on `feature/stereo-fx-strategy`, pushed, then merged fast-forward into `main`.
-- `origin/main` currently includes full preset 1.0 + stereo/host fixes + latest room-only reverb work.
+### 4) What was tried but intentionally not kept
+- A prototype smoothing pass for mono/stereo FX transition behavior (delay/reverb strategy interpolation) was implemented and auditioned.
+- User judged it unnecessary for real-world usage and asked to remove it.
+- That patch was reverted before commit; `main` does not include it.
 
 ## Non-negotiable guardrails (must follow)
 - Audio-thread (`ProcessBlock` and callees) rules:
@@ -94,19 +97,23 @@ Purpose: concise handoff for new agents so work can continue without replaying f
 
 ## Known practical status
 - Stereo path and dual-mono core behavior are in place and working.
-- Preset workflow is much more complete and modern than the old load/save-file-only flow.
-- Reverb currently sounds good per user feedback and is in a solid room-only baseline.
+- Effective-mono CPU optimization is robust for:
+  - dual-identical mono on stereo input
+  - one-sided mono on stereo input
+  - while avoiding false mono on tightly matched but real stereo content.
+- Preset menu/workflow is significantly improved (save-as inline, rename, delete, default preset, cleaner strip UX).
+- Reverb is still on room-only finalized baseline from `a375ec7`.
+- Output mode preset linkage was discussed as low-priority and left unchanged for now.
 
-## Potential next work areas (not yet committed as a roadmap)
-1. Reverb cleanup pass:
-   - further factorization of long `ProcessBlock` reverb section for readability/maintenance without sound change.
+## Potential next work areas (not committed roadmap)
+1. Reverb code cleanup:
+   - factor/organize long `ProcessBlock` reverb section without changing sound.
 2. Optional FX features:
-   - ping-pong delay mode switch
-   - additional stereo width/decorrelation control (if desired by user).
-3. Productization:
-   - naming/branding cleanup (plugin/manufacturer strings, assets) and consistency.
-4. Cross-host UX polish:
-   - verify behavior in LUNA/Reaper/other DAWs around defaults and plugin listing labels.
+   - ping-pong delay mode switch.
+3. Productization polish:
+   - naming/branding cleanup (plugin/manufacturer strings/assets).
+4. Cross-host UX validation:
+   - verify defaults/listing behavior in LUNA/Reaper/other hosts.
 
 ## Starter prompt for the next agent (copy/paste)
 You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
@@ -129,9 +136,11 @@ After reading instructions, briefly summarize the most important guardrails you 
 - build/test policy (no builds unless explicitly requested)
 
 Current baseline to preserve:
-- `main` includes full stereo routing/core work, preset management 1.0, and room-only reverb finalization.
-- Latest head: `a375ec7`.
+- `main` includes full stereo routing/core work, preset management improvements (inline save-as/rename/delete/default preset), and room-only reverb finalization.
+- Latest head: `25a9c25`.
 - `iPlug2` is pinned to `b54bf7af6` from `https://github.com/miandre/iPlug2.git`.
+- Robust effective-mono CPU optimization is merged and should not regress.
+- FX mono/stereo transition smoothing prototype is intentionally not on `main`.
 
 Task request:
 1) Inspect current code state and identify the top 3-5 highest-value next steps.
