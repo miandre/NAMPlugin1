@@ -474,6 +474,8 @@ private:
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRChannel2;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRRight;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRRightChannel2;
+  WDL_String mStagedIRPath;
+  WDL_String mStagedIRPathRight;
   // Flags to take away the modules at a safe time.
   std::atomic<bool> mShouldRemoveModel = false;
   std::array<std::atomic<bool>, 3> mShouldRemoveModelSlot;

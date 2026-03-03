@@ -981,7 +981,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     auto loadIRLeftCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
       if (fileName.GetLength())
       {
-        mIRPath = fileName;
         const dsp::wav::LoadReturnCode retCode = _StageIRLeft(fileName);
         if (retCode != dsp::wav::LoadReturnCode::SUCCESS)
         {
@@ -1001,7 +1000,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     auto loadIRRightCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
       if (fileName.GetLength())
       {
-        mIRPathRight = fileName;
         const dsp::wav::LoadReturnCode retCode = _StageIRRight(fileName);
         if (retCode != dsp::wav::LoadReturnCode::SUCCESS)
         {
@@ -4869,6 +4867,7 @@ void NeuralAmpModeler::_AllocateIOPointers(const size_t nChans)
 void NeuralAmpModeler::_ApplyDSPStaging()
 {
   const bool inputStereoMode = GetParam(kInputStereoMode)->Bool();
+  bool triggerOutputDeClick = false;
   auto updateActiveModelGainsAndLatency = [this]() {
     _UpdateLatency();
     _SetInputGain();
@@ -5011,17 +5010,25 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   }
   if (mShouldRemoveIRLeft)
   {
+    mStagedIR = nullptr;
+    mStagedIRChannel2 = nullptr;
+    mStagedIRPath.Set("");
     mIR = nullptr;
     mIRChannel2 = nullptr;
     mIRPath.Set("");
     mShouldRemoveIRLeft = false;
+    triggerOutputDeClick = true;
   }
   if (mShouldRemoveIRRight)
   {
+    mStagedIRRight = nullptr;
+    mStagedIRRightChannel2 = nullptr;
+    mStagedIRPathRight.Set("");
     mIRRight = nullptr;
     mIRRightChannel2 = nullptr;
     mIRPathRight.Set("");
     mShouldRemoveIRRight = false;
+    triggerOutputDeClick = true;
   }
   // Move things from staged to live
   if (mStagedModel != nullptr && (!inputStereoMode || mStagedModelRight != nullptr))
@@ -5051,6 +5058,9 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStagedIR = nullptr;
     mIRChannel2 = std::move(mStagedIRChannel2);
     mStagedIRChannel2 = nullptr;
+    mIRPath = mStagedIRPath;
+    mStagedIRPath.Set("");
+    triggerOutputDeClick = true;
   }
   if (mStagedIRRight != nullptr && (!inputStereoMode || mStagedIRRightChannel2 != nullptr))
   {
@@ -5058,7 +5068,13 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStagedIRRight = nullptr;
     mIRRightChannel2 = std::move(mStagedIRRightChannel2);
     mStagedIRRightChannel2 = nullptr;
+    mIRPathRight = mStagedIRPathRight;
+    mStagedIRPathRight.Set("");
+    triggerOutputDeClick = true;
   }
+
+  if (triggerOutputDeClick)
+    mAmpSwitchDeClickSamplesRemaining.store(kAmpSlotSwitchDeClickSamples, std::memory_order_relaxed);
 }
 
 void NeuralAmpModeler::_DeallocateIOPointers()
@@ -5140,6 +5156,7 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
     {
       const auto irData = mIR->GetData();
       mStagedIR = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      mStagedIRPath = mIRPath;
     }
   }
   if (mStagedIRChannel2 != nullptr)
@@ -5176,6 +5193,7 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
     {
       const auto irData = mIRRight->GetData();
       mStagedIRRight = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      mStagedIRPathRight = mIRPathRight;
     }
   }
   if (mStagedIRRightChannel2 != nullptr)
@@ -5355,9 +5373,6 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
 
 dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath)
 {
-  // FIXME it'd be better for the path to be "staged" as well. Just in case the
-  // path and the model got caught on opposite sides of the fence...
-  WDL_String previousIRPath = mIRPath;
   const double sampleRate = GetSampleRate();
   dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
   try
@@ -5372,6 +5387,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
       // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
       mStagedIRChannel2 = std::move(stagedIRChannel2);
       mStagedIR = std::move(stagedIR);
+      mStagedIRPath = irPath;
     }
   }
   catch (std::runtime_error& e)
@@ -5383,8 +5399,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
 
   if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
   {
-    mIRPath = irPath;
-    SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, mIRPath.GetLength(), mIRPath.Get());
+    SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, irPath.GetLength(), irPath.Get());
   }
   else
   {
@@ -5396,7 +5411,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
     {
       mStagedIRChannel2 = nullptr;
     }
-    mIRPath = previousIRPath;
+    mStagedIRPath.Set("");
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadFailed);
   }
 
@@ -5405,7 +5420,6 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
 
 dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPath)
 {
-  WDL_String previousIRPath = mIRPathRight;
   const double sampleRate = GetSampleRate();
   dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
   try
@@ -5420,6 +5434,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
       // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
       mStagedIRRightChannel2 = std::move(stagedIRRightChannel2);
       mStagedIRRight = std::move(stagedIRRight);
+      mStagedIRPathRight = irPath;
     }
   }
   catch (std::runtime_error& e)
@@ -5431,9 +5446,8 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
 
   if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
   {
-    mIRPathRight = irPath;
     SendControlMsgFromDelegate(
-      kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, mIRPathRight.GetLength(), mIRPathRight.Get());
+      kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, irPath.GetLength(), irPath.Get());
   }
   else
   {
@@ -5441,7 +5455,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
       mStagedIRRight = nullptr;
     if (mStagedIRRightChannel2 != nullptr)
       mStagedIRRightChannel2 = nullptr;
-    mIRPathRight = previousIRPath;
+    mStagedIRPathRight.Set("");
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserRight, kMsgTagLoadFailed);
   }
 
