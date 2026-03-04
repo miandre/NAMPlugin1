@@ -72,6 +72,17 @@ constexpr double kStereoSideBypassEngageSeconds = 0.08;
 constexpr double kStereoSideBypassReleaseSeconds = 0.03;
 constexpr int kStereoSideBypassResumeDeClickSamples = 64;
 constexpr size_t kMinInternalPreparedFrames = 16384;
+constexpr double kDelayManualTempoDefaultBPM = 120.0;
+constexpr double kDelayManualTempoMinBPM = 10.0;
+constexpr double kDelayManualTempoMaxBPM = 350.0;
+constexpr double kDelayHostTempoMinBPM = 1.0;
+constexpr double kDelayHostTempoMaxBPM = 400.0;
+constexpr int kDefaultFXDelayTimeMode = 1; // MS
+#ifdef APP_API
+constexpr int kDefaultDelayTempoSource = 1; // Manual in standalone.
+#else
+constexpr int kDefaultDelayTempoSource = 0; // Host auto in plugin formats.
+#endif
 
 struct EffectiveMonoInputAnalysis
 {
@@ -521,6 +532,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kFXDelayMix)->InitDouble("FX Delay Mix", 25.0, 0.0, 100.0, 0.1, "%");
   GetParam(kFXDelayTimeMs)->InitDouble("FX Delay Time", 420.0, 1.0, 2000.0, 1.0, "ms");
   GetParam(kFXDelayFeedback)->InitDouble("FX Delay Feedback", 35.0, 0.0, 80.0, 0.1, "%");
+  GetParam(kFXDelayTimeMode)->InitEnum("FX Delay Time Mode", kDefaultFXDelayTimeMode, {"Sync", "MS"});
+  GetParam(kDelayTempoSource)->InitEnum("FX Delay Tempo Source", kDefaultDelayTempoSource, {"Auto", "Manual"});
+  GetParam(kDelayManualTempoBPM)
+    ->InitDouble("FX Delay Tempo", kDelayManualTempoDefaultBPM, kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM, 0.1, "BPM");
   GetParam(kFXReverbActive)->InitBool("FX Reverb", false);
   GetParam(kFXReverbMix)->InitDouble("FX Reverb Mix", 20.0, 0.0, 100.0, 0.1, "%");
   GetParam(kFXReverbDecay)->InitDouble("FX Reverb Decay", 1.8, 0.1, 10.0, 0.1, "s");
@@ -795,6 +810,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto fxDelaySwitchArea =
       IRECT(fxDelaySwitchX - 0.5f * stompButtonW, fxDelaySwitchY - 0.5f * stompButtonH, fxDelaySwitchX + 0.5f * stompButtonW,
             fxDelaySwitchY + 0.5f * stompButtonH);
+    const auto fxDelaySyncModeArea =
+      IRECT(fxDelaySwitchArea.L - 6.0f, fxDelaySwitchArea.T - 30.0f, fxDelaySwitchArea.R + 6.0f, fxDelaySwitchArea.T - 8.0f);
     const auto fxDelayOnLedArea =
       IRECT(fxDelaySwitchArea.MW() + 41.0f, fxDelaySwitchArea.B - 34.0f, fxDelaySwitchArea.MW() + 55.0f, fxDelaySwitchArea.B - 20.0f);
 
@@ -816,6 +833,22 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                            inputModeSwitchCenterY - 0.5f * kInputModeSwitchHeight,
                                            inputModeSwitchCenterX + 0.5f * kInputModeSwitchWidth,
                                            inputModeSwitchCenterY + 0.5f * kInputModeSwitchHeight);
+    constexpr float kSyncButtonGap = 16.0f;
+    constexpr float kSyncButtonWidth = 56.0f;
+    constexpr float kSyncButtonHeight = 22.0f;
+    const float syncButtonCenterX = inputModeSwitchArea.R + kSyncButtonGap + 0.5f * kSyncButtonWidth;
+    const auto delaySyncButtonArea = IRECT(syncButtonCenterX - 0.5f * kSyncButtonWidth,
+                                           inputModeSwitchCenterY - 0.5f * kSyncButtonHeight,
+                                           syncButtonCenterX + 0.5f * kSyncButtonWidth,
+                                           inputModeSwitchCenterY + 0.5f * kSyncButtonHeight);
+    constexpr float kTempoBPMFieldGap = 10.0f;
+    constexpr float kTempoBPMFieldWidth = 86.0f;
+    constexpr float kTempoBPMFieldHeight = 22.0f;
+    const auto delayTempoBPMFieldArea =
+      IRECT(delaySyncButtonArea.R + kTempoBPMFieldGap,
+            inputModeSwitchCenterY - 0.5f * kTempoBPMFieldHeight,
+            delaySyncButtonArea.R + kTempoBPMFieldGap + kTempoBPMFieldWidth,
+            inputModeSwitchCenterY + 0.5f * kTempoBPMFieldHeight);
 
     constexpr float kSettingsIconHeight = 24.0f;
     constexpr float kSettingsRightPad = 8.0f;
@@ -1141,6 +1174,23 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->SetTooltip("Model On/Off");
     pGraphics->AttachControl(new ISVGSwitchControl(inputModeSwitchArea, {inputMonoSVG, inputStereoSVG}, kInputStereoMode))
       ->SetTooltip("Input mode: Mono = input 1 only, Stereo = input 1+2");
+    const IText syncOnText(18.0f, COLOR_WHITE.WithOpacity(0.96f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    const IText syncOffText(18.0f, COLOR_GRAY.WithOpacity(0.9f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    pGraphics->AttachControl(new NAMSyncTextToggleControl(delaySyncButtonArea, kDelayTempoSource, syncOnText, syncOffText))
+      ->SetTooltip("Delay sync: ON uses host tempo when available, OFF uses manual BPM");
+    const IVStyle tempoFieldStyle = utilityStyle.WithShowLabel(false)
+                                     .WithColor(kFG, COLOR_BLACK.WithOpacity(0.78f))
+                                     .WithColor(kHL, COLOR_WHITE.WithOpacity(0.86f))
+                                     .WithColor(kFR, COLOR_BLACK.WithOpacity(0.5f))
+                                     .WithValueText(IText(18.0f,
+                                                          COLOR_WHITE.WithOpacity(0.96f),
+                                                          "ArialNarrow-Bold",
+                                                          EAlign::Center,
+                                                          EVAlign::Middle));
+    pGraphics->AttachControl(
+      new NAMTempoNumberBoxControl(delayTempoBPMFieldArea, kDelayManualTempoBPM, nullptr, "BPM", tempoFieldStyle, false,
+                                   kDelayManualTempoDefaultBPM, kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM, "%0.1f", false))
+      ->SetTooltip("Manual tempo (editable when SYNC is OFF)");
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle), kCtrlTagIRToggle);
     pGraphics->AttachControl(new NAMFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Select cab IR L...", "wav",
                                                        loadIRLeftCompletionHandler, utilityStyle, fileSVG, crossSVG,
@@ -1204,6 +1254,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new NAMBitmapLEDControl(fxDelayOnLedArea, redLedOnBitmap, redLedOffBitmap),
                              kCtrlTagFXDelayOnLED,
                              "FX_CONTROLS");
+    const IText fxDelaySyncOnText(13.0f, COLOR_WHITE.WithOpacity(0.96f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    const IText fxDelaySyncOffText(13.0f, COLOR_GRAY.WithOpacity(0.9f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    pGraphics->AttachControl(new NAMSyncTextToggleControl(fxDelaySyncModeArea, kFXDelayTimeMode, fxDelaySyncOnText,
+                                                          fxDelaySyncOffText),
+                             -1,
+                             "FX_CONTROLS")
+      ->SetTooltip("Delay TIME mode: SYNC = note divisions, MS = milliseconds");
     pGraphics->AttachControl(
       new NAMMomentaryBitmapButtonControl(fxReverbSwitchArea, kFXReverbActive, stompButtonUpBitmap, stompButtonDownBitmap),
       -1,
@@ -1317,8 +1374,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(fxDelayTimeArea, kFXDelayTimeMs, "TIME", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
-                              kPedalKnobScale, 8.0f, -5.0f),
+      new NAMDelayTimeKnobControl(fxDelayTimeArea, kFXDelayTimeMs, "TIME", utilityStyle, pedalKnobBitmap,
+                                  pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(new NAMPedalKnobControl(fxDelayFeedbackArea, kFXDelayFeedback, "FDBK", utilityStyle, pedalKnobBitmap,
@@ -1493,6 +1550,19 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const size_t numChannelsExternalOut = (size_t)NOutChansConnected();
   const size_t numFrames = (size_t)nFrames;
   const double sampleRate = GetSampleRate();
+  const double hostTempoBPM = GetTempo();
+  const bool hostTempoValid = std::isfinite(hostTempoBPM) && hostTempoBPM >= kDelayHostTempoMinBPM
+                              && hostTempoBPM <= kDelayHostTempoMaxBPM;
+  const double manualTempoBPM =
+    std::clamp(GetParam(kDelayManualTempoBPM)->Value(), kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM);
+  const bool preferManualTempo = (GetParam(kDelayTempoSource)->Int() != 0);
+  const bool useManualTempo = preferManualTempo || !hostTempoValid;
+  mDelayUsingManualTempo.store(useManualTempo, std::memory_order_relaxed);
+  mDelayHostTempoValid.store(hostTempoValid, std::memory_order_relaxed);
+  mDelayTempoBPM.store(useManualTempo ? manualTempoBPM : hostTempoBPM, std::memory_order_relaxed);
+  const double hostSamplePos = GetSamplePos();
+  mDelaySamplePos.store(std::isfinite(hostSamplePos) ? hostSamplePos : -1.0, std::memory_order_relaxed);
+  mDelayTransportIsRunning.store(GetTransportIsRunning(), std::memory_order_relaxed);
   const bool inputStereoMode = GetParam(kInputStereoMode)->Bool();
   const bool hasRightInputChannel = (inputs != nullptr) && (numChannelsExternalIn > 1) && (inputs[1] != nullptr);
   bool stereoCoreRequested = false;
@@ -2375,6 +2445,25 @@ void NeuralAmpModeler::OnIdle()
   _ApplyInputStereoAutoDefaultIfNeeded();
   _RefreshModelCapabilityIndicators();
 
+  if (auto* pGraphics = GetUI())
+  {
+    if (auto* pTempoControl = pGraphics->GetControlWithParamIdx(kDelayManualTempoBPM))
+    {
+      const bool syncOn = (GetParam(kDelayTempoSource)->Int() == 0);
+      pTempoControl->SetDisabled(syncOn);
+
+      double displayedTempoBPM = GetParam(kDelayManualTempoBPM)->Value();
+      if (syncOn && mDelayHostTempoValid.load(std::memory_order_relaxed))
+      {
+        displayedTempoBPM =
+          std::clamp(mDelayTempoBPM.load(std::memory_order_relaxed), kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM);
+      }
+
+      const double displayedTempoNormalized = GetParam(kDelayManualTempoBPM)->ToNormalized(displayedTempoBPM);
+      pTempoControl->SetValueFromDelegate(displayedTempoNormalized, 0);
+    }
+  }
+
   if (mStandalonePresetNameEntryReopenPending)
   {
     bool reopened = false;
@@ -3086,10 +3175,24 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       {
         if (auto* pFXDelayOnLED = pGraphics->GetControlWithTag(kCtrlTagFXDelayOnLED))
           pFXDelayOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        const int delayParams[] = {kFXDelayMix, kFXDelayTimeMs, kFXDelayFeedback, kFXDelayLowCutHz, kFXDelayHighCutHz};
+        const int delayParams[] = {kFXDelayMix, kFXDelayTimeMs, kFXDelayFeedback, kFXDelayLowCutHz, kFXDelayHighCutHz,
+                                   kFXDelayTimeMode};
         for (const int delayParam : delayParams)
           if (auto* pControl = pGraphics->GetControlWithParamIdx(delayParam))
             pControl->SetDisabled(!active);
+        break;
+      }
+      case kFXDelayTimeMode:
+      {
+        if (auto* pDelayTimeControl = pGraphics->GetControlWithParamIdx(kFXDelayTimeMs))
+          pDelayTimeControl->SetDirty(false);
+        break;
+      }
+      case kDelayTempoSource:
+      {
+        const bool syncOn = (GetParam(kDelayTempoSource)->Int() == 0);
+        if (auto* pTempoControl = pGraphics->GetControlWithParamIdx(kDelayManualTempoBPM))
+          pTempoControl->SetDisabled(syncOn);
         break;
       }
       case kFXReverbActive:

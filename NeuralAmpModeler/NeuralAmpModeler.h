@@ -106,6 +106,11 @@ enum EParams
   kFXReverbHighCutHz,
   // Input mode: mono uses only input 1, stereo uses input 1+2.
   kInputStereoMode,
+  // Delay tempo source/mode foundation (append-only).
+  kDelayTempoSource,
+  kDelayManualTempoBPM,
+  // Delay-local TIME knob mode: SYNC (note divisions) vs MS.
+  kFXDelayTimeMode,
   kNumParams
 };
 
@@ -524,6 +529,12 @@ private:
   bool mDefaultPresetCapturedFromStartup = false;
   bool mHasDefaultPresetState = false;
   iplug::IByteChunk mDefaultPresetStateChunk;
+  // Cached transport timing state for delay sync foundation.
+  std::atomic<double> mDelayTempoBPM{120.0};
+  std::atomic<double> mDelaySamplePos{-1.0};
+  std::atomic<bool> mDelayTransportIsRunning{false};
+  std::atomic<bool> mDelayHostTempoValid{false};
+  std::atomic<bool> mDelayUsingManualTempo{true};
   iplug::igraphics::IPopupMenu mStandalonePresetMenu;
   std::array<AmpSlotState, 3> mAmpSlotStates = {};
   std::array<std::atomic<bool>, 3> mAmpSlotHasLoudness;

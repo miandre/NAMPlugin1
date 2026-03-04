@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <algorithm> // std::clamp
 #include <cmath> // std::round
 #include <functional>
@@ -186,6 +187,131 @@ public:
 private:
   IBitmap mOffBitmap;
   IBitmap mOnBitmap;
+};
+
+class NAMSyncTextToggleControl : public IControl
+{
+public:
+  NAMSyncTextToggleControl(const IRECT& bounds, int paramIdx, const IText& onText, const IText& offText)
+  : IControl(bounds, paramIdx)
+  , mOnText(onText)
+  , mOffText(offText)
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const bool syncOn = _IsSyncOn();
+    if (mMouseIsOver && !IsDisabled() && !syncOn)
+      g.FillRoundRect(COLOR_WHITE.WithOpacity(0.08f), mRECT, 3.0f, &mBlend);
+    g.DrawText(syncOn ? mOnText : mOffText, "SYNC", mRECT, &mBlend);
+  }
+
+  void OnMouseDown(float, float, const IMouseMod&) override
+  {
+    if (IsDisabled())
+      return;
+
+    if (const auto* pParam = GetParam())
+    {
+      const int nextMode = (pParam->Int() == 0) ? 1 : 0;
+      SetValueFromUserInput(pParam->ToNormalized(static_cast<double>(nextMode)));
+      return;
+    }
+
+    SetValueFromUserInput(_IsSyncOn() ? 1.0 : 0.0);
+  }
+
+private:
+  bool _IsSyncOn() const
+  {
+    if (const auto* pParam = GetParam())
+      return pParam->Int() == 0;
+    return GetValue() < 0.5;
+  }
+
+  IText mOnText;
+  IText mOffText;
+};
+
+class NAMTempoNumberBoxControl : public IVNumberBoxControl
+{
+public:
+  using IVNumberBoxControl::IVNumberBoxControl;
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (IsDisabled())
+      return;
+    IVNumberBoxControl::OnMouseDown(x, y, mod);
+  }
+
+  void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
+  {
+    if (IsDisabled())
+      return;
+    IVNumberBoxControl::OnMouseDrag(x, y, dX, dY, mod);
+  }
+
+  void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override
+  {
+    if (IsDisabled())
+      return;
+    IVNumberBoxControl::OnMouseWheel(x, y, mod, d);
+  }
+
+  void OnMouseDblClick(float x, float y, const IMouseMod& mod) override
+  {
+    if (IsDisabled())
+      return;
+    IVNumberBoxControl::OnMouseDblClick(x, y, mod);
+  }
+
+  void OnAttached() override
+  {
+    IVNumberBoxControl::OnAttached();
+    _ApplyVisualState(false);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const bool disabled = IsDisabled();
+    const bool active = (mMouseIsOver || mMouseIsDown) && !disabled;
+    _ApplyVisualState(active);
+    if (disabled)
+    {
+      // Keep disabled hover identical to idle (no white flash while SYNC is on).
+      const IColor idleFill = IColor(40, 255, 255, 255);
+      SetColor(kHL, idleFill);
+      SetColor(kFG, idleFill);
+    }
+    if (!active && mTextReadout != nullptr)
+      g.FillRect(IColor(40, 255, 255, 255), mTextReadout->GetRECT(), &mBlend);
+    IVNumberBoxControl::Draw(g);
+  }
+
+private:
+  void _ApplyVisualState(bool active)
+  {
+    if (mVisualActive == active)
+      return;
+
+    mVisualActive = active;
+
+    // Keep hover and drag the same: black text on white field.
+    SetColor(kHL, COLOR_WHITE.WithOpacity(0.92f));
+    SetColor(kFG, COLOR_WHITE.WithOpacity(0.92f));
+
+    if (mTextReadout != nullptr)
+    {
+      const IColor textColor = active ? COLOR_BLACK.WithOpacity(0.95f) : COLOR_WHITE.WithOpacity(0.96f);
+      const IVStyle readoutStyle = mStyle.WithDrawFrame(true).WithValueText(mStyle.valueText.WithFGColor(textColor));
+      mTextReadout->SetStyle(readoutStyle);
+      mTextReadout->SetDirty(false);
+    }
+  }
+
+  bool mVisualActive = true;
 };
 
 // A toggle parameter button with momentary press visuals:
@@ -564,6 +690,63 @@ private:
   float mLabelYOffset = 0.0f;
   float mValueYOffset = 0.0f;
   bool mShowValueWhileDragging = false;
+};
+
+class NAMDelayTimeKnobControl : public NAMPedalKnobControl
+{
+public:
+  using NAMPedalKnobControl::NAMPedalKnobControl;
+
+  void OnInit() override
+  {
+    NAMPedalKnobControl::OnInit();
+    _UpdateSyncValueReadout();
+  }
+
+  void SetDirty(bool push, int valIdx = kNoValIdx) override
+  {
+    NAMPedalKnobControl::SetDirty(push, valIdx);
+    _UpdateSyncValueReadout();
+  }
+
+private:
+  bool _IsSyncMode()
+  {
+    auto* pDelegate = GetDelegate();
+    if (pDelegate == nullptr)
+      return false;
+    const auto* pModeParam = pDelegate->GetParam(kFXDelayTimeMode);
+    if (pModeParam == nullptr)
+      return false;
+    return pModeParam->Int() == 0;
+  }
+
+  static int _GetSyncDivisionIndex(double normalizedValue)
+  {
+    const auto& labels = _SyncDivisionLabels();
+    const double normalized = std::clamp(normalizedValue, 0.0, 1.0);
+    const int maxIndex = static_cast<int>(labels.size()) - 1;
+    return static_cast<int>(std::llround(normalized * static_cast<double>(maxIndex)));
+  }
+
+  void _UpdateSyncValueReadout()
+  {
+    if (!_IsSyncMode())
+      return;
+    const auto& labels = _SyncDivisionLabels();
+    const int idx = _GetSyncDivisionIndex(GetValue());
+    if (idx >= 0 && idx < static_cast<int>(labels.size()))
+      mValueStr.Set(labels[static_cast<size_t>(idx)]);
+  }
+
+  static const std::array<const char*, 14>& _SyncDivisionLabels()
+  {
+    static const std::array<const char*, 14> labels = {
+      "1/32", "1/16T", "1/32D", "1/16", "1/8T", "1/16D", "1/8",
+      "1/4T", "1/8D", "1/4", "1/2T", "1/4D", "1/2", "1/1"
+    };
+    return labels;
+  }
 };
 
 class NAMSwitchControl : public IVSlideSwitchControl, public IBitmapBase

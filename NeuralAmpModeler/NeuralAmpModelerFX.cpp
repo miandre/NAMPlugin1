@@ -5,6 +5,44 @@ using iplug::sample;
 namespace
 {
 constexpr double kPi = 3.14159265358979323846;
+
+struct DelaySyncDivisionDef
+{
+  double quarterNoteMultiplier = 1.0;
+};
+
+constexpr std::array<DelaySyncDivisionDef, 14> kDelaySyncDivisions = {{
+  {0.125},             // 1/32
+  {1.0 / 6.0},         // 1/16T
+  {0.1875},            // 1/32D
+  {0.25},              // 1/16
+  {1.0 / 3.0},         // 1/8T
+  {0.375},             // 1/16D
+  {0.5},               // 1/8
+  {2.0 / 3.0},         // 1/4T
+  {0.75},              // 1/8D
+  {1.0},               // 1/4
+  {4.0 / 3.0},         // 1/2T
+  {1.5},               // 1/4D
+  {2.0},               // 1/2
+  {4.0},               // 1/1
+}};
+
+int GetDelaySyncDivisionIndexFromNormalized(const double normalizedValue)
+{
+  const double normalized = std::clamp(normalizedValue, 0.0, 1.0);
+  const int maxIndex = static_cast<int>(kDelaySyncDivisions.size()) - 1;
+  return static_cast<int>(std::llround(normalized * static_cast<double>(maxIndex)));
+}
+
+double GetDelaySyncTimeMsFromNormalized(const double normalizedValue, const double tempoBPM)
+{
+  const int idx = GetDelaySyncDivisionIndexFromNormalized(normalizedValue);
+  const double clampedTempoBPM = (std::isfinite(tempoBPM) && tempoBPM > 1.0) ? tempoBPM : 120.0;
+  const double quarterNoteMs = 60000.0 / clampedTempoBPM;
+  const double delayTimeMs = quarterNoteMs * kDelaySyncDivisions[static_cast<size_t>(idx)].quarterNoteMultiplier;
+  return std::clamp(delayTimeMs, 1.0, 2000.0);
+}
 } // namespace
 
 void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t numChannelsInternal,
@@ -21,8 +59,13 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
   constexpr double kFXDelayWetWidthStereo = 1.28;
   constexpr double kFXDelayMonoStereoTimeOffsetMs = 12.0;
   constexpr double kFXDelayMonoStereoPingPongFeedback = 0.75;
-  const double targetTimeSamples = std::clamp(
-    GetParam(kFXDelayTimeMs)->Value() * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
+  const bool syncMode = (GetParam(kFXDelayTimeMode)->Int() == 0);
+  const double delayTimeParamNormalized = GetParam(kFXDelayTimeMs)->GetNormalized();
+  const double targetDelayTimeMs =
+    syncMode ? GetDelaySyncTimeMsFromNormalized(delayTimeParamNormalized, mDelayTempoBPM.load(std::memory_order_relaxed))
+             : GetParam(kFXDelayTimeMs)->Value();
+  const double targetTimeSamples =
+    std::clamp(targetDelayTimeMs * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
   const double targetFeedback = std::clamp(GetParam(kFXDelayFeedback)->Value() * 0.01, 0.0, 0.80);
   const double targetMix = std::clamp(GetParam(kFXDelayMix)->Value() * 0.01, 0.0, 1.0);
   const double maxCutHz = std::max(40.0, 0.45 * sampleRate);
