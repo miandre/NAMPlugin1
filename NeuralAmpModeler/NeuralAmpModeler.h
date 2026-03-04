@@ -510,6 +510,12 @@ private:
   bool mEffectiveMonoCollapseActive = false;
   size_t mEffectiveMonoCandidateSamples = 0;
   size_t mEffectiveStereoCandidateSamples = 0;
+  // Stereo CPU optimization: bypass heavy per-side stages when one side is sustained silent.
+  std::array<bool, kNumChannelsInternal> mStereoSideBypassActive = {};
+  std::array<size_t, kNumChannelsInternal> mStereoSideSilentCandidateSamples = {};
+  std::array<size_t, kNumChannelsInternal> mStereoSideActiveCandidateSamples = {};
+  std::array<int, kNumChannelsInternal> mStereoSideResumeDeClickSamplesRemaining = {};
+  std::array<double, kNumChannelsInternal> mStereoSideResumePrevSample = {};
   bool mDefaultPresetActive = true;
   bool mLoadingDefaultPreset = false;
   bool mDefaultPresetPostLoadSyncPending = false;

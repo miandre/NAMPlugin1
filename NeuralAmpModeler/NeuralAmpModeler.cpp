@@ -64,15 +64,24 @@ constexpr std::streamoff kMaxStandaloneStateBytes = 16 * 1024 * 1024;
 constexpr double kEffectiveMonoMaxPeakDiff = 3.0e-5;
 constexpr double kEffectiveMonoMaxRelativeDiff = 1.0e-7;
 constexpr double kEffectiveMonoSilenceMidEnergy = 1.0e-14;
-constexpr double kEffectiveMonoOneSidedEnergyRatio = 1.0e-6;
 constexpr double kEffectiveMonoEngageSeconds = 0.25;
 constexpr double kEffectiveMonoReleaseSeconds = 0.03;
+constexpr double kStereoSideBypassOneSidedEnergyRatio = 1.0e-6;
+constexpr double kStereoSideBypassSilenceEnergy = 1.0e-14;
+constexpr double kStereoSideBypassEngageSeconds = 0.08;
+constexpr double kStereoSideBypassReleaseSeconds = 0.03;
+constexpr int kStereoSideBypassResumeDeClickSamples = 64;
 constexpr size_t kMinInternalPreparedFrames = 16384;
 
 struct EffectiveMonoInputAnalysis
 {
   bool isEffectivelyMono = false;
   int monoSourceChannel = 0; // 0 = left, 1 = right
+};
+
+struct StereoSideSilenceAnalysis
+{
+  std::array<bool, 2> sideSilent = {false, false};
 };
 
 EffectiveMonoInputAnalysis AnalyzeEffectiveMonoInputBlock(const sample* inputLeft, const sample* inputRight,
@@ -108,18 +117,10 @@ EffectiveMonoInputAnalysis AnalyzeEffectiveMonoInputBlock(const sample* inputLef
 
   const double silenceEnergy = kEffectiveMonoSilenceMidEnergy * static_cast<double>(numFrames);
   const double louderEnergy = std::max(leftEnergy, rightEnergy);
-  const double quieterEnergy = std::min(leftEnergy, rightEnergy);
   if (louderEnergy <= silenceEnergy)
   {
     result.isEffectivelyMono = true;
     result.monoSourceChannel = 0;
-    return result;
-  }
-
-  if (quieterEnergy <= louderEnergy * kEffectiveMonoOneSidedEnergyRatio)
-  {
-    result.isEffectivelyMono = true;
-    result.monoSourceChannel = (rightEnergy > leftEnergy) ? 1 : 0;
     return result;
   }
 
@@ -139,6 +140,36 @@ EffectiveMonoInputAnalysis AnalyzeEffectiveMonoInputBlock(const sample* inputLef
     result.isEffectivelyMono = true;
     result.monoSourceChannel = (rightEnergy > leftEnergy) ? 1 : 0;
   }
+  return result;
+}
+
+StereoSideSilenceAnalysis AnalyzeStereoSideSilenceBlock(const sample* inputLeft, const sample* inputRight,
+                                                        const size_t numFrames)
+{
+  StereoSideSilenceAnalysis result{};
+  if (inputLeft == nullptr || inputRight == nullptr || numFrames == 0)
+    return result;
+
+  double leftEnergy = 0.0;
+  double rightEnergy = 0.0;
+  for (size_t s = 0; s < numFrames; ++s)
+  {
+    const double left = static_cast<double>(inputLeft[s]);
+    const double right = static_cast<double>(inputRight[s]);
+    leftEnergy += left * left;
+    rightEnergy += right * right;
+  }
+
+  const double silenceEnergy = kStereoSideBypassSilenceEnergy * static_cast<double>(numFrames);
+  if (leftEnergy <= silenceEnergy && rightEnergy <= silenceEnergy)
+  {
+    result.sideSilent[0] = true;
+    result.sideSilent[1] = true;
+    return result;
+  }
+
+  result.sideSilent[0] = leftEnergy <= std::max(silenceEnergy, rightEnergy * kStereoSideBypassOneSidedEnergyRatio);
+  result.sideSilent[1] = rightEnergy <= std::max(silenceEnergy, leftEnergy * kStereoSideBypassOneSidedEnergyRatio);
   return result;
 }
 
@@ -1501,8 +1532,10 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     {
       mEffectiveMonoCandidateSamples = std::min(monoEngageSamples, mEffectiveMonoCandidateSamples + numFrames);
       mEffectiveStereoCandidateSamples = 0;
-      if (mEffectiveMonoCandidateSamples >= monoEngageSamples)
+      if (!mEffectiveMonoCollapseActive && mEffectiveMonoCandidateSamples >= monoEngageSamples)
+      {
         mEffectiveMonoCollapseActive = true;
+      }
     }
     else
     {
@@ -1590,6 +1623,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   }
   // Input enters the amp core as mono (standalone) or dual-mono (plugin stereo input).
   _ProcessInput(processInputs, numFrames, processNumChannelsExternalIn, numChannelsMonoCore);
+  if (numFrames > 0 && numChannelsMonoCore > 0 && mInputPointers != nullptr && mInputPointers[0] != nullptr)
+    mInputSender.ProcessBlock(mInputPointers, (int)numFrames, kCtrlTagInputMeter, 1);
   _ApplyDSPStaging();
   const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
   auto* activeToneStack = mToneStacks[activeSlot].get();
@@ -1627,7 +1662,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         std::fill(outputs[c], outputs[c] + numFrames, 0.0f);
       }
       std::feupdateenv(&fe_state);
-      _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsMonoCore, numChannelsExternalOut);
+      _UpdateMeters(nullptr, outputs, numFrames, 0, numChannelsExternalOut);
       return;
     }
     if (tunerMonitorMode == 1)
@@ -1635,7 +1670,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       // Clean bypass while tuning, using post-input-gain mono signal.
       std::feupdateenv(&fe_state);
       _ProcessOutput(mInputPointers, outputs, numFrames, numChannelsMonoCore, numChannelsExternalOut);
-      _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsMonoCore, numChannelsExternalOut);
+      _UpdateMeters(nullptr, outputs, numFrames, 0, numChannelsExternalOut);
       return;
     }
     // tunerMonitorMode == 2 -> fall through to full processing path.
@@ -1666,6 +1701,61 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
   sample** modelInputPointers =
     noiseGateActive ? mNoiseGateGain.Process(triggerOutput, numChannelsMonoCore, numFrames) : triggerOutput;
+  std::array<bool, 2> bypassHeavySide = {false, false};
+  if (numChannelsMonoCore == 2 && modelInputPointers != nullptr && modelInputPointers[0] != nullptr
+      && modelInputPointers[1] != nullptr)
+  {
+    const auto sideSilence = AnalyzeStereoSideSilenceBlock(modelInputPointers[0], modelInputPointers[1], numFrames);
+    const double safeSampleRate = std::max(1.0, sampleRate);
+    const size_t bypassEngageSamples =
+      std::max<size_t>(1, static_cast<size_t>(std::ceil(kStereoSideBypassEngageSeconds * safeSampleRate)));
+    const size_t bypassReleaseSamples =
+      std::max<size_t>(1, static_cast<size_t>(std::ceil(kStereoSideBypassReleaseSeconds * safeSampleRate)));
+    for (size_t c = 0; c < 2; ++c)
+    {
+      if (sideSilence.sideSilent[c])
+      {
+        mStereoSideSilentCandidateSamples[c] =
+          std::min(bypassEngageSamples, mStereoSideSilentCandidateSamples[c] + numFrames);
+        mStereoSideActiveCandidateSamples[c] = 0;
+        if (!mStereoSideBypassActive[c] && mStereoSideSilentCandidateSamples[c] >= bypassEngageSamples)
+        {
+          mStereoSideBypassActive[c] = true;
+          mStereoSideResumeDeClickSamplesRemaining[c] = 0;
+        }
+      }
+      else
+      {
+        mStereoSideSilentCandidateSamples[c] = 0;
+        if (mStereoSideBypassActive[c])
+        {
+          mStereoSideActiveCandidateSamples[c] =
+            std::min(bypassReleaseSamples, mStereoSideActiveCandidateSamples[c] + numFrames);
+          if (mStereoSideActiveCandidateSamples[c] >= bypassReleaseSamples)
+          {
+            mStereoSideBypassActive[c] = false;
+            mStereoSideActiveCandidateSamples[c] = 0;
+            mStereoSideResumeDeClickSamplesRemaining[c] = kStereoSideBypassResumeDeClickSamples;
+          }
+        }
+        else
+        {
+          mStereoSideActiveCandidateSamples[c] = 0;
+        }
+      }
+      bypassHeavySide[c] = mStereoSideBypassActive[c];
+    }
+  }
+  else
+  {
+    for (size_t c = 0; c < 2; ++c)
+    {
+      mStereoSideBypassActive[c] = false;
+      mStereoSideSilentCandidateSamples[c] = 0;
+      mStereoSideActiveCandidateSamples[c] = 0;
+      mStereoSideResumeDeClickSamplesRemaining[c] = 0;
+    }
+  }
 
   if (boostEnabled)
   {
@@ -1676,12 +1766,27 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     }
     else
     {
-      sample* leftIn[1] = {modelInputPointers[0]};
-      sample* leftOut[1] = {boostOutPointers[0]};
-      sample* rightIn[1] = {modelInputPointers[1]};
-      sample* rightOut[1] = {boostOutPointers[1]};
-      mStompModel->process(leftIn, leftOut, nFrames);
-      mStompModelRight->process(rightIn, rightOut, nFrames);
+      if (!bypassHeavySide[0])
+      {
+        sample* leftIn[1] = {modelInputPointers[0]};
+        sample* leftOut[1] = {boostOutPointers[0]};
+        mStompModel->process(leftIn, leftOut, nFrames);
+      }
+      else
+      {
+        std::copy_n(modelInputPointers[0], numFrames, boostOutPointers[0]);
+      }
+
+      if (!bypassHeavySide[1])
+      {
+        sample* rightIn[1] = {modelInputPointers[1]};
+        sample* rightOut[1] = {boostOutPointers[1]};
+        mStompModelRight->process(rightIn, rightOut, nFrames);
+      }
+      else
+      {
+        std::copy_n(modelInputPointers[1], numFrames, boostOutPointers[1]);
+      }
     }
     modelInputPointers = boostOutPointers;
   }
@@ -1708,12 +1813,66 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     }
     else
     {
-      sample* leftIn[1] = {modelInputPointers[0]};
-      sample* leftOut[1] = {modelOutPointers[0]};
-      sample* rightIn[1] = {modelInputPointers[1]};
-      sample* rightOut[1] = {modelOutPointers[1]};
-      mModel->process(leftIn, leftOut, nFrames);
-      mModelRight->process(rightIn, rightOut, nFrames);
+      if (!bypassHeavySide[0])
+      {
+        sample* leftIn[1] = {modelInputPointers[0]};
+        sample* leftOut[1] = {modelOutPointers[0]};
+        mModel->process(leftIn, leftOut, nFrames);
+      }
+      else
+      {
+        std::copy_n(modelInputPointers[0], numFrames, modelOutPointers[0]);
+      }
+
+      if (!bypassHeavySide[1])
+      {
+        sample* rightIn[1] = {modelInputPointers[1]};
+        sample* rightOut[1] = {modelOutPointers[1]};
+        mModelRight->process(rightIn, rightOut, nFrames);
+      }
+      else
+      {
+        std::copy_n(modelInputPointers[1], numFrames, modelOutPointers[1]);
+      }
+
+      if (numFrames > 0)
+      {
+        for (size_t c = 0; c < 2; ++c)
+        {
+          if (bypassHeavySide[c])
+          {
+            mStereoSideResumePrevSample[c] = static_cast<double>(modelOutPointers[c][numFrames - 1]);
+            mStereoSideResumeDeClickSamplesRemaining[c] = 0;
+            continue;
+          }
+
+          int declickRemaining = mStereoSideResumeDeClickSamplesRemaining[c];
+          if (declickRemaining > 0)
+          {
+            const int framesToSmooth = static_cast<int>(std::min(numFrames, static_cast<size_t>(declickRemaining)));
+            double prev = mStereoSideResumePrevSample[c];
+            int channelRemaining = declickRemaining;
+            for (int s = 0; s < framesToSmooth; ++s)
+            {
+              const double t = 1.0 - static_cast<double>(channelRemaining - 1)
+                                         / static_cast<double>(kStereoSideBypassResumeDeClickSamples);
+              const double blended = (1.0 - t) * prev + t * static_cast<double>(modelOutPointers[c][s]);
+              modelOutPointers[c][s] = static_cast<sample>(blended);
+              prev = blended;
+              --channelRemaining;
+            }
+            if (numFrames > static_cast<size_t>(framesToSmooth))
+              prev = static_cast<double>(modelOutPointers[c][numFrames - 1]);
+            mStereoSideResumePrevSample[c] = prev;
+            declickRemaining -= framesToSmooth;
+            mStereoSideResumeDeClickSamplesRemaining[c] = std::max(0, declickRemaining);
+          }
+          else
+          {
+            mStereoSideResumePrevSample[c] = static_cast<double>(modelOutPointers[c][numFrames - 1]);
+          }
+        }
+      }
     }
     modelInputPointers = modelOutPointers;
   }
@@ -2552,7 +2711,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   // _ProcessOutput(lpfPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
   // * Output of input leveling (inputs -> mInputPointers),
   // * Output of output leveling (mOutputPointers -> outputs)
-  _UpdateMeters(mInputPointers, outputs, numFrames, numChannelsInternal, numChannelsExternalOut);
+  _UpdateMeters(nullptr, outputs, numFrames, 0, numChannelsExternalOut);
 }
 
 void NeuralAmpModeler::OnReset()
@@ -2702,8 +2861,9 @@ void NeuralAmpModeler::OnReset()
   // I'm ignoring the model & IR, but it's not the end of the world.
   const int tailCycles = 10;
   SetTailSize(tailCycles * (int)(sampleRate / kDCBlockerFrequency));
-  mInputSender.Reset(sampleRate);
-  mOutputSender.Reset(sampleRate);
+  const double meterSenderSampleRate = (sampleRate > 0.0) ? sampleRate : DEFAULT_SAMPLE_RATE;
+  mInputSender.Reset(meterSenderSampleRate);
+  mOutputSender.Reset(meterSenderSampleRate);
   // If there is a model or IR loaded, they need to be checked for resampling.
   _ResetModelAndIR(sampleRate, GetBlockSize());
   mTransposeShifter.Reset(sampleRate, maxBlockSize);
@@ -2811,6 +2971,11 @@ void NeuralAmpModeler::OnReset()
   mEffectiveMonoCollapseActive = false;
   mEffectiveMonoCandidateSamples = 0;
   mEffectiveStereoCandidateSamples = 0;
+  mStereoSideBypassActive.fill(false);
+  mStereoSideSilentCandidateSamples.fill(0);
+  mStereoSideActiveCandidateSamples.fill(0);
+  mStereoSideResumeDeClickSamplesRemaining.fill(0);
+  mStereoSideResumePrevSample.fill(0.0);
   _UpdateLatency();
 }
 
@@ -5630,11 +5795,16 @@ void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** ou
   const double gain = mOutputGain;
 
   auto writeSample = [gain](sample inputSample) {
+    double outputSample = gain * static_cast<double>(inputSample);
+    if (!std::isfinite(outputSample))
+    {
+      outputSample = 0.0;
+    }
 #ifdef APP_API // Ensure valid output to interface
-    return static_cast<sample>(std::clamp(gain * inputSample, -1.0, 1.0));
+    return static_cast<sample>(std::clamp(outputSample, -1.0, 1.0));
 #else // In a DAW, other things may come next and should be able to handle large
       // values.
-    return static_cast<sample>(gain * inputSample);
+    return static_cast<sample>(outputSample);
 #endif
   };
 
@@ -5811,11 +5981,14 @@ void NeuralAmpModeler::_UpdateLatency()
 void NeuralAmpModeler::_UpdateMeters(sample** inputPointer, sample** outputPointer, const size_t nFrames,
                                      const size_t nChansIn, const size_t nChansOut)
 {
+  if (nFrames == 0)
+    return;
+
   // Right now, we didn't specify MAXNC when we initialized these, so it's 1.
   const int nChansHack = 1;
-  if (inputPointer != nullptr && inputPointer[0] != nullptr)
+  if (nChansIn > 0 && inputPointer != nullptr && inputPointer[0] != nullptr)
     mInputSender.ProcessBlock(inputPointer, (int)nFrames, kCtrlTagInputMeter, nChansHack);
-  if (outputPointer != nullptr && outputPointer[0] != nullptr)
+  if (nChansOut > 0 && outputPointer != nullptr && outputPointer[0] != nullptr)
     mOutputSender.ProcessBlock(outputPointer, (int)nFrames, kCtrlTagOutputMeter, nChansHack);
 }
 
