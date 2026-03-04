@@ -415,6 +415,8 @@
     <ClCompile Include="..\..\AudioDSPTools\dsp\RecursiveLinearFilter.cpp" />
     <ClCompile Include="..\..\AudioDSPTools\dsp\wav.cpp" />
     <ClCompile Include="..\NeuralAmpModeler.cpp" />
+    <ClCompile Include="..\NeuralAmpModelerPostEQ.cpp" />
+    <ClCompile Include="..\NeuralAmpModelerFX.cpp" />
     <ClCompile Include="..\TunerAnalyzer.cpp" />
     <ClCompile Include="..\..\NeuralAmpModelerCore\NAM\activations.cpp" />
     <ClCompile Include="..\..\NeuralAmpModelerCore\NAM\conv1d.cpp" />
@@ -529,6 +531,8 @@
     <ClInclude Include="..\Colors.h" />
     <ClInclude Include="..\config.h" />
     <ClInclude Include="..\NeuralAmpModeler.h" />
+    <ClInclude Include="..\NeuralAmpModelerPostEQ.h" />
+    <ClInclude Include="..\NeuralAmpModelerFX.h" />
     <ClInclude Include="..\NeuralAmpModelerControls.h" />
     <ClInclude Include="..\TunerAnalyzer.h" />
     <ClInclude Include="..\..\NeuralAmpModelerCore\NAM\activations.h" />
