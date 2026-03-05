@@ -137,6 +137,7 @@ enum ECtrlTags
   kCtrlTagTopNavAmp,
   kCtrlTagTopNavStomp,
   kCtrlTagTopNavCab,
+  kCtrlTagTopNavEq,
   kCtrlTagTopNavFx,
   kCtrlTagTopNavTuner,
   kCtrlTagAmpSlot1,
@@ -325,6 +326,12 @@ private:
     Count
   };
 
+  enum class FXPage : int
+  {
+    Main = 0,
+    Eq
+  };
+
   // Allocates mInputPointers and mOutputPointers
   void _AllocateIOPointers(const size_t nChans);
   // Moves DSP modules from staging area to the main area.
@@ -499,6 +506,7 @@ private:
   std::atomic<int> mPendingAmpSlotSwitch{-1};
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false};
+  FXPage mFXActivePage = FXPage::Main;
   int mAmpSelectorIndex = 1;
   bool mApplyingAmpSlotState = false;
   bool mStartupDefaultLoadAttempted = false;
