@@ -921,6 +921,51 @@ public:
   }
 };
 
+class NAMEQFaderSliderControl : public IVSliderControl
+{
+public:
+  NAMEQFaderSliderControl(const IRECT& bounds, int paramIdx, const IVStyle& style, const IBitmap& knobBitmap)
+  : IVSliderControl(bounds, paramIdx, "", style.WithShowLabel(false).WithShowValue(false), false, EDirection::Vertical,
+                    DEFAULT_GEARING, 6.0f, 3.0f, true)
+  , mKnobBitmap(knobBitmap)
+  {
+  }
+
+  void OnRescale() override
+  {
+    IVSliderControl::OnRescale();
+    if (mKnobBitmap.IsValid())
+      mKnobBitmap = GetUI()->GetScaledBitmap(mKnobBitmap);
+  }
+
+  void DrawTrack(IGraphics&, const IRECT&) override {}
+
+  void DrawHandle(IGraphics& g, const IRECT& bounds) override
+  {
+    if (!mKnobBitmap.IsValid())
+      return;
+
+    // Keep the slider body transparent and draw only a compact handle bitmap.
+    const float sourceW = static_cast<float>(mKnobBitmap.W());
+    const float sourceH = static_cast<float>(mKnobBitmap.H());
+    const float ratio = sourceW > 0.0f ? (sourceH / sourceW) : 1.0f;
+
+    const float handleW = std::max(bounds.W() * 1.35f, 10.0f);
+    const float handleH = std::min(handleW * ratio, static_cast<float>(mWidgetBounds.H()) * 0.28f);
+    IRECT knobBounds(bounds.MW() - 0.5f * handleW, bounds.MH() - 0.5f * handleH, bounds.MW() + 0.5f * handleW,
+                     bounds.MH() + 0.5f * handleH);
+    if (knobBounds.T < mWidgetBounds.T)
+      knobBounds.Translate(0.0f, static_cast<float>(mWidgetBounds.T) - knobBounds.T);
+    if (knobBounds.B > mWidgetBounds.B)
+      knobBounds.Translate(0.0f, static_cast<float>(mWidgetBounds.B) - knobBounds.B);
+    const IBlend knobBlend(EBlend::Default, IsDisabled() ? 0.45f : 1.0f);
+    g.DrawFittedBitmap(mKnobBitmap, knobBounds, &knobBlend);
+  }
+
+private:
+  IBitmap mKnobBitmap;
+};
+
 class NAMTunerMonitorControl : public IVTabSwitchControl
 {
 public:

@@ -539,7 +539,22 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     ->InitDouble("FX Delay Tempo", kDelayManualTempoDefaultBPM, kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM, 0.1, "BPM");
   GetParam(kFXReverbActive)->InitBool("FX Reverb", false);
   GetParam(kFXReverbMix)->InitDouble("FX Reverb Mix", 20.0, 0.0, 100.0, 0.1, "%");
-  GetParam(kFXReverbDecay)->InitDouble("FX Reverb Decay", 1.8, 0.1, 10.0, 0.1, "s");
+  GetParam(kFXReverbDecay)
+    ->InitDouble("FX Reverb Decay",
+                 1.8,
+                 0.1,
+                 10.0,
+                 0.1,
+                 "",
+                 0,
+                 "",
+                 IParam::ShapeLinear(),
+                 IParam::kUnitCustom,
+                 [](double value, WDL_String& display) {
+                   const double sizeNormalized = std::clamp((value - 0.1) / 9.9, 0.0, 1.0);
+                   const int sizeDisplay = static_cast<int>(std::lround(1.0 + sizeNormalized * 99.0));
+                   display.SetFormatted(16, "%d", sizeDisplay);
+                 });
   GetParam(kFXReverbPreDelayMs)->InitDouble("FX Reverb PreDelay", 25.0, 0.0, 250.0, 1.0, "ms");
   GetParam(kFXReverbTone)->InitDouble("FX Reverb Tone", 50.0, 0.0, 100.0, 0.1, "%");
   GetParam(kFXDelayLowCutHz)->InitDouble("FX Delay LoCut", 120.0, 20.0, 2000.0, 1.0, "Hz");
@@ -611,7 +626,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto settingsBackgroundBitmap = pGraphics->LoadBitmap(SETTINGSBACKGROUND_FN);
     const auto fileBackgroundBitmap = pGraphics->LoadBitmap(FILEBACKGROUND_FN);
     const auto inputLevelBackgroundBitmap = pGraphics->LoadBitmap(INPUTLEVELBACKGROUND_FN);
-    const auto linesBitmap = pGraphics->LoadBitmap(LINES_FN);
     const auto ampKnobBackgroundBitmap = pGraphics->LoadBitmap(KNOBBACKGROUND_FN);
     const auto switchOffBitmap = pGraphics->LoadBitmap(SWITCH_OFF_FN);
     const auto switchOnBitmap = pGraphics->LoadBitmap(SWITCH_ON_FN);
@@ -619,12 +633,15 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto meterBackgroundBitmap = pGraphics->LoadBitmap(METERBACKGROUND_FN);
     const auto pedalKnobBitmap = pGraphics->LoadBitmap(PEDALKNOB_FN);
     const auto pedalKnobShadowBitmap = pGraphics->LoadBitmap(PEDALKNOBSHADOW_FN);
+    const auto eqFaderKnobBitmap = pGraphics->LoadBitmap(EQFADERKNOB_FN);
     const auto stompButtonUpBitmap = pGraphics->LoadBitmap(STOMPBUTTONUP_FN);
     const auto stompButtonDownBitmap = pGraphics->LoadBitmap(STOMPBUTTONDOWN_FN);
     const auto greenLedOnBitmap = pGraphics->LoadBitmap(GREENLEDON_FN);
     const auto greenLedOffBitmap = pGraphics->LoadBitmap(GREENLEDOFF_FN);
     const auto redLedOnBitmap = pGraphics->LoadBitmap(REDLEDON_FN);
     const auto redLedOffBitmap = pGraphics->LoadBitmap(REDLEDOFF_FN);
+    const auto smallOnOffOffBitmap = pGraphics->LoadBitmap(SMALLONOFF_OFF_FN);
+    const auto smallOnOffOnBitmap = pGraphics->LoadBitmap(SMALLONOFF_ON_FN);
 
     // Top/section icons are SVG-only now.
 
@@ -786,36 +803,38 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto fxEqOnLedArea =
       IRECT(fxEqSwitchArea.MW() - 12.0f, fxEqSwitchArea.B - 304.0f, fxEqSwitchArea.MW() + 12.0f, fxEqSwitchArea.B - 280.0f);
 
-    const float fxReverbKnobY = designToUIY(1215.0f);
-    const auto fxReverbMixArea = makePedalKnobArea(designToUIX(1840.0f), fxReverbKnobY);
-    const auto fxReverbDecayArea = makePedalKnobArea(designToUIX(2064.0f), fxReverbKnobY);
-    const auto fxReverbPreDelayArea = makePedalKnobArea(designToUIX(2259.0f), fxReverbKnobY);
-    const auto fxReverbToneArea = makePedalKnobArea(designToUIX(2445.0f), fxReverbKnobY);
-    const auto fxReverbLowCutArea = makePedalKnobArea(designToUIX(820.0f), fxReverbKnobY);
-    const auto fxReverbHighCutArea = makePedalKnobArea(designToUIX(1210.0f), fxReverbKnobY);
-    const float fxReverbSwitchX = designToUIX(2660.0f);
-    const float fxReverbSwitchY = designToUIY(1250.0f);
-    const auto fxReverbSwitchArea =
-      IRECT(fxReverbSwitchX - 0.5f * stompButtonW, fxReverbSwitchY - 0.5f * stompButtonH,
-            fxReverbSwitchX + 0.5f * stompButtonW, fxReverbSwitchY + 0.5f * stompButtonH);
-    const auto fxReverbOnLedArea = IRECT(fxReverbSwitchArea.MW() + 41.0f, fxReverbSwitchArea.B - 34.0f,
-                                         fxReverbSwitchArea.MW() + 55.0f, fxReverbSwitchArea.B - 20.0f);
+    // FX section first pass against refreshed background art:
+    // Delay row (top), Reverb row (bottom), and left-anchored amp-style on/off switches.
+    const float fxDelayKnobY = designToUIY(800.0f);
+    const auto fxDelayMixArea = makePedalKnobArea(designToUIX(1570.0f), fxDelayKnobY);
+    const auto fxDelayFeedbackArea = makePedalKnobArea(designToUIX(1810.0f), fxDelayKnobY);
+    const auto fxDelayTimeArea = makePedalKnobArea(designToUIX(2045.0f), fxDelayKnobY);
+    const auto fxDelayLowCutArea = makePedalKnobArea(designToUIX(2290.0f), fxDelayKnobY);
+    const auto fxDelayHighCutArea = makePedalKnobArea(designToUIX(2535.0f), fxDelayKnobY);
+    const float fxDelaySwitchX = designToUIX(430.0f);
+    const float fxDelaySwitchY = designToUIY(850.0f);
+    const auto fxDelaySwitchArea = IRECT(fxDelaySwitchX - 0.5f * modelSwitchWidth,
+                                         fxDelaySwitchY - 0.5f * modelSwitchHeight,
+                                         fxDelaySwitchX + 0.5f * modelSwitchWidth,
+                                         fxDelaySwitchY + 0.5f * modelSwitchHeight);
+    const float fxDelaySyncCenterX = designToUIX(2050.0f);
+    const float fxDelaySyncCenterY = designToUIY(1100.0f);
+    const auto fxDelaySyncModeArea = IRECT(fxDelaySyncCenterX - 20.0f, fxDelaySyncCenterY - 9.0f,
+                                           fxDelaySyncCenterX + 20.0f, fxDelaySyncCenterY + 9.0f);
 
-    const float fxDelayKnobY = designToUIY(1575.0f);
-    const auto fxDelayMixArea = makePedalKnobArea(designToUIX(820.0f), fxDelayKnobY);
-    const auto fxDelayTimeArea = makePedalKnobArea(designToUIX(1210.0f), fxDelayKnobY);
-    const auto fxDelayFeedbackArea = makePedalKnobArea(designToUIX(1600.0f), fxDelayKnobY);
-    const auto fxDelayLowCutArea = makePedalKnobArea(designToUIX(1990.0f), fxDelayKnobY);
-    const auto fxDelayHighCutArea = makePedalKnobArea(designToUIX(2380.0f), fxDelayKnobY);
-    const float fxDelaySwitchX = designToUIX(2660.0f);
-    const float fxDelaySwitchY = designToUIY(1610.0f);
-    const auto fxDelaySwitchArea =
-      IRECT(fxDelaySwitchX - 0.5f * stompButtonW, fxDelaySwitchY - 0.5f * stompButtonH, fxDelaySwitchX + 0.5f * stompButtonW,
-            fxDelaySwitchY + 0.5f * stompButtonH);
-    const auto fxDelaySyncModeArea =
-      IRECT(fxDelaySwitchArea.L - 6.0f, fxDelaySwitchArea.T - 30.0f, fxDelaySwitchArea.R + 6.0f, fxDelaySwitchArea.T - 8.0f);
-    const auto fxDelayOnLedArea =
-      IRECT(fxDelaySwitchArea.MW() + 41.0f, fxDelaySwitchArea.B - 34.0f, fxDelaySwitchArea.MW() + 55.0f, fxDelaySwitchArea.B - 20.0f);
+    const float fxReverbKnobY = designToUIY(1448.0f);
+    const auto fxReverbMixArea = makePedalKnobArea(designToUIX(740.0f), fxReverbKnobY);
+    const auto fxReverbDecayArea = makePedalKnobArea(designToUIX(1075.0f), fxReverbKnobY);
+    const auto fxReverbPreDelayArea = makePedalKnobArea(designToUIX(1400.0f), fxReverbKnobY);
+    const auto fxReverbToneArea = makePedalKnobArea(designToUIX(1720.0f), fxReverbKnobY);
+    const auto fxReverbLowCutArea = makePedalKnobArea(designToUIX(2050.0f), fxReverbKnobY);
+    const auto fxReverbHighCutArea = makePedalKnobArea(designToUIX(2380.0f), fxReverbKnobY);
+    const float fxReverbSwitchX = designToUIX(430.0f);
+    const float fxReverbSwitchY = designToUIY(1520.0f);
+    const auto fxReverbSwitchArea = IRECT(fxReverbSwitchX - 0.5f * modelSwitchWidth,
+                                          fxReverbSwitchY - 0.5f * modelSwitchHeight,
+                                          fxReverbSwitchX + 0.5f * modelSwitchWidth,
+                                          fxReverbSwitchY + 0.5f * modelSwitchHeight);
 
 
     // Gate/EQ toggle row (independent group)
@@ -1089,12 +1108,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     };
 
     pGraphics->AttachControl(new NAMBackgroundBitmapControl(b, AMP2BACKGROUND_FN, amp2BackgroundBitmap), kCtrlTagMainBackground);
-    pGraphics->AttachControl(new IBitmapControl(b, linesBitmap));
-    // Subtle utility-zone overlays to anchor top and footer controls visually.
-    const IColor topBarOverlayColor = IColor(72, 6, 6, 8);
-    const IColor bottomBarOverlayColor = IColor(82, 6, 6, 8);
-    pGraphics->AttachControl(new IPanelControl(topBarArea, topBarOverlayColor));
-    pGraphics->AttachControl(new IPanelControl(bottomBarArea, bottomBarOverlayColor));
+    // Keep FX background fully visible behind top/footer zones.
     // Single subtle top separator (kept above amp image); no footer separator.
     const IColor separatorColor = IColor(70, 255, 255, 255);
     const float topSeparatorY = topBarControlRowTopBase - 2.0f;
@@ -1266,31 +1280,26 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                              kCtrlTagFXEQOnLED,
                              "EQ_CONTROLS");
     pGraphics->AttachControl(
-      new NAMMomentaryBitmapButtonControl(fxDelaySwitchArea, kFXDelayActive, stompButtonUpBitmap, stompButtonDownBitmap),
+      new NAMBitmapToggleControl(fxDelaySwitchArea, kFXDelayActive, switchOffBitmap, switchOnBitmap),
       -1,
       "FX_CONTROLS");
-    pGraphics->AttachControl(new NAMBitmapLEDControl(fxDelayOnLedArea, redLedOnBitmap, redLedOffBitmap),
-                             kCtrlTagFXDelayOnLED,
-                             "FX_CONTROLS");
-    const IText fxDelaySyncOnText(13.0f, COLOR_WHITE.WithOpacity(0.96f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
-    const IText fxDelaySyncOffText(13.0f, COLOR_GRAY.WithOpacity(0.9f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
-    pGraphics->AttachControl(new NAMSyncTextToggleControl(fxDelaySyncModeArea, kFXDelayTimeMode, fxDelaySyncOnText,
-                                                          fxDelaySyncOffText),
-                             -1,
-                             "FX_CONTROLS")
+    // kFXDelayTimeMode enum is {Sync, MS}; Sync (0) should display switch ON.
+    // NAMBitmapToggleControl draws "off" art at 0 and "on" art at 1, so mapping is intentionally inverted.
+    pGraphics->AttachControl(
+      new NAMBitmapToggleControl(fxDelaySyncModeArea, kFXDelayTimeMode, smallOnOffOnBitmap, smallOnOffOffBitmap),
+      -1,
+      "FX_CONTROLS")
       ->SetTooltip("Delay TIME mode: SYNC = note divisions, MS = milliseconds");
     pGraphics->AttachControl(
-      new NAMMomentaryBitmapButtonControl(fxReverbSwitchArea, kFXReverbActive, stompButtonUpBitmap, stompButtonDownBitmap),
+      new NAMBitmapToggleControl(fxReverbSwitchArea, kFXReverbActive, switchOffBitmap, switchOnBitmap),
       -1,
       "FX_CONTROLS");
-    pGraphics->AttachControl(new NAMBitmapLEDControl(fxReverbOnLedArea, redLedOnBitmap, redLedOffBitmap),
-                             kCtrlTagFXReverbOnLED,
-                             "FX_CONTROLS");
     pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap))->Hide(true);
 
     // The knobs
     constexpr float kSideLabelYOffset = 18.0f;
     constexpr float kSideValueYOffset = -24.0f;
+    const IVStyle fxKnobNoLabelStyle = utilityStyle.WithShowLabel(false);
     pGraphics->AttachControl(new NAMKnobControl(
       inputKnobArea, kInputLevel, "INPUT", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale, kSideLabelYOffset,
       kSideValueYOffset));
@@ -1312,100 +1321,98 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "STOMP_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(
-      fxEqBand31Area, kFXEQBand31Hz, "31Hz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+    pGraphics->AttachControl(new NAMEQFaderSliderControl(fxEqBand31Area, kFXEQBand31Hz, fxEqSliderStyle, eqFaderKnobBitmap),
                              -1,
                              "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(
-      fxEqBand62Area, kFXEQBand62Hz, "62Hz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
-                             -1,
-                             "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(fxEqBand125Area, kFXEQBand125Hz, "125Hz", fxEqSliderStyle,
-                                                 false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
-                             -1,
-                             "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(fxEqBand250Area, kFXEQBand250Hz, "250Hz", fxEqSliderStyle,
-                                                 false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
-                             -1,
-                             "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(fxEqBand500Area, kFXEQBand500Hz, "500Hz", fxEqSliderStyle,
-                                                 false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
-                             -1,
-                             "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(
-      fxEqBand1kArea, kFXEQBand1kHz, "1kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
-                             -1,
-                             "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(
-      fxEqBand2kArea, kFXEQBand2kHz, "2kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
-                             -1,
-                             "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(
-      fxEqBand4kArea, kFXEQBand4kHz, "4kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
-                             -1,
-                             "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(
-      fxEqBand8kArea, kFXEQBand8kHz, "8kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
-                             -1,
-                             "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(
-      fxEqBand16kArea, kFXEQBand16kHz, "16kHz", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
-                             -1,
-                             "EQ_CONTROLS");
-    pGraphics->AttachControl(new IVSliderControl(
-      fxEqOutputArea, kFXEQOutputGain, "GAIN", fxEqSliderStyle, false, EDirection::Vertical, DEFAULT_GEARING, 6.0f, 3.0f, true),
+    pGraphics->AttachControl(new NAMEQFaderSliderControl(fxEqBand62Area, kFXEQBand62Hz, fxEqSliderStyle, eqFaderKnobBitmap),
                              -1,
                              "EQ_CONTROLS");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(fxReverbMixArea, kFXReverbMix, "DRY/WET", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+      new NAMEQFaderSliderControl(fxEqBand125Area, kFXEQBand125Hz, fxEqSliderStyle, eqFaderKnobBitmap),
+      -1,
+      "EQ_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMEQFaderSliderControl(fxEqBand250Area, kFXEQBand250Hz, fxEqSliderStyle, eqFaderKnobBitmap),
+      -1,
+      "EQ_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMEQFaderSliderControl(fxEqBand500Area, kFXEQBand500Hz, fxEqSliderStyle, eqFaderKnobBitmap),
+      -1,
+      "EQ_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMEQFaderSliderControl(fxEqBand1kArea, kFXEQBand1kHz, fxEqSliderStyle, eqFaderKnobBitmap),
+      -1,
+      "EQ_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMEQFaderSliderControl(fxEqBand2kArea, kFXEQBand2kHz, fxEqSliderStyle, eqFaderKnobBitmap),
+      -1,
+      "EQ_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMEQFaderSliderControl(fxEqBand4kArea, kFXEQBand4kHz, fxEqSliderStyle, eqFaderKnobBitmap),
+      -1,
+      "EQ_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMEQFaderSliderControl(fxEqBand8kArea, kFXEQBand8kHz, fxEqSliderStyle, eqFaderKnobBitmap),
+      -1,
+      "EQ_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMEQFaderSliderControl(fxEqBand16kArea, kFXEQBand16kHz, fxEqSliderStyle, eqFaderKnobBitmap),
+      -1,
+      "EQ_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMEQFaderSliderControl(fxEqOutputArea, kFXEQOutputGain, fxEqSliderStyle, eqFaderKnobBitmap),
+      -1,
+      "EQ_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxReverbMixArea, kFXReverbMix, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(fxReverbDecayArea, kFXReverbDecay, "DECAY", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+      new NAMPedalKnobControl(fxReverbDecayArea, kFXReverbDecay, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
-    pGraphics->AttachControl(new NAMPedalKnobControl(fxReverbPreDelayArea, kFXReverbPreDelayMs, "PRE-DLY", utilityStyle,
+    pGraphics->AttachControl(new NAMPedalKnobControl(fxReverbPreDelayArea, kFXReverbPreDelayMs, "", fxKnobNoLabelStyle,
                                                      pedalKnobBitmap, pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
                              -1,
                              "FX_CONTROLS");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(fxReverbToneArea, kFXReverbTone, "TONE", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+      new NAMPedalKnobControl(fxReverbToneArea, kFXReverbTone, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(fxReverbLowCutArea, kFXReverbLowCutHz, "LO CUT", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+      new NAMPedalKnobControl(fxReverbLowCutArea, kFXReverbLowCutHz, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(fxReverbHighCutArea, kFXReverbHighCutHz, "HI CUT", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+      new NAMPedalKnobControl(fxReverbHighCutArea, kFXReverbHighCutHz, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(fxDelayMixArea, kFXDelayMix, "DRY/WET", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+      new NAMPedalKnobControl(fxDelayMixArea, kFXDelayMix, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(
-      new NAMDelayTimeKnobControl(fxDelayTimeArea, kFXDelayTimeMs, "TIME", utilityStyle, pedalKnobBitmap,
+      new NAMDelayTimeKnobControl(fxDelayTimeArea, kFXDelayTimeMs, "", fxKnobNoLabelStyle, pedalKnobBitmap,
                                   pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
-    pGraphics->AttachControl(new NAMPedalKnobControl(fxDelayFeedbackArea, kFXDelayFeedback, "FDBK", utilityStyle, pedalKnobBitmap,
+    pGraphics->AttachControl(new NAMPedalKnobControl(fxDelayFeedbackArea, kFXDelayFeedback, "", fxKnobNoLabelStyle, pedalKnobBitmap,
                                                      pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
                              -1,
                              "FX_CONTROLS");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(fxDelayLowCutArea, kFXDelayLowCutHz, "LO CUT", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+      new NAMPedalKnobControl(fxDelayLowCutArea, kFXDelayLowCutHz, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(fxDelayHighCutArea, kFXDelayHighCutHz, "HI CUT", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+      new NAMPedalKnobControl(fxDelayHighCutArea, kFXDelayHighCutHz, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
