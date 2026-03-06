@@ -821,6 +821,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float fxDelaySyncCenterY = designToUIY(1100.0f);
     const auto fxDelaySyncModeArea = IRECT(fxDelaySyncCenterX - 20.0f, fxDelaySyncCenterY - 9.0f,
                                            fxDelaySyncCenterX + 20.0f, fxDelaySyncCenterY + 9.0f);
+    // Delay LCD display window (left side of the delay unit graphic).
+    const auto fxDelayDigitalReadoutArea =
+      IRECT(designToUIX(590.0f), designToUIY(685.0f), designToUIX(1340.0f), designToUIY(1060.0f));
 
     const float fxReverbKnobY = designToUIY(1448.0f);
     const auto fxReverbMixArea = makePedalKnobArea(designToUIX(740.0f), fxReverbKnobY);
@@ -1290,6 +1293,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       -1,
       "FX_CONTROLS")
       ->SetTooltip("Delay TIME mode: SYNC = note divisions, MS = milliseconds");
+    pGraphics->AttachControl(new NAMFXDelayDigitalDisplayControl(fxDelayDigitalReadoutArea),
+                             kCtrlTagFXDelayReadout,
+                             "FX_CONTROLS")
+      ->SetTooltip("Delay readout: TIME / MIX / FDBK");
     pGraphics->AttachControl(
       new NAMBitmapToggleControl(fxReverbSwitchArea, kFXReverbActive, switchOffBitmap, switchOnBitmap),
       -1,
@@ -1394,16 +1401,16 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       "FX_CONTROLS");
     pGraphics->AttachControl(
       new NAMPedalKnobControl(fxDelayMixArea, kFXDelayMix, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
-                              kPedalKnobScale, 8.0f, -5.0f),
+                              kPedalKnobScale, 8.0f, -5.0f, false),
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(
       new NAMDelayTimeKnobControl(fxDelayTimeArea, kFXDelayTimeMs, "", fxKnobNoLabelStyle, pedalKnobBitmap,
-                                  pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
+                                  pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f, false),
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(new NAMPedalKnobControl(fxDelayFeedbackArea, kFXDelayFeedback, "", fxKnobNoLabelStyle, pedalKnobBitmap,
-                                                     pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
+                                                     pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f, false),
                              -1,
                              "FX_CONTROLS");
     pGraphics->AttachControl(
@@ -3212,6 +3219,16 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       {
         if (auto* pDelayTimeControl = pGraphics->GetControlWithParamIdx(kFXDelayTimeMs))
           pDelayTimeControl->SetDirty(false);
+        if (auto* pDelayReadout = pGraphics->GetControlWithTag(kCtrlTagFXDelayReadout))
+          pDelayReadout->SetDirty(false);
+        break;
+      }
+      case kFXDelayTimeMs:
+      case kFXDelayMix:
+      case kFXDelayFeedback:
+      {
+        if (auto* pDelayReadout = pGraphics->GetControlWithTag(kCtrlTagFXDelayReadout))
+          pDelayReadout->SetDirty(false);
         break;
       }
       case kDelayTempoSource:

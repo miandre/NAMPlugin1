@@ -606,13 +606,14 @@ class NAMPedalKnobControl : public IVKnobControl
 public:
   NAMPedalKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, const IBitmap& knobBitmap,
                       const IBitmap& shadowBitmap, float knobScale = 1.0f, float labelYOffset = 0.0f,
-                      float valueYOffset = 0.0f)
+                      float valueYOffset = 0.0f, bool showValueWhileDragging = true)
   : IVKnobControl(bounds, paramIdx, label, style, true)
   , mKnobBitmap(knobBitmap)
   , mShadowBitmap(shadowBitmap)
   , mKnobScale(knobScale)
   , mLabelYOffset(labelYOffset)
   , mValueYOffset(valueYOffset)
+  , mShowValueWhileDraggingEnabled(showValueWhileDragging)
   {
   }
 
@@ -647,7 +648,7 @@ public:
   void OnMouseDown(float x, float y, const IMouseMod& mod) override
   {
     IKnobControlBase::OnMouseDown(x, y, mod);
-    mShowValueWhileDragging = true;
+    mShowValueWhileDragging = mShowValueWhileDraggingEnabled;
     SetDirty(false);
   }
 
@@ -689,6 +690,7 @@ private:
   float mKnobScale = 1.0f;
   float mLabelYOffset = 0.0f;
   float mValueYOffset = 0.0f;
+  bool mShowValueWhileDraggingEnabled = true;
   bool mShowValueWhileDragging = false;
 };
 
@@ -747,6 +749,107 @@ private:
     };
     return labels;
   }
+};
+
+class NAMFXDelayDigitalDisplayControl : public IControl
+{
+public:
+  explicit NAMFXDelayDigitalDisplayControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    mIgnoreMouse = true;
+    mTimeReadout.Set("--");
+    mMixReadout.Set("--");
+    mFeedbackReadout.Set("--");
+  }
+
+  void OnInit() override { _RefreshReadouts(true); }
+
+  void OnGUIIdle() override { _RefreshReadouts(false); }
+
+  void Draw(IGraphics& g) override
+  {
+    _RefreshReadouts(false);
+
+    const float roundness = 5.0f;
+    g.FillRoundRect(IColor(0, 16, 18, 22), mRECT, roundness, &mBlend);
+
+    const auto content = mRECT.GetPadded(-6.0f);
+    const auto row1 = content.SubRectVertical(3, 0);
+    const auto row2 = content.SubRectVertical(3, 1);
+    const auto row3 = content.SubRectVertical(3, 2);
+    const float rowH = static_cast<float>(row1.H());
+    const float labelSize = std::clamp(rowH * 0.34f, 9.0f, 16.0f);
+    const float valueSize = std::clamp(rowH * 0.52f, 12.0f, 24.0f);
+    const IText labelText(labelSize, COLOR_GRAY.WithOpacity(0.94f), "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    const IText valueText(valueSize, IColor(255, 180, 255, 200), "Michroma-Regular", EAlign::Far, EVAlign::Middle);
+
+    g.DrawText(labelText, "MIX", row1, &mBlend);
+    g.DrawText(valueText, mMixReadout.Get(), row1, &mBlend);
+    g.DrawText(labelText, "FDBK", row2, &mBlend);
+    g.DrawText(valueText, mFeedbackReadout.Get(), row2, &mBlend);
+    g.DrawText(labelText, "TIME", row3, &mBlend);
+    g.DrawText(valueText, mTimeReadout.Get(), row3, &mBlend);
+  }
+
+private:
+  void _RefreshReadouts(const bool forceDirty)
+  {
+    const auto* pDelegate = GetDelegate();
+    if (pDelegate == nullptr)
+      return;
+
+    const auto* pModeParam = pDelegate->GetParam(kFXDelayTimeMode);
+    const auto* pTimeParam = pDelegate->GetParam(kFXDelayTimeMs);
+    const auto* pMixParam = pDelegate->GetParam(kFXDelayMix);
+    const auto* pFeedbackParam = pDelegate->GetParam(kFXDelayFeedback);
+    if (pModeParam == nullptr || pTimeParam == nullptr || pMixParam == nullptr || pFeedbackParam == nullptr)
+      return;
+
+    WDL_String timeReadout;
+    if (pModeParam->Int() == 0)
+    {
+      const auto& labels = _SyncDivisionLabels();
+      const double normalized = std::clamp(pTimeParam->GetNormalized(), 0.0, 1.0);
+      const int idx =
+        static_cast<int>(std::llround(normalized * static_cast<double>(static_cast<int>(labels.size()) - 1)));
+      const int safeIdx = std::clamp(idx, 0, static_cast<int>(labels.size()) - 1);
+      timeReadout.Set(labels[static_cast<size_t>(safeIdx)]);
+    }
+    else
+    {
+      timeReadout.SetFormatted(24, "%0.0f ms", pTimeParam->Value());
+    }
+
+    WDL_String mixReadout;
+    mixReadout.SetFormatted(24, "%0.1f %%", pMixParam->Value());
+    WDL_String feedbackReadout;
+    feedbackReadout.SetFormatted(24, "%0.1f %%", pFeedbackParam->Value());
+
+    const bool changed = std::strcmp(mTimeReadout.Get(), timeReadout.Get()) != 0
+      || std::strcmp(mMixReadout.Get(), mixReadout.Get()) != 0
+      || std::strcmp(mFeedbackReadout.Get(), feedbackReadout.Get()) != 0;
+    if (!changed && !forceDirty)
+      return;
+
+    mTimeReadout.Set(timeReadout.Get());
+    mMixReadout.Set(mixReadout.Get());
+    mFeedbackReadout.Set(feedbackReadout.Get());
+    SetDirty(false);
+  }
+
+  static const std::array<const char*, 14>& _SyncDivisionLabels()
+  {
+    static const std::array<const char*, 14> labels = {
+      "1/32", "1/16T", "1/32D", "1/16", "1/8T", "1/16D", "1/8",
+      "1/4T", "1/8D", "1/4", "1/2T", "1/4D", "1/2", "1/1"
+    };
+    return labels;
+  }
+
+  WDL_String mTimeReadout;
+  WDL_String mMixReadout;
+  WDL_String mFeedbackReadout;
 };
 
 class NAMSwitchControl : public IVSlideSwitchControl, public IBitmapBase
