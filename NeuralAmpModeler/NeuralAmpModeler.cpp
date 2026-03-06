@@ -536,7 +536,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kFXDelayTimeMode)->InitEnum("FX Delay Time Mode", kDefaultFXDelayTimeMode, {"Sync", "MS"});
   GetParam(kDelayTempoSource)->InitEnum("FX Delay Tempo Source", kDefaultDelayTempoSource, {"Auto", "Manual"});
   GetParam(kDelayManualTempoBPM)
-    ->InitDouble("FX Delay Tempo", kDelayManualTempoDefaultBPM, kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM, 0.1, "BPM");
+    ->InitDouble("FX Delay Tempo", kDelayManualTempoDefaultBPM, kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM, 1.0, "BPM");
   GetParam(kFXReverbActive)->InitBool("FX Reverb", false);
   GetParam(kFXReverbMix)->InitDouble("FX Reverb Mix", 20.0, 0.0, 100.0, 0.1, "%");
   GetParam(kFXReverbDecay)
@@ -587,6 +587,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
 #ifdef OS_IOS
     auto scaleFactor = GetScaleForScreen(PLUG_WIDTH, PLUG_HEIGHT) * 0.85f;
+#elif defined(APP_API)
+    auto scaleFactor = 1.2f;
 #else
     auto scaleFactor = 1.0f;
 #endif
@@ -869,13 +871,20 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                            syncButtonCenterX + 0.5f * kSyncButtonWidth,
                                            inputModeSwitchCenterY + 0.5f * kSyncButtonHeight);
     constexpr float kTempoBPMFieldGap = 10.0f;
-    constexpr float kTempoBPMFieldWidth = 86.0f;
+    constexpr float kTempoBPMFieldWidth = 52.0f;
     constexpr float kTempoBPMFieldHeight = 22.0f;
     const auto delayTempoBPMFieldArea =
       IRECT(delaySyncButtonArea.R + kTempoBPMFieldGap,
             inputModeSwitchCenterY - 0.5f * kTempoBPMFieldHeight,
             delaySyncButtonArea.R + kTempoBPMFieldGap + kTempoBPMFieldWidth,
             inputModeSwitchCenterY + 0.5f * kTempoBPMFieldHeight);
+    constexpr float kTempoBPMLabelGap = 4.0f;
+    constexpr float kTempoBPMLabelWidth = 36.0f;
+    const auto delayTempoBPMLabelArea =
+      IRECT(delayTempoBPMFieldArea.R + kTempoBPMLabelGap,
+            delayTempoBPMFieldArea.T,
+            delayTempoBPMFieldArea.R + kTempoBPMLabelGap + kTempoBPMLabelWidth,
+            delayTempoBPMFieldArea.B);
 
     constexpr float kSettingsIconHeight = 24.0f;
     constexpr float kSettingsRightPad = 8.0f;
@@ -1221,8 +1230,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                                           EVAlign::Middle));
     pGraphics->AttachControl(
       new NAMTempoNumberBoxControl(delayTempoBPMFieldArea, kDelayManualTempoBPM, nullptr, "BPM", tempoFieldStyle, false,
-                                   kDelayManualTempoDefaultBPM, kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM, "%0.1f", false))
+                                   kDelayManualTempoDefaultBPM, kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM, "%0.0f", false))
       ->SetTooltip("Manual tempo (editable when SYNC is OFF)");
+    pGraphics->AttachControl(
+      new ITextControl(delayTempoBPMLabelArea,
+                       "BPM",
+                       IText(16.0f, COLOR_WHITE.WithOpacity(0.96f), "Roboto-Regular", EAlign::Near, EVAlign::Middle),
+                       COLOR_TRANSPARENT));
     pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle), kCtrlTagIRToggle);
     pGraphics->AttachControl(new NAMFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Select cab IR L...", "wav",
                                                        loadIRLeftCompletionHandler, utilityStyle, fileSVG, crossSVG,
@@ -1584,7 +1598,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool hostTempoValid = std::isfinite(hostTempoBPM) && hostTempoBPM >= kDelayHostTempoMinBPM
                               && hostTempoBPM <= kDelayHostTempoMaxBPM;
   const double manualTempoBPM =
-    std::clamp(GetParam(kDelayManualTempoBPM)->Value(), kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM);
+    std::round(std::clamp(GetParam(kDelayManualTempoBPM)->Value(), kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM));
   const bool preferManualTempo = (GetParam(kDelayTempoSource)->Int() != 0);
   const bool useManualTempo = preferManualTempo || !hostTempoValid;
   mDelayUsingManualTempo.store(useManualTempo, std::memory_order_relaxed);
