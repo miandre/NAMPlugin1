@@ -137,6 +137,7 @@ enum ECtrlTags
   kCtrlTagTopNavAmp,
   kCtrlTagTopNavStomp,
   kCtrlTagTopNavCab,
+  kCtrlTagTopNavEq,
   kCtrlTagTopNavFx,
   kCtrlTagTopNavTuner,
   kCtrlTagAmpSlot1,
@@ -150,6 +151,7 @@ enum ECtrlTags
   kCtrlTagFXEQOnLED,
   kCtrlTagFXDelayOnLED,
   kCtrlTagFXReverbOnLED,
+  kCtrlTagFXDelayReadout,
   kCtrlTagAmp1HasLoudness,
   kCtrlTagAmp1HasCalibration,
   kCtrlTagAmp2HasLoudness,
@@ -322,6 +324,7 @@ private:
     Cab,
     Fx,
     Tuner,
+    Eq,
     Count
   };
 
@@ -498,7 +501,7 @@ private:
   int mCurrentModelSlot = 1;
   std::atomic<int> mPendingAmpSlotSwitch{-1};
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
-  std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false};
+  std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false, false};
   int mAmpSelectorIndex = 1;
   bool mApplyingAmpSlotState = false;
   bool mStartupDefaultLoadAttempted = false;
