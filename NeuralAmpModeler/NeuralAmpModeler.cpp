@@ -38,7 +38,7 @@ constexpr double kPi = 3.14159265358979323846;
 
 namespace
 {
-constexpr int kAmpSlotSwitchDeClickSamples = 96;
+constexpr int kAmpSlotSwitchDeClickSamples = 192;
 constexpr int kAmpSlotModelStateEmpty = 0;
 constexpr int kAmpSlotModelStateLoading = 1;
 constexpr int kAmpSlotModelStateReady = 2;
@@ -4330,7 +4330,6 @@ void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int
   mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateLoading, std::memory_order_release);
   mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
   const uint64_t requestId = mSlotLoadRequestId[slotIndex].fetch_add(1, std::memory_order_relaxed) + 1;
-  mShouldRemoveModelSlot[slotIndex].store(true, std::memory_order_release);
   _ClearAmpSlotCapabilityState(slotIndex);
 
   {
@@ -4536,8 +4535,6 @@ void NeuralAmpModeler::_SelectAmpSlot(int slotIndex)
     GetParam(kModelToggle)->Set(0.0);
     SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
   }
-  mAmpSwitchDeClickSamplesRemaining.store(kAmpSlotSwitchDeClickSamples, std::memory_order_relaxed);
-
   _RefreshTopNavControls();
 }
 
@@ -4871,37 +4868,50 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     const int targetSlot = std::clamp(requestedSlot, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     if (targetSlot != mCurrentModelSlot)
     {
-      const int previousSlot = mCurrentModelSlot;
-      if (previousSlot >= 0 && previousSlot < static_cast<int>(mAmpNAMPaths.size()))
+      const bool targetHasPath = (mAmpNAMPaths[targetSlot].GetLength() > 0);
+      const int targetState = mAmpSlotModelState[targetSlot].load(std::memory_order_acquire);
+      const bool haveReadyTargetModel = (targetState == kAmpSlotModelStateReady) && (mAmpSlotModelCache[targetSlot] != nullptr)
+                                        && (!inputStereoMode || mAmpSlotModelCacheRight[targetSlot] != nullptr);
+      const bool waitForTargetLoad = targetHasPath && !haveReadyTargetModel
+                                     && (targetState == kAmpSlotModelStateLoading);
+      if (waitForTargetLoad)
       {
-        mAmpSlotModelCache[previousSlot] = std::move(mModel);
-        mAmpSlotModelCacheRight[previousSlot] = std::move(mModelRight);
-        const int prevState =
-          (mAmpSlotModelCache[previousSlot] != nullptr) ? kAmpSlotModelStateReady : kAmpSlotModelStateEmpty;
-        mAmpSlotModelState[previousSlot].store(prevState, std::memory_order_relaxed);
-      }
-
-      mCurrentModelSlot = targetSlot;
-      const bool haveTargetModel = (mAmpSlotModelCache[targetSlot] != nullptr)
-                                   && (!inputStereoMode || mAmpSlotModelCacheRight[targetSlot] != nullptr);
-      if (haveTargetModel)
-      {
-        mModel = std::move(mAmpSlotModelCache[targetSlot]);
-        mModelRight = std::move(mAmpSlotModelCacheRight[targetSlot]);
-        mAmpSlotModelState[targetSlot].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
-        mNewModelLoadedInDSP = true;
+        // Keep current slot live until the target slot model has actually arrived.
+        mPendingAmpSlotSwitch.store(targetSlot, std::memory_order_release);
       }
       else
       {
-        _ClearAmpSlotCapabilityState(targetSlot);
-        mModel = nullptr;
-        mModelRight = nullptr;
-        if (mAmpSlotModelState[targetSlot].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
-          mAmpSlotModelState[targetSlot].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
-        mModelCleared = true;
-      }
+        const int previousSlot = mCurrentModelSlot;
+        if (previousSlot >= 0 && previousSlot < static_cast<int>(mAmpNAMPaths.size()))
+        {
+          mAmpSlotModelCache[previousSlot] = std::move(mModel);
+          mAmpSlotModelCacheRight[previousSlot] = std::move(mModelRight);
+          const int prevState =
+            (mAmpSlotModelCache[previousSlot] != nullptr) ? kAmpSlotModelStateReady : kAmpSlotModelStateEmpty;
+          mAmpSlotModelState[previousSlot].store(prevState, std::memory_order_relaxed);
+        }
 
-      updateActiveModelGainsAndLatency();
+        mCurrentModelSlot = targetSlot;
+        if (haveReadyTargetModel)
+        {
+          mModel = std::move(mAmpSlotModelCache[targetSlot]);
+          mModelRight = std::move(mAmpSlotModelCacheRight[targetSlot]);
+          mAmpSlotModelState[targetSlot].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
+          mNewModelLoadedInDSP = true;
+        }
+        else
+        {
+          _ClearAmpSlotCapabilityState(targetSlot);
+          mModel = nullptr;
+          mModelRight = nullptr;
+          if (mAmpSlotModelState[targetSlot].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
+            mAmpSlotModelState[targetSlot].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+          mModelCleared = true;
+        }
+
+        triggerOutputDeClick = true;
+        updateActiveModelGainsAndLatency();
+      }
     }
   }
 
