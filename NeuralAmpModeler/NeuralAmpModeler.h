@@ -338,6 +338,18 @@ private:
     Release
   };
 
+  enum class AmpSlotModelSourceKind : int
+  {
+    ExternalPath = 0,
+    EmbeddedModelId
+  };
+
+  struct AmpSlotModelSource
+  {
+    AmpSlotModelSourceKind kind = AmpSlotModelSourceKind::ExternalPath;
+    WDL_String value;
+  };
+
   // Allocates mInputPointers and mOutputPointers
   void _AllocateIOPointers(const size_t nChans);
   // Moves DSP modules from staging area to the main area.
@@ -416,7 +428,9 @@ private:
   void _ApplyAmpSlotStateToToneStack(int slotIndex);
   void _ApplyCurrentAmpParamsToActiveToneStack();
   bool _CanEditAmpSlotModel(int slotIndex) const;
+  WDL_String _ResolveAmpSlotModelSourceToPathForMode(int slotIndex, const AmpSlotModelSource& requestedSource) const;
   WDL_String _ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath) const;
+  void _SetAmpSlotModelSource(int slotIndex, const AmpSlotModelSource& source);
   void _SetAmpSlotFixedModelPath(int slotIndex, const WDL_String& modelPath);
   void _SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath);
   bool _IsAmpSlotManagedParam(int paramIdx) const;
@@ -518,6 +532,7 @@ private:
   AmpWorkflowMode mAmpWorkflowMode = AmpWorkflowMode::Rig;
   std::array<bool, 3> mAmpSlotModelEditLocked = {false, false, false};
   std::array<WDL_String, 3> mAmpSlotFixedModelPaths;
+  std::array<AmpSlotModelSource, 3> mAmpSlotModelSources;
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false, false};
   int mAmpSelectorIndex = 1;

@@ -595,6 +595,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 #endif
   for (auto& fixedPath : mAmpSlotFixedModelPaths)
     fixedPath.Set("");
+  for (auto& source : mAmpSlotModelSources)
+  {
+    source.kind = AmpSlotModelSourceKind::ExternalPath;
+    source.value.Set("");
+  }
 
   mMakeGraphicsFunc = [&]() {
 
@@ -4361,16 +4366,45 @@ bool NeuralAmpModeler::_CanEditAmpSlotModel(int slotIndex) const
 
 WDL_String NeuralAmpModeler::_ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath) const
 {
+  AmpSlotModelSource requestedSource;
+  requestedSource.kind = AmpSlotModelSourceKind::ExternalPath;
+  requestedSource.value = requestedPath;
+  return _ResolveAmpSlotModelSourceToPathForMode(slotIndex, requestedSource);
+}
+
+WDL_String NeuralAmpModeler::_ResolveAmpSlotModelSourceToPathForMode(int slotIndex,
+                                                                      const AmpSlotModelSource& requestedSource) const
+{
   slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotFixedModelPaths.size()) - 1);
+  AmpSlotModelSource effectiveSource = requestedSource;
   if (mAmpWorkflowMode == AmpWorkflowMode::Release && !_CanEditAmpSlotModel(slotIndex))
   {
     const WDL_String& fixedPath = mAmpSlotFixedModelPaths[slotIndex];
     if (fixedPath.GetLength() > 0)
-      return fixedPath;
+    {
+      effectiveSource.kind = AmpSlotModelSourceKind::ExternalPath;
+      effectiveSource.value = fixedPath;
+    }
   }
+
+  if (effectiveSource.kind == AmpSlotModelSourceKind::EmbeddedModelId)
+  {
+    // Milestone-B scaffold: embedded model ids are not materialized to loadable paths yet.
+    WDL_String emptyPath;
+    emptyPath.Set("");
+    return emptyPath;
+  }
+
   WDL_String path;
-  path.Set(requestedPath.Get());
+  path.Set(effectiveSource.value.Get());
   return path;
+}
+
+void NeuralAmpModeler::_SetAmpSlotModelSource(int slotIndex, const AmpSlotModelSource& source)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotModelSources.size()) - 1);
+  mAmpSlotModelSources[slotIndex].kind = source.kind;
+  mAmpSlotModelSources[slotIndex].value = source.value;
 }
 
 void NeuralAmpModeler::_SetAmpSlotFixedModelPath(int slotIndex, const WDL_String& modelPath)
@@ -4382,6 +4416,10 @@ void NeuralAmpModeler::_SetAmpSlotFixedModelPath(int slotIndex, const WDL_String
 void NeuralAmpModeler::_SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath)
 {
   slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  AmpSlotModelSource source;
+  source.kind = AmpSlotModelSourceKind::ExternalPath;
+  source.value = modelPath;
+  _SetAmpSlotModelSource(slotIndex, source);
   mAmpNAMPaths[slotIndex] = modelPath;
   if (slotIndex == mAmpSelectorIndex)
     mNAMPath = modelPath;
