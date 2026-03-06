@@ -585,6 +585,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
   mNoiseGateTrigger.AddListener(&mNoiseGateGain);
 
+#if NAM_RELEASE_MODE
+  mAmpWorkflowMode = AmpWorkflowMode::Release;
+  mAmpSlotModelEditLocked.fill(true);
+#else
+  mAmpWorkflowMode = AmpWorkflowMode::Rig;
+  mAmpSlotModelEditLocked.fill(false);
+#endif
+
   mMakeGraphicsFunc = [&]() {
 
 #ifdef OS_IOS
@@ -1049,7 +1057,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     auto loadAmpModelForSlot = [this](const int slotIndex, const int ctrlTag, const WDL_String& fileName) {
       if (fileName.GetLength())
       {
-        _RequestModelLoadForSlot(fileName, slotIndex, ctrlTag);
+        _RequestModelLoadForSlot(fileName, slotIndex, ctrlTag, true);
         _MarkStandalonePresetDirty();
         mAmpSlotStates[slotIndex].modelToggle = 1.0;
         mAmpSlotStates[slotIndex].modelToggleTouched = true;
@@ -3168,6 +3176,15 @@ void NeuralAmpModeler::OnUIOpen()
   _RefreshTopNavControls();
   _RefreshStandalonePresetList();
   _UpdatePresetLabel();
+
+  if (auto* pGraphics = GetUI())
+  {
+    for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+    {
+      if (auto* pSlotModelPicker = pGraphics->GetControlWithTag(_GetAmpModelCtrlTagForSlot(slotIndex)))
+        pSlotModelPicker->SetDisabled(!_CanEditAmpSlotModel(slotIndex));
+    }
+  }
 }
 
 void NeuralAmpModeler::OnParamChange(int paramIdx)
@@ -3352,7 +3369,7 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
               if (chosenFileName.GetLength())
               {
                 const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(mAmpSelectorIndex);
-                _RequestModelLoadForSlot(chosenFileName, mAmpSelectorIndex, slotCtrlTag);
+                _RequestModelLoadForSlot(chosenFileName, mAmpSelectorIndex, slotCtrlTag, true);
                 _MarkStandalonePresetDirty();
                 GetParam(kModelToggle)->Set(1.0);
               }
@@ -3387,7 +3404,12 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
                                  ? std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1)
                                  : slotIndex;
 
-      mAmpNAMPaths[resolvedSlot].Set("");
+      if (!_CanEditAmpSlotModel(resolvedSlot))
+        return true;
+
+      WDL_String emptyPath;
+      emptyPath.Set("");
+      _SetAmpSlotModelPath(resolvedSlot, emptyPath);
       mAmpSlotStates[resolvedSlot].modelToggle = 0.0;
       mAmpSlotStates[resolvedSlot].modelToggleTouched = true;
       mAmpSlotModelState[resolvedSlot].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
@@ -3400,7 +3422,6 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
 
       if (resolvedSlot == mAmpSelectorIndex)
       {
-        mNAMPath.Set("");
         mPendingAmpSlotSwitch.store(resolvedSlot, std::memory_order_release);
       }
       return true;
@@ -4268,15 +4289,16 @@ void NeuralAmpModeler::_StopModelLoadWorker()
     mModelLoadWorker.join();
 }
 
-void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag)
+void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag,
+                                                const bool userInitiated)
 {
   slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
   if (modelPath.GetLength() == 0)
     return;
+  if (userInitiated && !_CanEditAmpSlotModel(slotIndex))
+    return;
 
-  mAmpNAMPaths[slotIndex] = modelPath;
-  if (slotIndex == mAmpSelectorIndex)
-    mNAMPath = modelPath;
+  _SetAmpSlotModelPath(slotIndex, modelPath);
 
   mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateLoading, std::memory_order_release);
   mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
@@ -4305,6 +4327,22 @@ void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int
   mModelLoadCV.notify_one();
 
   SendControlMsgFromDelegate(slotCtrlTag, kMsgTagLoadedModel, modelPath.GetLength(), modelPath.Get());
+}
+
+bool NeuralAmpModeler::_CanEditAmpSlotModel(int slotIndex) const
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotModelEditLocked.size()) - 1);
+  if (mAmpWorkflowMode == AmpWorkflowMode::Rig)
+    return true;
+  return !mAmpSlotModelEditLocked[static_cast<size_t>(slotIndex)];
+}
+
+void NeuralAmpModeler::_SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  mAmpNAMPaths[slotIndex] = modelPath;
+  if (slotIndex == mAmpSelectorIndex)
+    mNAMPath = modelPath;
 }
 
 void NeuralAmpModeler::_ModelLoadWorkerLoop()

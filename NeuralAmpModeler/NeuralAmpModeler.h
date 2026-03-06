@@ -332,6 +332,12 @@ private:
     Count
   };
 
+  enum class AmpWorkflowMode : int
+  {
+    Rig = 0,
+    Release
+  };
+
   // Allocates mInputPointers and mOutputPointers
   void _AllocateIOPointers(const size_t nChans);
   // Moves DSP modules from staging area to the main area.
@@ -409,8 +415,11 @@ private:
   void _ApplyAmpSlotState(int slotIndex);
   void _ApplyAmpSlotStateToToneStack(int slotIndex);
   void _ApplyCurrentAmpParamsToActiveToneStack();
+  bool _CanEditAmpSlotModel(int slotIndex) const;
+  void _SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath);
   bool _IsAmpSlotManagedParam(int paramIdx) const;
-  void _RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag);
+  void _RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag,
+                                bool userInitiated = false);
   void _ModelLoadWorkerLoop();
   void _StartModelLoadWorker();
   void _StopModelLoadWorker();
@@ -504,6 +513,8 @@ private:
   // Active model ownership slot is updated on audio thread in _ApplyDSPStaging().
   int mCurrentModelSlot = 1;
   std::atomic<int> mPendingAmpSlotSwitch{-1};
+  AmpWorkflowMode mAmpWorkflowMode = AmpWorkflowMode::Rig;
+  std::array<bool, 3> mAmpSlotModelEditLocked = {false, false, false};
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false, false};
   int mAmpSelectorIndex = 1;
