@@ -68,19 +68,27 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
     std::clamp(targetDelayTimeMs * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
   const double targetFeedback = std::clamp(GetParam(kFXDelayFeedback)->Value() * 0.01, 0.0, 0.80);
   const double targetMix = std::clamp(GetParam(kFXDelayMix)->Value() * 0.01, 0.0, 1.0);
+  const double targetDucker = std::clamp(GetParam(kFXDelayDucker)->Value() * 0.01, 0.0, 1.0);
   const double maxCutHz = std::max(40.0, 0.45 * sampleRate);
   const double targetLowCutHz = std::clamp(GetParam(kFXDelayLowCutHz)->Value(), 20.0, maxCutHz);
   const double targetHighCutHz =
     std::clamp(std::max(GetParam(kFXDelayHighCutHz)->Value(), targetLowCutHz + 20.0), 20.0, maxCutHz);
   constexpr double kFXDelayTimeSmoothingMs = 120.0;
   constexpr double kFXDelayControlSmoothingMs = 30.0;
+  constexpr double kFXDelayDuckerAttackMs = 6.0;
+  constexpr double kFXDelayDuckerReleaseMs = 180.0;
+  constexpr double kFXDelayDuckerDetectorDrive = 45.0;
   const double timeSmoothingAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kFXDelayTimeSmoothingMs * 0.001));
   const double controlSmoothingAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kFXDelayControlSmoothingMs * 0.001));
+  const double duckerAttackAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kFXDelayDuckerAttackMs * 0.001));
+  const double duckerReleaseAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kFXDelayDuckerReleaseMs * 0.001));
   double smoothedTimeSamples = mFXDelaySmoothedTimeSamples;
   double smoothedFeedback = mFXDelaySmoothedFeedback;
   double smoothedMix = mFXDelaySmoothedMix;
+  double smoothedDucker = mFXDelaySmoothedDucker;
   double smoothedLowCutHz = mFXDelaySmoothedLowCutHz;
   double smoothedHighCutHz = mFXDelaySmoothedHighCutHz;
+  double duckerEnvelope = mFXDelayDuckerEnvelope;
   size_t writeIndex = mFXDelayWriteIndex;
 
   for (size_t s = 0; s < numFrames; ++s)
@@ -88,6 +96,7 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
     smoothedTimeSamples += timeSmoothingAlpha * (targetTimeSamples - smoothedTimeSamples);
     smoothedFeedback += controlSmoothingAlpha * (targetFeedback - smoothedFeedback);
     smoothedMix += controlSmoothingAlpha * (targetMix - smoothedMix);
+    smoothedDucker += controlSmoothingAlpha * (targetDucker - smoothedDucker);
     smoothedLowCutHz += controlSmoothingAlpha * (targetLowCutHz - smoothedLowCutHz);
     smoothedHighCutHz += controlSmoothingAlpha * (targetHighCutHz - smoothedHighCutHz);
     if (smoothedHighCutHz < smoothedLowCutHz + 20.0)
@@ -170,6 +179,18 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
       }
     }
 
+    double duckingGain = 1.0;
+    if (fxDelayActive)
+    {
+      double duckerInput = 0.0;
+      for (size_t ch = 0; ch < numChannelsInternal; ++ch)
+        duckerInput = std::max(duckerInput, std::abs(drySamples[ch]));
+      const double duckerAlpha = (duckerInput > duckerEnvelope) ? duckerAttackAlpha : duckerReleaseAlpha;
+      duckerEnvelope += duckerAlpha * (duckerInput - duckerEnvelope);
+      const double duckerDetector = 1.0 - std::exp(-duckerEnvelope * kFXDelayDuckerDetectorDrive);
+      duckingGain = std::clamp(1.0 - smoothedDucker * duckerDetector, 0.0, 1.0);
+    }
+
     for (size_t c = 0; c < numChannelsInternal; ++c)
     {
       auto& delayBuffer = mFXDelayBuffer[c];
@@ -185,7 +206,7 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
 
       if (fxDelayActive)
         // "Amount" behavior: keep dry at unity and add wet signal.
-        ioPointers[c][s] = static_cast<sample>(drySamples[c] + wetDelayedSamples[c] * smoothedMix);
+        ioPointers[c][s] = static_cast<sample>(drySamples[c] + wetDelayedSamples[c] * smoothedMix * duckingGain);
     }
 
     ++writeIndex;
@@ -195,8 +216,10 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
   mFXDelaySmoothedTimeSamples = smoothedTimeSamples;
   mFXDelaySmoothedFeedback = smoothedFeedback;
   mFXDelaySmoothedMix = smoothedMix;
+  mFXDelaySmoothedDucker = smoothedDucker;
   mFXDelaySmoothedLowCutHz = smoothedLowCutHz;
   mFXDelaySmoothedHighCutHz = smoothedHighCutHz;
+  mFXDelayDuckerEnvelope = duckerEnvelope;
   mFXDelayWriteIndex = writeIndex;
 }
 
