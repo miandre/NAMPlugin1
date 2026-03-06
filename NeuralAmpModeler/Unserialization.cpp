@@ -73,7 +73,9 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
     mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
     mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
     mSlotLoadRequestId[slotIndex].fetch_add(1, std::memory_order_relaxed);
-    mShouldRemoveModelSlot[slotIndex].store(true, std::memory_order_relaxed);
+    // Keep the active slot's live DSP until replacement is ready to avoid preset-switch dropouts.
+    const bool clearSlotNow = (slotIndex != activeSlot);
+    mShouldRemoveModelSlot[slotIndex].store(clearSlotNow, std::memory_order_relaxed);
   }
 
   mNAMPath.Set(getStringOrEmpty("NAMPath").c_str());
@@ -87,6 +89,11 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
     _RequestModelLoadForSlot(mNAMPath, activeSlot, _GetAmpModelCtrlTagForSlot(activeSlot));
     mAmpSlotStates[activeSlot].modelToggle = 1.0;
     mAmpSlotStates[activeSlot].modelToggleTouched = true;
+  }
+  else
+  {
+    // No active model in preset: clear active slot deterministically.
+    mShouldRemoveModelSlot[activeSlot].store(true, std::memory_order_relaxed);
   }
   mPendingAmpSlotSwitch.store(activeSlot, std::memory_order_relaxed);
 
