@@ -534,6 +534,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kFXDelayTimeMs)->InitDouble("FX Delay Time", 420.0, 1.0, 2000.0, 1.0, "ms");
   GetParam(kFXDelayFeedback)->InitDouble("FX Delay Feedback", 35.0, 0.0, 80.0, 0.1, "%");
   GetParam(kFXDelayTimeMode)->InitEnum("FX Delay Time Mode", kDefaultFXDelayTimeMode, {"Sync", "MS"});
+  GetParam(kFXDelayPingPong)->InitBool("FX Delay PingPong", false);
   GetParam(kDelayTempoSource)->InitEnum("FX Delay Tempo Source", kDefaultDelayTempoSource, {"Auto", "Manual"});
   GetParam(kDelayManualTempoBPM)
     ->InitDouble("FX Delay Tempo", kDelayManualTempoDefaultBPM, kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM, 1.0, "BPM");
@@ -825,6 +826,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float fxDelaySyncCenterY = designToUIY(1100.0f);
     const auto fxDelaySyncModeArea = IRECT(fxDelaySyncCenterX - 20.0f, fxDelaySyncCenterY - 9.0f,
                                            fxDelaySyncCenterX + 20.0f, fxDelaySyncCenterY + 9.0f);
+    const float fxDelayPingPongCenterX = designToUIX(1570.0f);
+    const float fxDelayPingPongCenterY = fxDelaySyncCenterY;
+    const auto fxDelayPingPongModeArea =
+      IRECT(fxDelayPingPongCenterX - 20.0f, fxDelayPingPongCenterY - 9.0f, fxDelayPingPongCenterX + 20.0f,
+            fxDelayPingPongCenterY + 9.0f);
     // Delay LCD display window (left side of the delay unit graphic).
     const auto fxDelayDigitalReadoutArea =
       IRECT(designToUIX(590.0f), designToUIY(685.0f), designToUIX(1340.0f), designToUIY(1060.0f));
@@ -1304,6 +1310,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       -1,
       "FX_CONTROLS")
       ->SetTooltip("Delay TIME mode: SYNC = note divisions, MS = milliseconds");
+    pGraphics->AttachControl(
+      new NAMBitmapToggleControl(fxDelayPingPongModeArea, kFXDelayPingPong, smallOnOffOffBitmap, smallOnOffOnBitmap),
+      -1,
+      "FX_CONTROLS")
+      ->SetTooltip("Delay Ping-Pong: OFF = normal stereo, ON = cross-feedback ping-pong");
     pGraphics->AttachControl(new NAMFXDelayDigitalDisplayControl(fxDelayDigitalReadoutArea),
                              kCtrlTagFXDelayReadout,
                              "FX_CONTROLS")
@@ -3225,8 +3236,8 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       {
         if (auto* pFXDelayOnLED = pGraphics->GetControlWithTag(kCtrlTagFXDelayOnLED))
           pFXDelayOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        const int delayParams[] = {kFXDelayMix, kFXDelayTimeMs, kFXDelayFeedback, kFXDelayLowCutHz, kFXDelayHighCutHz,
-                                   kFXDelayTimeMode};
+        const int delayParams[] = {kFXDelayMix,      kFXDelayTimeMs, kFXDelayFeedback, kFXDelayLowCutHz,
+                                   kFXDelayHighCutHz, kFXDelayTimeMode, kFXDelayPingPong};
         for (const int delayParam : delayParams)
           if (auto* pControl = pGraphics->GetControlWithParamIdx(delayParam))
             pControl->SetDisabled(!active);

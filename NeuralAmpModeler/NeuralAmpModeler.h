@@ -111,6 +111,8 @@ enum EParams
   kDelayManualTempoBPM,
   // Delay-local TIME knob mode: SYNC (note divisions) vs MS.
   kFXDelayTimeMode,
+  // Delay stereo feedback mode: off = normal stereo, on = ping-pong cross feedback.
+  kFXDelayPingPong,
   kNumParams
 };
 

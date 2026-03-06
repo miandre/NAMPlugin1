@@ -54,11 +54,11 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
 
   const bool stereoFXBusActive = (numChannelsInternal == 2);
   const bool monoSourceAtFX = (numChannelsMonoCore == 1);
+  const bool pingPongMode = stereoFXBusActive && GetParam(kFXDelayPingPong)->Bool();
   constexpr double kFXDelayFeedbackCrossStereo = 0.22;
   constexpr double kFXDelayWetCrossStereo = 0.16;
   constexpr double kFXDelayWetWidthStereo = 1.28;
   constexpr double kFXDelayMonoStereoTimeOffsetMs = 12.0;
-  constexpr double kFXDelayMonoStereoPingPongFeedback = 0.75;
   const bool syncMode = (GetParam(kFXDelayTimeMode)->Int() == 0);
   const double delayTimeParamNormalized = GetParam(kFXDelayTimeMs)->GetNormalized();
   const double targetDelayTimeMs =
@@ -94,8 +94,6 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
       smoothedHighCutHz = std::min(maxCutHz, smoothedLowCutHz + 20.0);
     const double lowCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedLowCutHz / sampleRate);
     const double highCutAlpha = 1.0 - std::exp(-2.0 * kPi * smoothedHighCutHz / sampleRate);
-    const double monoStereoTimeOffsetSamples =
-      monoSourceAtFX ? (kFXDelayMonoStereoTimeOffsetMs * 0.001 * sampleRate) : 0.0;
     std::array<double, kNumChannelsInternal> drySamples = {};
     std::array<double, kNumChannelsInternal> filteredDelayedSamples = {};
     std::array<double, kNumChannelsInternal> feedbackDelayedSamples = {};
@@ -108,15 +106,15 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
       drySamples[c] = dry;
 
       double channelTimeSamples = smoothedTimeSamples;
-      if (monoSourceAtFX && stereoFXBusActive)
+      if (!pingPongMode && monoSourceAtFX && stereoFXBusActive)
       {
+        const double monoStereoTimeOffsetSamples = kFXDelayMonoStereoTimeOffsetMs * 0.001 * sampleRate;
         const double stereoOffsetSign = (c == 0) ? -1.0 : 1.0;
         channelTimeSamples = std::clamp(
           smoothedTimeSamples + stereoOffsetSign * monoStereoTimeOffsetSamples,
           1.0,
           static_cast<double>(mFXDelayBufferSamples - 2));
       }
-
       double readPos = static_cast<double>(writeIndex) - channelTimeSamples;
       if (readPos < 0.0)
         readPos += static_cast<double>(mFXDelayBufferSamples);
@@ -138,33 +136,51 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
 
     if (stereoFXBusActive)
     {
-      const double feedbackCross = monoSourceAtFX ? 0.60 : kFXDelayFeedbackCrossStereo;
-      const double wetCross = monoSourceAtFX ? 0.26 : kFXDelayWetCrossStereo;
-      const double wetWidth = monoSourceAtFX ? 1.40 : kFXDelayWetWidthStereo;
-      const double delayedL = filteredDelayedSamples[0];
-      const double delayedR = filteredDelayedSamples[1];
-      feedbackDelayedSamples[0] = (1.0 - feedbackCross) * delayedL + feedbackCross * delayedR;
-      feedbackDelayedSamples[1] = (1.0 - feedbackCross) * delayedR + feedbackCross * delayedL;
-      wetDelayedSamples[0] = (1.0 - wetCross) * delayedL + wetCross * delayedR;
-      wetDelayedSamples[1] = (1.0 - wetCross) * delayedR + wetCross * delayedL;
-
-      const double wetMid = 0.5 * (wetDelayedSamples[0] + wetDelayedSamples[1]);
-      const double wetSide = 0.5 * (wetDelayedSamples[0] - wetDelayedSamples[1]) * wetWidth;
-      wetDelayedSamples[0] = wetMid + wetSide;
-      wetDelayedSamples[1] = wetMid - wetSide;
+      if (pingPongMode)
+      {
+        feedbackDelayedSamples[0] = filteredDelayedSamples[1];
+        feedbackDelayedSamples[1] = filteredDelayedSamples[0];
+        if (monoSourceAtFX)
+        {
+          wetDelayedSamples[0] = filteredDelayedSamples[0];
+          wetDelayedSamples[1] = filteredDelayedSamples[1];
+        }
+        else
+        {
+          // Stereo-input ping-pong: first repeat appears on the opposite side.
+          wetDelayedSamples[0] = filteredDelayedSamples[1];
+          wetDelayedSamples[1] = filteredDelayedSamples[0];
+        }
+      }
+      else
+      {
+        const double feedbackCross = monoSourceAtFX ? 0.60 : kFXDelayFeedbackCrossStereo;
+        const double wetCross = monoSourceAtFX ? 0.26 : kFXDelayWetCrossStereo;
+        const double wetWidth = monoSourceAtFX ? 1.40 : kFXDelayWetWidthStereo;
+        const double delayedL = filteredDelayedSamples[0];
+        const double delayedR = filteredDelayedSamples[1];
+        feedbackDelayedSamples[0] = (1.0 - feedbackCross) * delayedL + feedbackCross * delayedR;
+        feedbackDelayedSamples[1] = (1.0 - feedbackCross) * delayedR + feedbackCross * delayedL;
+        wetDelayedSamples[0] = (1.0 - wetCross) * delayedL + wetCross * delayedR;
+        wetDelayedSamples[1] = (1.0 - wetCross) * delayedR + wetCross * delayedL;
+        const double wetMid = 0.5 * (wetDelayedSamples[0] + wetDelayedSamples[1]);
+        const double wetSide = 0.5 * (wetDelayedSamples[0] - wetDelayedSamples[1]) * wetWidth;
+        wetDelayedSamples[0] = wetMid + wetSide;
+        wetDelayedSamples[1] = wetMid - wetSide;
+      }
     }
 
     for (size_t c = 0; c < numChannelsInternal; ++c)
     {
       auto& delayBuffer = mFXDelayBuffer[c];
-      double feedbackForWrite = feedbackDelayedSamples[c];
-      if (monoSourceAtFX && stereoFXBusActive)
+      const double feedbackForWrite = feedbackDelayedSamples[c];
+      double dryForWrite = drySamples[c];
+      if (pingPongMode && monoSourceAtFX && stereoFXBusActive)
       {
-        const size_t otherChannel = 1 - c;
-        feedbackForWrite = (1.0 - kFXDelayMonoStereoPingPongFeedback) * feedbackDelayedSamples[c]
-                           + kFXDelayMonoStereoPingPongFeedback * feedbackDelayedSamples[otherChannel];
+        // Seed only one side for mono->stereo ping-pong, so repeats alternate L/R.
+        dryForWrite = (c == 0) ? 0.5 * (drySamples[0] + drySamples[1]) : 0.0;
       }
-      const double writeValue = drySamples[c] + smoothedFeedback * feedbackForWrite;
+      const double writeValue = dryForWrite + smoothedFeedback * feedbackForWrite;
       delayBuffer[writeIndex] = static_cast<sample>(writeValue);
 
       if (fxDelayActive)
