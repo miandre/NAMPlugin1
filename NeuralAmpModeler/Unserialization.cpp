@@ -64,7 +64,9 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
   const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
   for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
   {
-    mAmpNAMPaths[slotIndex].Set("");
+    WDL_String emptyPath;
+    emptyPath.Set("");
+    _SetAmpSlotModelPath(slotIndex, emptyPath);
     _ClearAmpSlotCapabilityState(slotIndex);
     mAmpSlotStates[slotIndex].modelToggle = 0.0;
     mAmpSlotStates[slotIndex].modelToggleTouched = true;
@@ -78,9 +80,10 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
   mIRPath.Set(getStringOrEmpty("IRPath").c_str());
   _ClearStompCapabilityState();
 
-  if (mNAMPath.GetLength())
+  const WDL_String effectiveActiveSlotPath = _ResolveAmpSlotModelPathForMode(activeSlot, mNAMPath);
+  if (effectiveActiveSlotPath.GetLength())
   {
-    mAmpNAMPaths[activeSlot] = mNAMPath;
+    _SetAmpSlotModelPath(activeSlot, mNAMPath);
     _RequestModelLoadForSlot(mNAMPath, activeSlot, _GetAmpModelCtrlTagForSlot(activeSlot));
     mAmpSlotStates[activeSlot].modelToggle = 1.0;
     mAmpSlotStates[activeSlot].modelToggleTouched = true;

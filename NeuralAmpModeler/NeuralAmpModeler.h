@@ -416,6 +416,8 @@ private:
   void _ApplyAmpSlotStateToToneStack(int slotIndex);
   void _ApplyCurrentAmpParamsToActiveToneStack();
   bool _CanEditAmpSlotModel(int slotIndex) const;
+  WDL_String _ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath) const;
+  void _SetAmpSlotFixedModelPath(int slotIndex, const WDL_String& modelPath);
   void _SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath);
   bool _IsAmpSlotManagedParam(int paramIdx) const;
   void _RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag,
@@ -515,6 +517,7 @@ private:
   std::atomic<int> mPendingAmpSlotSwitch{-1};
   AmpWorkflowMode mAmpWorkflowMode = AmpWorkflowMode::Rig;
   std::array<bool, 3> mAmpSlotModelEditLocked = {false, false, false};
+  std::array<WDL_String, 3> mAmpSlotFixedModelPaths;
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false, false};
   int mAmpSelectorIndex = 1;

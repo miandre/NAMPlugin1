@@ -72,6 +72,7 @@ constexpr double kStereoSideBypassEngageSeconds = 0.08;
 constexpr double kStereoSideBypassReleaseSeconds = 0.03;
 constexpr int kStereoSideBypassResumeDeClickSamples = 64;
 constexpr size_t kMinInternalPreparedFrames = 16384;
+constexpr std::array<const char*, 3> kAmpSlotDefaultModelFileNames = {"Amp1.nam", "Amp2.nam", "Amp3.nam"};
 constexpr double kDelayManualTempoDefaultBPM = 120.0;
 constexpr double kDelayManualTempoMinBPM = 10.0;
 constexpr double kDelayManualTempoMaxBPM = 350.0;
@@ -592,6 +593,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   mAmpWorkflowMode = AmpWorkflowMode::Rig;
   mAmpSlotModelEditLocked.fill(false);
 #endif
+  for (auto& fixedPath : mAmpSlotFixedModelPaths)
+    fixedPath.Set("");
 
   mMakeGraphicsFunc = [&]() {
 
@@ -2339,9 +2342,13 @@ void NeuralAmpModeler::OnReset()
 
       if (!defaultsDir.empty())
       {
-        setWdlPath(mAmpNAMPaths[0], defaultsDir / "Amp1.nam");
-        setWdlPath(mAmpNAMPaths[1], defaultsDir / "Amp2.nam");
-        setWdlPath(mAmpNAMPaths[2], defaultsDir / "Amp3.nam");
+        for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+        {
+          WDL_String slotModelPath;
+          setWdlPath(slotModelPath, defaultsDir / kAmpSlotDefaultModelFileNames[slotIndex]);
+          _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
+          _SetAmpSlotModelPath(slotIndex, slotModelPath);
+        }
         setWdlPath(mStompNAMPath, defaultsDir / "Boost1.nam");
         setWdlPath(mIRPath, defaultsDir / "Cab1.wav");
 
@@ -3000,7 +3007,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
     {
       const auto& slotPath = mAmpNAMPaths[slotIndex];
-      if (slotPath.GetLength())
+      const WDL_String effectiveSlotPath = _ResolveAmpSlotModelPathForMode(slotIndex, slotPath);
+      if (effectiveSlotPath.GetLength())
       {
         _RequestModelLoadForSlot(slotPath, slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex));
       }
@@ -3064,9 +3072,10 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     mNAMPath = legacyNAMPath;
     mIRPath = legacyIRPath;
     mIRPathRight = legacyIRRightPath;
-    mAmpNAMPaths[mAmpSelectorIndex] = mNAMPath;
+    _SetAmpSlotModelPath(mAmpSelectorIndex, mNAMPath);
 
-    if (mNAMPath.GetLength())
+    const WDL_String effectiveLegacyPath = _ResolveAmpSlotModelPathForMode(mAmpSelectorIndex, mNAMPath);
+    if (effectiveLegacyPath.GetLength())
       _RequestModelLoadForSlot(mNAMPath, mAmpSelectorIndex, _GetAmpModelCtrlTagForSlot(mAmpSelectorIndex));
     else
     {
@@ -3711,9 +3720,13 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
 
   if (!defaultsDir.empty())
   {
-    setWdlPath(mAmpNAMPaths[0], defaultsDir / "Amp1.nam");
-    setWdlPath(mAmpNAMPaths[1], defaultsDir / "Amp2.nam");
-    setWdlPath(mAmpNAMPaths[2], defaultsDir / "Amp3.nam");
+    for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+    {
+      WDL_String slotModelPath;
+      setWdlPath(slotModelPath, defaultsDir / kAmpSlotDefaultModelFileNames[slotIndex]);
+      _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
+      _SetAmpSlotModelPath(slotIndex, slotModelPath);
+    }
     setWdlPath(mStompNAMPath, defaultsDir / "Boost1.nam");
     setWdlPath(mIRPath, defaultsDir / "Cab1.wav");
     mIRPathRight.Set("");
@@ -4293,12 +4306,21 @@ void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int
                                                 const bool userInitiated)
 {
   slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
-  if (modelPath.GetLength() == 0)
-    return;
   if (userInitiated && !_CanEditAmpSlotModel(slotIndex))
     return;
 
-  _SetAmpSlotModelPath(slotIndex, modelPath);
+  const bool slotLocked = !_CanEditAmpSlotModel(slotIndex);
+  if (mAmpWorkflowMode == AmpWorkflowMode::Release && slotLocked && !userInitiated
+      && mAmpSlotFixedModelPaths[slotIndex].GetLength() == 0 && modelPath.GetLength() > 0)
+  {
+    _SetAmpSlotFixedModelPath(slotIndex, modelPath);
+  }
+
+  const WDL_String effectiveModelPath = _ResolveAmpSlotModelPathForMode(slotIndex, modelPath);
+  if (effectiveModelPath.GetLength() == 0)
+    return;
+
+  _SetAmpSlotModelPath(slotIndex, effectiveModelPath);
 
   mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateLoading, std::memory_order_release);
   mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
@@ -4318,7 +4340,7 @@ void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int
     ModelLoadJob job;
     job.slotIndex = slotIndex;
     job.requestId = requestId;
-    job.modelPath = modelPath;
+    job.modelPath = effectiveModelPath;
     const double sampleRate = GetSampleRate();
     job.sampleRate = (sampleRate > 0.0) ? sampleRate : 48000.0;
     job.blockSize = std::max(1, GetBlockSize());
@@ -4326,7 +4348,7 @@ void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int
   }
   mModelLoadCV.notify_one();
 
-  SendControlMsgFromDelegate(slotCtrlTag, kMsgTagLoadedModel, modelPath.GetLength(), modelPath.Get());
+  SendControlMsgFromDelegate(slotCtrlTag, kMsgTagLoadedModel, effectiveModelPath.GetLength(), effectiveModelPath.Get());
 }
 
 bool NeuralAmpModeler::_CanEditAmpSlotModel(int slotIndex) const
@@ -4335,6 +4357,26 @@ bool NeuralAmpModeler::_CanEditAmpSlotModel(int slotIndex) const
   if (mAmpWorkflowMode == AmpWorkflowMode::Rig)
     return true;
   return !mAmpSlotModelEditLocked[static_cast<size_t>(slotIndex)];
+}
+
+WDL_String NeuralAmpModeler::_ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath) const
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotFixedModelPaths.size()) - 1);
+  if (mAmpWorkflowMode == AmpWorkflowMode::Release && !_CanEditAmpSlotModel(slotIndex))
+  {
+    const WDL_String& fixedPath = mAmpSlotFixedModelPaths[slotIndex];
+    if (fixedPath.GetLength() > 0)
+      return fixedPath;
+  }
+  WDL_String path;
+  path.Set(requestedPath.Get());
+  return path;
+}
+
+void NeuralAmpModeler::_SetAmpSlotFixedModelPath(int slotIndex, const WDL_String& modelPath)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotFixedModelPaths.size()) - 1);
+  mAmpSlotFixedModelPaths[slotIndex] = modelPath;
 }
 
 void NeuralAmpModeler::_SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath)
@@ -5127,9 +5169,7 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
     // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
     mStagedModelRight = std::move(stagedModelRight);
     mStagedModel = std::move(stagedModel);
-    mAmpNAMPaths[slotIndex] = modelPath;
-    if (mAmpSelectorIndex == slotIndex)
-      mNAMPath = modelPath;
+    _SetAmpSlotModelPath(slotIndex, modelPath);
     SendControlMsgFromDelegate(slotCtrlTag, kMsgTagLoadedModel, modelPath.GetLength(), modelPath.Get());
   }
   catch (std::runtime_error& e)
@@ -5152,8 +5192,9 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
     else
       _ClearAmpSlotCapabilityState(slotIndex);
     _RefreshModelCapabilityIndicators();
-    mAmpNAMPaths[slotIndex] = previousSlotPath;
-    mNAMPath = previousNAMPath;
+    _SetAmpSlotModelPath(slotIndex, previousSlotPath);
+    if (slotIndex == mAmpSelectorIndex)
+      mNAMPath = previousNAMPath;
     std::cerr << "Failed to read DSP module" << std::endl;
     std::cerr << e.what() << std::endl;
     return e.what();
