@@ -771,8 +771,14 @@ public:
   {
     _RefreshReadouts(false);
 
+    bool delayActive = true;
+    if (const auto* pDelegate = GetDelegate())
+      if (const auto* pDelayActiveParam = pDelegate->GetParam(kFXDelayActive))
+        delayActive = pDelayActiveParam->Bool();
+
+    const float displayOpacity = delayActive ? 1.0f : 0.22f;
     const float roundness = 5.0f;
-    g.FillRoundRect(IColor(0, 16, 18, 22), mRECT, roundness, &mBlend);
+    g.FillRoundRect(IColor(delayActive ? 0 : 130, 10, 12, 16), mRECT, roundness, &mBlend);
 
     const auto content = mRECT.GetPadded(-6.0f);
     const auto row1 = content.SubRectVertical(3, 0);
@@ -781,8 +787,16 @@ public:
     const float rowH = static_cast<float>(row1.H());
     const float labelSize = std::clamp(rowH * 0.34f, 9.0f, 16.0f);
     const float valueSize = std::clamp(rowH * 0.52f, 12.0f, 24.0f);
-    const IText labelText(labelSize, COLOR_GRAY.WithOpacity(0.94f), "Roboto-Regular", EAlign::Near, EVAlign::Middle);
-    const IText valueText(valueSize, IColor(255, 180, 255, 200), "Michroma-Regular", EAlign::Far, EVAlign::Middle);
+    const IText labelText(labelSize,
+                          COLOR_GRAY.WithOpacity(0.94f * displayOpacity),
+                          "Roboto-Regular",
+                          EAlign::Near,
+                          EVAlign::Middle);
+    const IText valueText(valueSize,
+                          IColor(255, 180, 255, 200).WithOpacity(displayOpacity),
+                          "Michroma-Regular",
+                          EAlign::Far,
+                          EVAlign::Middle);
 
     g.DrawText(labelText, "MIX", row1, &mBlend);
     g.DrawText(valueText, mMixReadout.Get(), row1, &mBlend);

@@ -111,6 +111,10 @@ enum EParams
   kDelayManualTempoBPM,
   // Delay-local TIME knob mode: SYNC (note divisions) vs MS.
   kFXDelayTimeMode,
+  // Delay stereo feedback mode: off = normal stereo, on = ping-pong cross feedback.
+  kFXDelayPingPong,
+  // Delay wet ducking amount (0 = off).
+  kFXDelayDucker,
   kNumParams
 };
 
@@ -594,8 +598,10 @@ private:
   double mFXDelaySmoothedTimeSamples = 1.0;
   double mFXDelaySmoothedFeedback = 0.0;
   double mFXDelaySmoothedMix = 0.0;
+  double mFXDelaySmoothedDucker = 0.0;
   double mFXDelaySmoothedLowCutHz = 20.0;
   double mFXDelaySmoothedHighCutHz = 20000.0;
+  double mFXDelayDuckerEnvelope = 0.0;
   std::array<double, kNumChannelsInternal> mFXDelayLowCutLPState = {};
   std::array<double, kNumChannelsInternal> mFXDelayHighCutLPState = {};
   // Post-IR FX reverb (preallocated in OnReset, no allocations in audio thread)

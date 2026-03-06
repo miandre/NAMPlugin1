@@ -534,6 +534,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kFXDelayTimeMs)->InitDouble("FX Delay Time", 420.0, 1.0, 2000.0, 1.0, "ms");
   GetParam(kFXDelayFeedback)->InitDouble("FX Delay Feedback", 35.0, 0.0, 80.0, 0.1, "%");
   GetParam(kFXDelayTimeMode)->InitEnum("FX Delay Time Mode", kDefaultFXDelayTimeMode, {"Sync", "MS"});
+  GetParam(kFXDelayPingPong)->InitBool("FX Delay PingPong", false);
+  GetParam(kFXDelayDucker)->InitDouble("FX Delay Ducker", 0.0, 0.0, 100.0, 0.1, "%");
   GetParam(kDelayTempoSource)->InitEnum("FX Delay Tempo Source", kDefaultDelayTempoSource, {"Auto", "Manual"});
   GetParam(kDelayManualTempoBPM)
     ->InitDouble("FX Delay Tempo", kDelayManualTempoDefaultBPM, kDelayManualTempoMinBPM, kDelayManualTempoMaxBPM, 1.0, "BPM");
@@ -557,10 +559,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                  });
   GetParam(kFXReverbPreDelayMs)->InitDouble("FX Reverb PreDelay", 25.0, 0.0, 250.0, 1.0, "ms");
   GetParam(kFXReverbTone)->InitDouble("FX Reverb Tone", 50.0, 0.0, 100.0, 0.1, "%");
-  GetParam(kFXDelayLowCutHz)->InitDouble("FX Delay LoCut", 120.0, 20.0, 2000.0, 1.0, "Hz");
-  GetParam(kFXDelayHighCutHz)->InitDouble("FX Delay HiCut", 12000.0, 1000.0, 20000.0, 10.0, "Hz");
-  GetParam(kFXReverbLowCutHz)->InitDouble("FX Reverb LoCut", 120.0, 20.0, 2000.0, 1.0, "Hz");
-  GetParam(kFXReverbHighCutHz)->InitDouble("FX Reverb HiCut", 12000.0, 1000.0, 20000.0, 10.0, "Hz");
+  GetParam(kFXDelayLowCutHz)->InitDouble("FX Delay LoCut", 20.0, 20.0, 2000.0, 1.0, "Hz");
+  GetParam(kFXDelayHighCutHz)->InitDouble("FX Delay HiCut", 20000.0, 1000.0, 20000.0, 10.0, "Hz");
+  GetParam(kFXReverbLowCutHz)->InitDouble("FX Reverb LoCut", 20.0, 20.0, 2000.0, 1.0, "Hz");
+  GetParam(kFXReverbHighCutHz)->InitDouble("FX Reverb HiCut", 20000.0, 1000.0, 20000.0, 10.0, "Hz");
   GetParam(kEQActive)->InitBool("ToneStack", true);
   GetParam(kOutputMode)->InitEnum("OutputMode", 1, {"Raw", "Normalized", "Calibrated"}); // TODO DRY w/ control
   GetParam(kIRToggle)->InitBool("IRToggle", true);
@@ -815,6 +817,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto fxDelayTimeArea = makePedalKnobArea(designToUIX(2045.0f), fxDelayKnobY);
     const auto fxDelayLowCutArea = makePedalKnobArea(designToUIX(2290.0f), fxDelayKnobY);
     const auto fxDelayHighCutArea = makePedalKnobArea(designToUIX(2535.0f), fxDelayKnobY);
+    const auto fxDelayDuckerArea = makePedalKnobArea(designToUIX(1566.0f), designToUIY(1055.0f));
     const float fxDelaySwitchX = designToUIX(430.0f);
     const float fxDelaySwitchY = designToUIY(850.0f);
     const auto fxDelaySwitchArea = IRECT(fxDelaySwitchX - 0.5f * modelSwitchWidth,
@@ -825,6 +828,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float fxDelaySyncCenterY = designToUIY(1100.0f);
     const auto fxDelaySyncModeArea = IRECT(fxDelaySyncCenterX - 20.0f, fxDelaySyncCenterY - 9.0f,
                                            fxDelaySyncCenterX + 20.0f, fxDelaySyncCenterY + 9.0f);
+    const float fxDelayPingPongCenterX = designToUIX(1811.0f);
+    const float fxDelayPingPongCenterY = fxDelaySyncCenterY;
+    const auto fxDelayPingPongModeArea =
+      IRECT(fxDelayPingPongCenterX - 20.0f, fxDelayPingPongCenterY - 9.0f, fxDelayPingPongCenterX + 20.0f,
+            fxDelayPingPongCenterY + 9.0f);
     // Delay LCD display window (left side of the delay unit graphic).
     const auto fxDelayDigitalReadoutArea =
       IRECT(designToUIX(590.0f), designToUIY(685.0f), designToUIX(1340.0f), designToUIY(1060.0f));
@@ -1304,6 +1312,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       -1,
       "FX_CONTROLS")
       ->SetTooltip("Delay TIME mode: SYNC = note divisions, MS = milliseconds");
+    pGraphics->AttachControl(
+      new NAMBitmapToggleControl(fxDelayPingPongModeArea, kFXDelayPingPong, smallOnOffOffBitmap, smallOnOffOnBitmap),
+      -1,
+      "FX_CONTROLS")
+      ->SetTooltip("Delay Ping-Pong: OFF = normal stereo, ON = cross-feedback ping-pong");
     pGraphics->AttachControl(new NAMFXDelayDigitalDisplayControl(fxDelayDigitalReadoutArea),
                              kCtrlTagFXDelayReadout,
                              "FX_CONTROLS")
@@ -1434,6 +1447,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                               kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "FX_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(fxDelayDuckerArea, kFXDelayDucker, "", fxKnobNoLabelStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
+                              kPedalKnobScale * 0.55f, 8.0f, -5.0f, false),
+      -1,
+      "FX_CONTROLS")
+      ->SetTooltip("Delay DUCKER amount (0% = off)");
     pGraphics->AttachControl(new NAMKnobControl(preModelGainArea, kPreModelGain, "PRE GAIN", ampKnobStyle,
                                                 ampKnobBackgroundBitmap, false, true, 0.7f, AP_KNOP_OFFSET));
     pGraphics->AttachControl(
@@ -2399,6 +2418,8 @@ void NeuralAmpModeler::OnReset()
     std::clamp(GetParam(kFXDelayTimeMs)->Value() * 0.001 * sampleRate, 1.0, static_cast<double>(mFXDelayBufferSamples - 2));
   mFXDelaySmoothedFeedback = std::clamp(GetParam(kFXDelayFeedback)->Value() * 0.01, 0.0, 0.80);
   mFXDelaySmoothedMix = std::clamp(GetParam(kFXDelayMix)->Value() * 0.01, 0.0, 1.0);
+  mFXDelaySmoothedDucker = std::clamp(GetParam(kFXDelayDucker)->Value() * 0.01, 0.0, 1.0);
+  mFXDelayDuckerEnvelope = 0.0;
   const double maxDelayCutHz = std::max(40.0, 0.45 * sampleRate);
   mFXDelaySmoothedLowCutHz = std::clamp(GetParam(kFXDelayLowCutHz)->Value(), 20.0, maxDelayCutHz);
   mFXDelaySmoothedHighCutHz =
@@ -2821,6 +2842,15 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     if (!mLoadingDefaultPreset)
       mDefaultPresetActive = false;
   };
+  auto syncAllParamControls = [this]() {
+    if (GetUI() == nullptr)
+      return;
+    for (int paramIdx = 0; paramIdx < kNumParams; ++paramIdx)
+    {
+      if (auto* pParam = GetParam(paramIdx))
+        SendParameterValueFromDelegate(paramIdx, pParam->GetNormalized(), true);
+    }
+  };
 
   // Look for the expected header. If it's there, then we'll know what to do.
   WDL_String header;
@@ -2832,7 +2862,10 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
   {
     const int restoredPos = _UnserializeStateWithUnknownVersion(chunk, startPos);
     if (restoredPos > startPos)
+    {
       markStateRestored();
+      syncAllParamControls();
+    }
     return restoredPos;
   }
 
@@ -2935,7 +2968,10 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     {
       const int restoredPos = _UnserializeStateWithKnownVersion(chunk, pos);
       if (restoredPos > startPos)
+      {
         markStateRestored();
+        syncAllParamControls();
+      }
       return restoredPos;
     }
 
@@ -2988,6 +3024,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     _SyncTunerParamToTopNav();
     _RefreshTopNavControls();
     markStateRestored();
+    syncAllParamControls();
 
     return paramsPos;
   }
@@ -3010,7 +3047,10 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     {
       const int restoredPos = _UnserializeStateWithKnownVersion(chunk, pos);
       if (restoredPos > startPos)
+      {
         markStateRestored();
+        syncAllParamControls();
+      }
       return restoredPos;
     }
     mNAMPath = legacyNAMPath;
@@ -3042,12 +3082,16 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     _SyncTunerParamToTopNav();
     _RefreshTopNavControls();
     markStateRestored();
+    syncAllParamControls();
     return paramsPos;
   }
 
   const int restoredPos = _UnserializeStateWithKnownVersion(chunk, pos);
   if (restoredPos > startPos)
+  {
     markStateRestored();
+    syncAllParamControls();
+  }
   return restoredPos;
 }
 
@@ -3225,11 +3269,6 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       {
         if (auto* pFXDelayOnLED = pGraphics->GetControlWithTag(kCtrlTagFXDelayOnLED))
           pFXDelayOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        const int delayParams[] = {kFXDelayMix, kFXDelayTimeMs, kFXDelayFeedback, kFXDelayLowCutHz, kFXDelayHighCutHz,
-                                   kFXDelayTimeMode};
-        for (const int delayParam : delayParams)
-          if (auto* pControl = pGraphics->GetControlWithParamIdx(delayParam))
-            pControl->SetDisabled(!active);
         break;
       }
       case kFXDelayTimeMode:
@@ -3259,11 +3298,6 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       {
         if (auto* pFXReverbOnLED = pGraphics->GetControlWithTag(kCtrlTagFXReverbOnLED))
           pFXReverbOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        const int reverbParams[] = {kFXReverbMix, kFXReverbDecay, kFXReverbPreDelayMs, kFXReverbTone,
-                                    kFXReverbLowCutHz, kFXReverbHighCutHz};
-        for (const int reverbParam : reverbParams)
-          if (auto* pControl = pGraphics->GetControlWithParamIdx(reverbParam))
-            pControl->SetDisabled(!active);
         break;
       }
       case kEQActive:
