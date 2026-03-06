@@ -616,7 +616,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto inputMonoSVG = pGraphics->LoadSVG(INPUT_MONO_SVG_FN);
     const auto inputStereoSVG = pGraphics->LoadSVG(INPUT_STEREO_SVG_FN);
     const auto ampActiveSVG = pGraphics->LoadSVG(AMP_ACTIVE_SVG_FN);
+    const auto ampPickerActiveSVG = pGraphics->LoadSVG(AMPPICKER_ACTIVE_SVG_FN);
     const auto stompActiveSVG = pGraphics->LoadSVG(STOMP_ACTIVE_SVG_FN);
+    const auto eqActiveSVG = pGraphics->LoadSVG(EQ_ACTIVE_SVG_FN);
     const auto cabActiveSVG = pGraphics->LoadSVG(CAB_ACTIVE_SVG_FN);
     const auto fxActiveSVG = pGraphics->LoadSVG(FX_ACTIVE_SVG_FN);
     const auto tunerActiveSVG = pGraphics->LoadSVG(TUNER_ACTIVE_SVG_FN);
@@ -887,7 +889,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     constexpr float topNavIconHeight = 60.0f;
     constexpr float kTunerToolIconHeight = 43.0f;
     constexpr float kTopNavRowYOffset = -6.0f;
-    const float topNavIconGap = 38.0f;
+    const float topNavIconGap = 19.0f;
     // Areas for model and IR
     // Top bar has two visual rows: icon row + primary control row.
     const float topBarIconRowTop = topMainRowArea.MH() - 0.5f * topNavIconHeight + kTopNavRowYOffset;
@@ -935,7 +937,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float topNavStompWidth = scaledWidthForHeightSVG(stompActiveSVG, topNavIconHeight);
     const float topNavAmpWidth = scaledWidthForHeightSVG(ampActiveSVG, topNavIconHeight);
     const float topNavCabWidth = scaledWidthForHeightSVG(cabActiveSVG, topNavIconHeight);
-    const float topNavEqWidth = scaledWidthForHeightSVG(stompActiveSVG, topNavIconHeight); // Temporary EQ icon reuse.
+    const float topNavEqWidth = scaledWidthForHeightSVG(eqActiveSVG, topNavIconHeight);
     const float topNavFxWidth = scaledWidthForHeightSVG(fxActiveSVG, topNavIconHeight);
     const float topNavRowWidth =
       topNavStompWidth + topNavAmpWidth + topNavCabWidth + topNavEqWidth + topNavFxWidth + 4.0f * topNavIconGap;
@@ -993,11 +995,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float blendSliderTop = irRowTop - 12.0f;
     const auto cabBlendArea = IRECT(heroArea.MW() - 0.5f * blendSliderWidth, blendSliderTop, heroArea.MW() + 0.5f * blendSliderWidth,
                                     blendSliderTop + blendSliderHeight);
-    // Footer placeholder amp selector strip (uses existing amp icon assets).
+    // Footer amp selector strip uses dedicated picker icon art.
     const float footerAmpIconHeight = 43.0f;
     const float footerAmpIconWidth =
-      (ampActiveSVG.IsValid() && ampActiveSVG.H() > 0.0f) ? (ampActiveSVG.W() * (footerAmpIconHeight / ampActiveSVG.H()))
-                                                           : footerAmpIconHeight;
+      (ampPickerActiveSVG.IsValid() && ampPickerActiveSVG.H() > 0.0f)
+      ? (ampPickerActiveSVG.W() * (footerAmpIconHeight / ampPickerActiveSVG.H()))
+      : footerAmpIconHeight;
     const float footerAmpIconGap = 36.0f;
     const float footerAmpRowWidth = 3.0f * footerAmpIconWidth + 2.0f * footerAmpIconGap;
     const float footerAmpRowLeft = bottomBarArea.MW() - 0.5f * footerAmpRowWidth;
@@ -1177,19 +1180,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                                   [this]() { _ToggleTopNavSectionBypass(TopNavSection::Cab); });
     pGraphics->AttachControl(pCabTopIcon, kCtrlTagTopNavCab)->SetTooltip("Cab");
 
-    IControl* pEqTopIcon = new NAMTopIconControl(topNavEqArea, stompActiveSVG, stompActiveSVG, stompActiveSVG,
-                                                 [this]() {
-                                                   mFXActivePage = FXPage::Eq;
-                                                   _SetTopNavActiveSection(TopNavSection::Fx);
-                                                 },
-                                                 [this]() { _ToggleTopNavSectionBypass(TopNavSection::Fx); });
+    IControl* pEqTopIcon = new NAMTopIconControl(topNavEqArea, eqActiveSVG, eqActiveSVG, eqActiveSVG,
+                                                 [this]() { _SetTopNavActiveSection(TopNavSection::Eq); },
+                                                 [this]() { _ToggleTopNavSectionBypass(TopNavSection::Eq); });
     pGraphics->AttachControl(pEqTopIcon, kCtrlTagTopNavEq)->SetTooltip("EQ");
 
     IControl* pFxTopIcon = new NAMTopIconControl(topNavFxArea, fxActiveSVG, fxActiveSVG, fxActiveSVG,
-                                                 [this]() {
-                                                   mFXActivePage = FXPage::Main;
-                                                   _SetTopNavActiveSection(TopNavSection::Fx);
-                                                 },
+                                                 [this]() { _SetTopNavActiveSection(TopNavSection::Fx); },
                                                  [this]() { _ToggleTopNavSectionBypass(TopNavSection::Fx); });
     pGraphics->AttachControl(pFxTopIcon, kCtrlTagTopNavFx)->SetTooltip("FX");
     pGraphics->AttachControl(
@@ -1237,21 +1234,21 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                 fileBackgroundBitmap),
       kCtrlTagIRFileBrowserRight);
     pGraphics->AttachControl(new NAMBlendSliderControl(cabBlendArea, kCabIRBlend, utilityStyle));
-    pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot1Area, ampActiveSVG, ampActiveSVG, ampActiveSVG,
+    pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot1Area, ampPickerActiveSVG, ampPickerActiveSVG, ampPickerActiveSVG,
                                                    [this]() {
                                                      _SelectAmpSlot(0);
                                                    },
                                                    {}),
                              kCtrlTagAmpSlot1)
       ->SetTooltip("Amp Slot 1");
-    pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot2Area, ampActiveSVG, ampActiveSVG, ampActiveSVG,
+    pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot2Area, ampPickerActiveSVG, ampPickerActiveSVG, ampPickerActiveSVG,
                                                    [this]() {
                                                      _SelectAmpSlot(1);
                                                    },
                                                    {}),
                              kCtrlTagAmpSlot2)
       ->SetTooltip("Amp Slot 2");
-    pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot3Area, ampActiveSVG, ampActiveSVG, ampActiveSVG,
+    pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot3Area, ampPickerActiveSVG, ampPickerActiveSVG, ampPickerActiveSVG,
                                                    [this]() {
                                                      _SelectAmpSlot(2);
                                                    },
@@ -2136,9 +2133,10 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** userLowPassPointers2 = mUserLowPass2.Process(userLowPassPointers1, numChannelsInternal, numFrames);
 
   sample** fxReverbPointers = userLowPassPointers2;
+  const bool eqBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Eq)];
   const bool fxBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Fx)];
 
-  if (GetParam(kFXEQActive)->Bool() && !fxBypassed && sampleRate > 0.0)
+  if (GetParam(kFXEQActive)->Bool() && !eqBypassed && sampleRate > 0.0)
     _ProcessPostCabEQStage(fxReverbPointers, numChannelsInternal, numFrames, sampleRate);
 
   const bool fxDelayActive = GetParam(kFXDelayActive)->Bool() && !fxBypassed;
@@ -2750,7 +2748,7 @@ void NeuralAmpModeler::_ApplyInputStereoAutoDefaultIfNeeded()
 
 bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 {
-  constexpr int32_t kStateSchemaVersion = 2;
+  constexpr int32_t kStateSchemaVersion = 3;
 
   // If this isn't here when unserializing, then we know we're dealing with something before v0.8.0.
   WDL_String header("###NeuralAmpModeler###"); // Don't change this!
@@ -2801,7 +2799,8 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
 int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 {
-  constexpr int32_t kStateSchemaVersion = 2;
+  constexpr int32_t kStateSchemaVersion = 3;
+  constexpr int32_t kLegacyStateSchemaVersion = 2;
   auto markStateRestored = [this]() {
     mStateRestoredFromChunk = true;
     mInputStereoAutoDefaultApplied = true;
@@ -2828,10 +2827,10 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
   if (versionPos < 0)
     return startPos;
 
-  // Current chunk schema (v2): explicit slot paths/states + full parameter payload.
+  // Current chunk schema (v3): explicit slot paths/states + full parameter payload.
   int32_t schemaVersion = 0;
   const int schemaPos = chunk.Get(&schemaVersion, versionPos);
-  if (schemaPos >= 0 && schemaVersion == kStateSchemaVersion)
+  if (schemaPos >= 0 && (schemaVersion == kStateSchemaVersion || schemaVersion == kLegacyStateSchemaVersion))
   {
     int statePos = schemaPos;
 
@@ -2867,14 +2866,18 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       return startPos;
 
     std::array<bool, static_cast<size_t>(TopNavSection::Count)> bypassed = {};
-    for (auto& bypassState : bypassed)
+    const size_t storedBypassCount =
+      (schemaVersion == kLegacyStateSchemaVersion) ? (static_cast<size_t>(TopNavSection::Tuner) + 1) : bypassed.size();
+    for (size_t i = 0; i < storedBypassCount; ++i)
     {
       int32_t bypassInt = 0;
       statePos = chunk.Get(&bypassInt, statePos);
       if (statePos < 0)
         return startPos;
-      bypassState = (bypassInt != 0);
+      bypassed[i] = (bypassInt != 0);
     }
+    if (schemaVersion == kLegacyStateSchemaVersion)
+      bypassed[static_cast<size_t>(TopNavSection::Eq)] = bypassed[static_cast<size_t>(TopNavSection::Fx)];
 
     std::array<AmpSlotState, 3> slotStates = {};
     for (auto& slotState : slotStates)
@@ -4381,10 +4384,8 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     const bool showAmpSection = (mTopNavActiveSection == TopNavSection::Amp);
     const bool showStompSection = (mTopNavActiveSection == TopNavSection::Stomp);
     const bool showCabSection = (mTopNavActiveSection == TopNavSection::Cab);
-    const bool showFxNavSection = (mTopNavActiveSection == TopNavSection::Fx);
-    const bool showFxSection = showFxNavSection && (mFXActivePage == FXPage::Main);
-    const bool showEqSection = showFxNavSection && (mFXActivePage == FXPage::Eq);
-    const bool fxBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Fx)];
+    const bool showFxSection = (mTopNavActiveSection == TopNavSection::Fx);
+    const bool showEqSection = (mTopNavActiveSection == TopNavSection::Eq);
     const auto updateIcon = [&](const int tag, const TopNavSection section) {
       if (auto* pIcon = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
       {
@@ -4399,10 +4400,8 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     updateIcon(kCtrlTagTopNavAmp, TopNavSection::Amp);
     updateIcon(kCtrlTagTopNavStomp, TopNavSection::Stomp);
     updateIcon(kCtrlTagTopNavCab, TopNavSection::Cab);
-    if (auto* pEqIcon = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(kCtrlTagTopNavEq)))
-      pEqIcon->SetVisualState(showEqSection, fxBypassed);
-    if (auto* pFxIcon = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(kCtrlTagTopNavFx)))
-      pFxIcon->SetVisualState(showFxSection, fxBypassed);
+    updateIcon(kCtrlTagTopNavEq, TopNavSection::Eq);
+    updateIcon(kCtrlTagTopNavFx, TopNavSection::Fx);
     updateIcon(kCtrlTagTopNavTuner, TopNavSection::Tuner);
 
     const char* backgroundResource = AMP2BACKGROUND_FN;
@@ -4420,7 +4419,9 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     else if (mTopNavActiveSection == TopNavSection::Cab)
       backgroundResource = CABBACKGROUND_FN;
     else if (mTopNavActiveSection == TopNavSection::Fx)
-      backgroundResource = (mFXActivePage == FXPage::Eq) ? EQBACKGROUND_FN : FXBACKGROUND_FN;
+      backgroundResource = FXBACKGROUND_FN;
+    else if (mTopNavActiveSection == TopNavSection::Eq)
+      backgroundResource = EQBACKGROUND_FN;
     if (auto* pBackground = dynamic_cast<NAMBackgroundBitmapControl*>(pGraphics->GetControlWithTag(kCtrlTagMainBackground)))
       pBackground->SetResourceName(backgroundResource);
 

@@ -324,13 +324,8 @@ private:
     Cab,
     Fx,
     Tuner,
+    Eq,
     Count
-  };
-
-  enum class FXPage : int
-  {
-    Main = 0,
-    Eq
   };
 
   // Allocates mInputPointers and mOutputPointers
@@ -506,8 +501,7 @@ private:
   int mCurrentModelSlot = 1;
   std::atomic<int> mPendingAmpSlotSwitch{-1};
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
-  std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false};
-  FXPage mFXActivePage = FXPage::Main;
+  std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false, false};
   int mAmpSelectorIndex = 1;
   bool mApplyingAmpSlotState = false;
   bool mStartupDefaultLoadAttempted = false;
