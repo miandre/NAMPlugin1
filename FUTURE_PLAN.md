@@ -1,110 +1,142 @@
 # FUTURE_PLAN.md
 
-Last updated: 2026-03-04
+Last updated: 2026-03-06
 
-Purpose: structured roadmap draft from user ideas, with technical feedback and sequencing.
+Purpose: active roadmap for remaining work.  
+This file is mandatory onboarding context for every new agent.
 
-## Development mode assumptions (important)
-- Project is currently in 100% development mode with a single tester.
-- Breaking changes are acceptable when they materially improve architecture or iteration speed.
-- Backward compatibility for old presets/params is not a hard requirement at this stage.
-- Long-term intent:
-  - this plugin can remain a "test rig" for model/IR evaluation,
-  - future productized amp sims can use fixed bundled sounds/models derived from rig learnings.
+## Development mode assumptions
+- Project is in active development with a single tester.
+- Breaking changes are acceptable when they materially improve architecture/iteration speed.
+- Backward compatibility for old presets is not a hard requirement right now.
 
-## Product direction
-- Near-term: keep high-velocity test rig workflows (model/IR loading, diagnostics, flexible routing).
-- Mid/long-term: support release-style fixed amp slots with bundled assets and controlled UX.
-- Recommended architecture target: one DSP core, two operating profiles:
-  - Rig Mode (flexible pickers, diagnostics)
-  - Release Mode (fixed bundled amp/cab sets)
+## Completed milestones (remove from active backlog)
 
-## Idea backlog rewritten with feedback
+### Done: Tempo/transport + synced delay foundation
+- Host/manual tempo handling implemented.
+- Standalone manual tempo workflow implemented.
+- Delay time sync mode (note divisions) implemented.
 
-### FX and timing
-- FX graphics refresh and control repositioning (UI asset-dependent).
-- Add digital display for parameter readout.
-  - Feasible in current UI framework; low risk.
-- Add DAW tempo sync foundation.
-  - High value prerequisite for synced delay and time-based FX.
-- Add delay sync to host tempo.
-  - Depends on tempo foundation.
-- Add ping-pong delay behavior.
-  - Feasible; medium DSP tuning risk.
-- Add delay ducker.
-  - Feasible; needs smooth envelope/gain handling to avoid pumping/clicks.
+### Done: Delay upgrades
+- Ping-pong behavior implemented and corrected for mono/stereo input behavior.
+- Delay ducker implemented with extended usable range.
+- Delay digital readout implemented and polished.
 
-### EQ and gate UX
-- Move HP/LP controls from General to EQ section.
-  - Low risk UI/organization change.
-- Gate threshold should also shape hold/release behavior (one-knob gate behavior curve).
-  - Feasible; medium tuning risk.
-- If gate becomes one-knob stable, move gate control to top-level bar (independent from stomp bypass).
-  - Good UX simplification.
+### Done: EQ/FX UI transition work
+- EQ moved to dedicated page.
+- FX/EQ navigation decoupled/fixed.
+- FX/EQ graphics and control layout polish completed.
 
-### Cab system (major feature)
-- Build interactive cab UI:
-  - microphone selection,
-  - mic cone position,
-  - optional mic distance.
-- Implement IR interpolation strategy:
-  - 1D (cone position): blend between adjacent IR captures.
-  - 2D (position + distance): blend up to 4 neighboring IRs.
-- Keep dual-cab behavior and blend options:
-  - global blend mode,
-  - per-cab pan + level mode.
-- Bundle curated IR sets in build while retaining optional external IR loading.
-- Feedback:
-  - High value but high complexity and CPU risk.
-  - Best shipped in phases (1D first, then 2D, then advanced dual-cab placement).
+## Active milestones (not completed)
 
-### Transpose
-- Current latency is still problematic.
-- Decision path:
-  - investigate lower-latency mode tradeoffs,
-  - if unacceptable quality/latency tradeoff remains, remove or demote feature.
-- Feedback:
-  - likely constrained by algorithmic tradeoff; treat as quality-mode decision, not only bug fix.
+### Milestone A: Amp slot architecture completion (current branch focus)
+Goal:
+- Finish Rig/Release split so Release slots are deterministic and resilient to preset/path drift.
 
-### Doubler
-- Add audition-oriented doubler to mimic double-tracked guitar feel.
-- Better than simple L/R delay (e.g., micro pitch/time modulation with width control).
-- Initial mono-compatibility can be lower priority.
-- Feedback:
-  - high musical value for audition workflow; medium implementation risk.
+Current state:
+- Foundation commit is in place (`439d946`).
+- Additional uncommitted WIP exists for fixed-slot path resolution and unserialization behavior.
 
-### Amp architecture and model workflow
-- Improve per-amp independent control behavior/tone-stack ownership.
-- Long-term product direction:
-  - fixed model(s) per amp slot,
-  - optional slot-specific model switching for hi/lo gain variants.
-- Feedback:
-  - highly aligned with release goals.
-  - in dev mode, can break current picker workflows if needed.
-  - still recommended to keep a Rig Mode path for rapid auditioning.
+Remaining tasks:
+1. Review and commit current WIP as one minimal patch.
+2. Verify preset restore/slot switching behavior in both modes.
+3. Decide whether Release mode should allow per-slot optional editable exceptions.
+4. Add lightweight tests/checklist steps for slot-lock invariants.
 
-### Cleanup and optimization
-- Review all custom changes since fork baseline.
-- Refactor structure where needed (FX/sections already started).
-- Identify code smells and optimization opportunities.
-- Feedback:
-  - run continuously per milestone, not one giant final cleanup.
+Risk:
+- Medium. Mostly state/serialization behavior risk, low DSP risk.
 
-## Proposed implementation order
-1. Tempo/transport foundation (host sync + internal timing state).
-2. Delay upgrades (tempo sync, ping-pong, ducker).
-3. Cab system v1 (1D mic-position blending with bundled IR asset pipeline).
-4. Amp slot architecture pass (fixed-slot model mapping + Rig Mode/Release Mode boundaries).
-5. Cab system v2 (distance/2D interpolation, optional per-cab pan/level mode).
-6. Ongoing cleanup/perf pass after each milestone (not deferred to the end).
+RT safety watch-outs:
+- Keep all slot/model loading and filesystem work off audio thread.
 
-## Additional recommendations
-- Add explicit feature flags/modes to isolate heavy features during host-stability testing.
-- Keep host validation matrix lightweight but consistent (LUNA, Reaper, standalone).
-- Maintain RT-safe diagnostics only (no callback logging/I/O).
+### Milestone B: Model bundling and release-packaging strategy (new)
+Goal:
+- Support fixed bundled models without exposing plain `.nam` files in release workflow.
+
+Proposed direction:
+1. Add slot source abstraction:
+   - `ExternalPath` (Rig mode),
+   - `EmbeddedModelId` (Release mode).
+2. Add build-time packaging step:
+   - pack models into one manifest + payload bundle,
+   - optional compression/encryption.
+3. Add background-thread model materialization path:
+   - preferred: load model directly from memory payload,
+   - fallback: controlled cache materialization if loader requires file path.
+4. Keep runtime per-slot DSP cache (already implemented) for fast switching.
+
+Copy-protection reality:
+- Client-side protection can be strengthened but not made absolute.
+- Bundling/obfuscation is not enough alone.
+- Stronger practical stack: license-bound encrypted payloads + in-memory decode + watermarking/legal controls.
+
+Risk:
+- Medium-high (pipeline/tooling + loader integration).
+
+RT safety watch-outs:
+- No decrypt/decompress/file I/O on audio thread.
+
+### Milestone C: Cab system v1 (1D interpolation)
+Goal:
+- Introduce musically useful mic position interpolation with manageable complexity.
+
+Scope:
+- 1D cone-position interpolation first.
+- Curated bundled IR set support.
+- Keep external IR fallback in Rig mode.
+
+Risk:
+- High CPU/complexity if not phased.
+
+RT safety watch-outs:
+- Precompute interpolation metadata; no dynamic allocations in callback.
+
+### Milestone D: Cab system v2 (2D distance + advanced routing)
+Goal:
+- Add distance axis and optional dual-cab pan/level workflows.
+
+Risk:
+- High (state/UI/DSP complexity).
+
+RT safety watch-outs:
+- Keep interpolation and routing deterministic and allocation-free in callback.
+
+### Milestone E: Gate UX reshape (one-knob behavior)
+Goal:
+- Threshold knob also drives hold/release contour in a predictable musical curve.
+
+Risk:
+- Medium (tuning-heavy).
+
+RT safety watch-outs:
+- Smoothing/curve evaluation must remain lightweight.
+
+### Milestone F: Transpose decision path
+Goal:
+- Decide whether to keep, simplify, or remove transpose based on latency/quality tradeoff.
+
+Risk:
+- Medium (user-facing behavior change likely).
+
+### Milestone G: Doubler
+Goal:
+- Add audition-oriented doubler (micro pitch/time modulation + width).
+
+Risk:
+- Medium.
+
+RT safety watch-outs:
+- Bounded modulation work and preallocated buffers only.
+
+## Recommended execution order from now
+1. Milestone A: finish amp-slot architecture WIP and commit.
+2. Milestone B: implement minimal model-bundle abstraction scaffold.
+3. Milestone C: cab interpolation v1.
+4. Milestones E/F/G in parallel as smaller feature tracks.
+5. Milestone D after v1 proves stable.
 
 ## Next-agent prompt (copy/paste)
-You are continuing work in `D:\Dev\NAMPlugin` on branch `main`.
+You are continuing work in `D:\Dev\NAMPlugin` on branch `amp-slot-architecture`.
 
 Read first, in this exact order:
 1) `AGENTS.md`
@@ -120,9 +152,9 @@ Then confirm repo/submodule state:
 - `git -C iPlug2 remote -v`
 
 Task:
-1) Convert `FUTURE_PLAN.md` into milestone-sized implementation tickets.
-2) Recommend smallest/lowest-risk first patch in milestone 1.
-3) For each ticket, list expected impact, technical risk, files/symbols touched, and RT-safety concerns.
+1) Finalize and commit current uncommitted Milestone-A (amp-slot architecture) WIP.
+2) Propose the smallest first Milestone-B patch for bundled-model support (abstraction only, no full packer yet).
+3) List RT-safety checks and manual validation steps before merge.
 
 Constraints:
 - Keep diffs minimal.

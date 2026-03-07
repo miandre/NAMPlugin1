@@ -1,6 +1,6 @@
 # AGENT_SESSION_SUMMARY.md
 
-Last updated: 2026-03-04
+Last updated: 2026-03-06
 
 Purpose: concise handoff so a new agent can continue without replaying full chat history.
 
@@ -11,91 +11,81 @@ Purpose: concise handoff so a new agent can continue without replaying full chat
 4. `FUTURE_PLAN.md`
 
 ## Current repository state
-- Branch: `main`
-- HEAD on `main`: `c2baa44`
-- Working tree baseline: clean at `c2baa44`
-- Remote:
-  - `origin` = `https://github.com/miandre/NAMPlugin1.git`
-  - `upstream` = `https://github.com/sdatkinson/NeuralAmpModelerPlugin.git` (push disabled)
-- Recent commits on `main`:
-  - `c2baa44` merge: fx refactor split processing units
-  - `f87da57` chore(project): add split FX sources to legacy project targets
-  - `50fd25d` refactor(fx): extract post-EQ and delay/reverb processing units
-  - `3f769cc` dsp: fix input metering and avoid one-sided stereo over-processing
-  - `beb92af` submodule: bump AudioDSPTools for noise gate RT-safe fallback
-  - `9c4528e` rt: forbid callback-time buffer growth in ProcessBlock
-  - `47f74a7` Merge branch 'feature/ir-staging-path-atomic-declick'
-  - `768de79` ir: stage paths atomically and de-click IR swaps
-  - `e0374ab` Merge branch 'feature/model-metadata-indicators'
-  - `ee6e6ed` ui: add per-model metadata capability indicators
-
-## Submodule state (important)
+- Active branch: `amp-slot-architecture`
+- Branch HEAD: `439d946`
+- `main` HEAD (remote): `fa7a264`
+- Submodule `iPlug2` pin:
+  - `b54bf7af6b15f84b9bd7593e63bdf75e70d658db`
 - `iPlug2` remote:
   - `origin` = `https://github.com/miandre/iPlug2.git`
-- Superproject pin:
-  - `b54bf7af6b15f84b9bd7593e63bdf75e70d658db`
+
+## Working tree status at handover (important)
+- There is active uncommitted Milestone-6 WIP in:
+  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
+  - `NeuralAmpModeler/NeuralAmpModeler.h`
+  - `NeuralAmpModeler/Unserialization.cpp`
+  - `NeuralAmpModeler/config.h` (`NAM_RELEASE_MODE` currently set to `1`)
+- This WIP is intentionally not committed yet and should be reviewed before merge.
+
+## What was completed recently
+
+### 1) EQ move + UI restructuring
+- Dedicated EQ page added and connected in top nav.
+- EQ/FX coupling bug fixed (independent section bypass/control behavior).
+- EQ and FX layout/artwork updated; obsolete overlay assets removed.
+
+### 2) Delay feature completion
+- Host/manual tempo foundation added.
+- Delay sync mode implemented (note division vs ms behavior).
+- Ping-pong mode implemented and corrected:
+  - ping-pong off keeps stereo behavior,
+  - ping-pong on does true cross feedback,
+  - stereo input behavior adjusted so first repeat starts on opposite side.
+- Delay ducker added with user knob and expanded range.
+- Delay digital readout implemented and polished (updates in realtime; order/mode UX fixes).
+
+### 3) FX UI/preset behavior polish
+- Delay/reverb UI refinements and control graphics updates.
+- Delay/reverb off-state visual behavior improved.
+- HP/LP defaults tuned (min/max).
+- Preset restore issues for FX control positions were fixed.
+
+### 4) Amp-slot architecture foundation (committed)
+- Commit `439d946` added:
+  - Rig/Release workflow mode scaffold,
+  - slot edit lock policy,
+  - user-initiated edit gating,
+  - initial slot-path mutation helper centralization.
+
+### 5) Amp-slot architecture follow-up (uncommitted WIP)
+- Added fixed-slot path manifest scaffolding:
+  - per-slot fixed path storage,
+  - mode-aware effective-path resolver,
+  - startup/default slot mapping hookup,
+  - unserialization guards to avoid clearing locked release slots from empty preset paths.
+- Needs final code review + build validation before commit.
 
 ## Build/config baseline to preserve
 - Audio/performance validation: `Release | x64` only.
-- Standalone audio test: run without debugger (`Ctrl+F5` in VS).
-- Do not evaluate DSP performance in Debug.
+- Standalone audio test: run without debugger (`Ctrl+F5`).
+- Do not evaluate DSP behavior/perf in Debug.
 - Do not run builds/tests unless user explicitly asks.
-
-## What was completed in this cycle
-
-### 1) Per-slot model metadata indicators (UI clarity)
-- Added non-editable capability indicators under each model picker so metadata display is no longer ambiguous when multiple models are loaded.
-- Indicators reflect metadata capabilities like loudness/calibration per slot.
-
-### 2) IR swap de-click and safer staging
-- IR change path now stages data atomically and applies de-click handling.
-- Reduced audible click risk when switching IRs.
-
-### 3) RT stability hardening and crash mitigation
-- Prevented callback-time buffer growth in `ProcessBlock` paths.
-- Bumped `AudioDSPTools` for a noise gate fallback that avoids crashing behavior when gate processing hits exceptional states.
-- LUNA crash investigation captured host-side evidence:
-  - one class of crash in `nvwgf2umx.dll` with stack overflow (GPU driver/user-space stack)
-  - one class showing unhandled `std::runtime_error` entering noise gate processing path.
-- Reaper remained stable during those investigations.
-
-### 4) DSP behavior fixes
-- Input metering corrected to reflect real input path expectation (post input gain, before downstream amp/gate coloration).
-- One-sided stereo feed no longer forces unnecessary dual-channel heavy processing.
-- Effective mono optimization now handles one-sided stereo source cases better and reduces crackle risk under heavy models.
-
-### 5) FX code refactor (structure only, no intentional sound change)
-- Split large `ProcessBlock` FX sections into dedicated files:
-  - `NeuralAmpModelerPostEQ.cpp/.h`
-  - `NeuralAmpModelerFX.cpp/.h`
-- `NeuralAmpModeler.cpp` now dispatches to focused helper methods for post-cab EQ, delay, and reverb processing.
-- Build/link safety fix: `GetNAMSampleRate(...)` in header was made `inline` to avoid multi-definition after multi-TU split.
-- Added new source files to relevant project files (app/vst3 and legacy targets where touched).
 
 ## Current policy notes
 - Non-negotiable RT rules still apply in audio thread:
-  - no allocations, locks, waits, file/network/UI/logging, or thrown exceptions across callback.
-- Keep diffs minimal and reviewable.
-- Keep style consistent with surrounding code.
-- Current product stage is dev-only single-user testing.
-  - Breaking changes are acceptable if they materially improve architecture/speed of iteration.
-  - Model picker and external IR picker are considered development-rig capabilities.
+  - no allocations, locks, waits, file/network/UI/logging, or exceptions across callback.
+- Keep diffs small and reviewable.
+- Dev-mode policy is active:
+  - breaking changes are allowed when they improve architecture/iteration speed.
 
-## Known practical status
-- Mainline includes:
-  - preset workflow improvements,
-  - robust effective-mono optimization,
-  - metadata slot indicators,
-  - IR de-click staging,
-  - RT hardening and noise-gate fallback,
-  - FX code split.
-- LUNA host instability is not fully closed as a root-cause story; plugin-side crash vectors were reduced, but external host/driver instability evidence exists.
-
-## Next planning source
-- Use `FUTURE_PLAN.md` as the canonical roadmap draft for upcoming feature work and sequencing.
+## Suggested next coding step
+1. Finalize and commit current uncommitted Milestone-6 WIP on `amp-slot-architecture`.
+2. Validate Rig mode (`NAM_RELEASE_MODE=0`) remains unchanged.
+3. Validate Release mode (`NAM_RELEASE_MODE=1`) fixed-slot behavior on preset restore.
+4. Then continue with model bundling/packaging milestone described in `FUTURE_PLAN.md`.
 
 ## Starter prompt for the next agent (copy/paste)
-You are continuing work in `D:\Dev\NAMPlugin` on branch `main`.
+You are continuing work in `D:\Dev\NAMPlugin` on branch `amp-slot-architecture`.
 
 Read first, in this exact order:
 1) `AGENTS.md`
@@ -117,6 +107,6 @@ After reading instructions, summarize the guardrails you will follow:
 - dev-mode policy: breaking changes are allowed when they improve architecture/iteration speed
 
 Task request:
-1) Propose milestone-sized implementation plan based on `FUTURE_PLAN.md`.
-2) Keep scope small per patch and prioritize lowest-risk/highest-value items first.
-3) For each proposed milestone, list user impact, technical risk, likely files/symbols, and RT-safety watch-outs.
+1) Review the uncommitted amp-slot architecture WIP and convert it into one minimal, safe commit.
+2) Verify Release-mode slot-lock behavior against preset restore edge cases.
+3) Propose and start the first minimal patch from the model-bundling strategy in `FUTURE_PLAN.md`.

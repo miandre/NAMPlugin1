@@ -5,6 +5,7 @@ If anything conflicts with real-time audio safety or build stability, prioritize
 
 Also read and follow: SKILLS.md (working modes, review process, communication style).
 Also read: AGENT_SESSION_SUMMARY.md (latest project-specific handoff and current state).
+Also read: FUTURE_PLAN.md (current roadmap, milestone status, and next priorities).
 Latest handover + starter prompt for new agents is maintained in `AGENT_SESSION_SUMMARY.md`.
 
 ## Project context
