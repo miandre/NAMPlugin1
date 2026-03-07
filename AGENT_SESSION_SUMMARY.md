@@ -1,112 +1,115 @@
-# AGENT_SESSION_SUMMARY.md
+Last updated: 2026-03-07
 
-Last updated: 2026-03-06
-
-Purpose: concise handoff so a new agent can continue without replaying full chat history.
+Purpose: concise handoff so a new agent can continue without replaying the full chat history.
 
 ## Read order for new agents
 1. `AGENTS.md`
 2. `SKILLS.md`
-3. `AGENT_SESSION_SUMMARY.md` (this file)
+3. `AGENT_SESSION_SUMMARY.md`
 4. `FUTURE_PLAN.md`
 
 ## Current repository state
 - Active branch: `amp-slot-architecture`
-- Branch HEAD: `439d946`
-- `main` HEAD (remote): `fa7a264`
-- Submodule `iPlug2` pin:
-  - `b54bf7af6b15f84b9bd7593e63bdf75e70d658db`
-- `iPlug2` remote:
-  - `origin` = `https://github.com/miandre/iPlug2.git`
+- Branch HEAD: `e84f5c3`
+- Recent relevant history:
+  - `e84f5c3` `feat(release-mode): scaffold fixed assets and safe preset recall`
+  - `d8ae1df` `fix(preset-load): avoid clearing active slot before replacement model`
+  - `75de4bf` `fix(amp-slot): defer switch until model ready to avoid clicks and dropouts`
+  - `71a8b8d` `feat(amp-slot): scaffold slot model source abstraction`
+  - `7d64372` `feat(amp-slot): preserve fixed release slot model paths on restore`
+  - `8c7a03b` `refactor(amp-slots): add rig/release slot edit policy foundation`
+- `main` changes are rebased in through `fa7a264`
 
-## Working tree status at handover (important)
-- There is active uncommitted Milestone-6 WIP in:
-  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
-  - `NeuralAmpModeler/NeuralAmpModeler.h`
-  - `NeuralAmpModeler/Unserialization.cpp`
-  - `NeuralAmpModeler/config.h` (`NAM_RELEASE_MODE` currently set to `1`)
-- This WIP is intentionally not committed yet and should be reviewed before merge.
+## Working tree status at handover
+- Current non-code local changes are untracked image assets:
+  - `NeuralAmpModeler/resources/img/Amp3Knob.png`
+  - `NeuralAmpModeler/resources/img/Amp3KnobBackground.png`
+- Treat those as user-owned unless explicitly told otherwise.
 
-## What was completed recently
+## What is completed now
 
-### 1) EQ move + UI restructuring
-- Dedicated EQ page added and connected in top nav.
-- EQ/FX coupling bug fixed (independent section bypass/control behavior).
-- EQ and FX layout/artwork updated; obsolete overlay assets removed.
+### 1) Delay and FX work from `main`
+- Delay sync/manual tempo foundation is in.
+- Ping-pong, ducker, and FX polish are in.
+- EQ/FX page split and related UI cleanup are in.
 
-### 2) Delay feature completion
-- Host/manual tempo foundation added.
-- Delay sync mode implemented (note division vs ms behavior).
-- Ping-pong mode implemented and corrected:
-  - ping-pong off keeps stereo behavior,
-  - ping-pong on does true cross feedback,
-  - stereo input behavior adjusted so first repeat starts on opposite side.
-- Delay ducker added with user knob and expanded range.
-- Delay digital readout implemented and polished (updates in realtime; order/mode UX fixes).
+### 2) Amp-slot architecture milestone is functionally landed
+- Rig/Release workflow split exists.
+- Per-slot edit gating and fixed-slot path handling exist.
+- Release-mode preset restore no longer clears locked slots from stale preset paths.
+- Slot model source abstraction exists:
+  - `ExternalPath` for Rig mode
+  - `EmbeddedModelId` for Release mode scaffold
 
-### 3) FX UI/preset behavior polish
-- Delay/reverb UI refinements and control graphics updates.
-- Delay/reverb off-state visual behavior improved.
-- HP/LP defaults tuned (min/max).
-- Preset restore issues for FX control positions were fixed.
+### 3) Safer slot/preset transitions are in
+- Slot switching defers audio-thread swap until the target model is ready.
+- Preset recall prefers deterministic mute over old-model/new-parameter hybrid audio.
+- The active scene is not allowed to keep sounding under mismatched preset state.
 
-### 4) Amp-slot architecture foundation (committed)
-- Commit `439d946` added:
-  - Rig/Release workflow mode scaffold,
-  - slot edit lock policy,
-  - user-initiated edit gating,
-  - initial slot-path mutation helper centralization.
+### 4) First Release-mode "release-feel" scaffold is in
+- `NAM_RELEASE_MODE=0`:
+  - manual dev workflow
+  - manual model/IR loading remains available
+- `NAM_RELEASE_MODE=1`:
+  - fixed amp/stomp/cab asset behavior from controlled `tmpLoad` asset files
+  - amp slots resolve through embedded asset IDs internally
+  - manual browsing/clearing of those fixed assets is disabled or ignored
+- User manually confirmed in Release mode:
+  - Amp 1-3 load
+  - Boost loads
+  - Cab loads
+  - Those assets cannot currently be changed by the user
 
-### 5) Amp-slot architecture follow-up (uncommitted WIP)
-- Added fixed-slot path manifest scaffolding:
-  - per-slot fixed path storage,
-  - mode-aware effective-path resolver,
-  - startup/default slot mapping hookup,
-  - unserialization guards to avoid clearing locked release slots from empty preset paths.
-- Needs final code review + build validation before commit.
+## Important behavioral conclusion
+- Do not optimize further for seamless preset recall in the current external-loader path unless there is a very clear payoff.
+- The product direction is fixed/preloaded Release assets, not arbitrary user loading.
+- Long preset mute is currently accepted as the safer temporary behavior.
 
 ## Build/config baseline to preserve
 - Audio/performance validation: `Release | x64` only.
 - Standalone audio test: run without debugger (`Ctrl+F5`).
-- Do not evaluate DSP behavior/perf in Debug.
-- Do not run builds/tests unless user explicitly asks.
+- Do not evaluate DSP performance in Debug.
+- Do not run builds/tests unless the user explicitly asks.
+- Do not assume local `config.h` matches the committed default; the user may toggle mode locally while testing.
 
 ## Current policy notes
-- Non-negotiable RT rules still apply in audio thread:
-  - no allocations, locks, waits, file/network/UI/logging, or exceptions across callback.
+- Audio-thread rules still apply:
+  - no allocations
+  - no locks or waits
+  - no file/network/UI/logging in callback
+  - no exceptions across the callback
 - Keep diffs small and reviewable.
 - Dev-mode policy is active:
-  - breaking changes are allowed when they improve architecture/iteration speed.
+  - breaking changes are acceptable if they improve architecture or iteration speed
 
 ## Suggested next coding step
-1. Finalize and commit current uncommitted Milestone-6 WIP on `amp-slot-architecture`.
-2. Validate Rig mode (`NAM_RELEASE_MODE=0`) remains unchanged.
-3. Validate Release mode (`NAM_RELEASE_MODE=1`) fixed-slot behavior on preset restore.
-4. Then continue with model bundling/packaging milestone described in `FUTURE_PLAN.md`.
+1. Update roadmap docs if they drift again after future commits.
+2. Shift focus away from Release-mode asset plumbing for now.
+3. Start `Milestone E`: gate UX reshape (one-knob behavior).
+4. Revisit Release-mode asset variants later, once the final bundled model set and hardware-switch mapping are known.
 
-## Starter prompt for the next agent (copy/paste)
+## Starter prompt for the next agent
 You are continuing work in `D:\Dev\NAMPlugin` on branch `amp-slot-architecture`.
 
 Read first, in this exact order:
-1) `AGENTS.md`
-2) `SKILLS.md`
-3) `AGENT_SESSION_SUMMARY.md`
-4) `FUTURE_PLAN.md`
+1. `AGENTS.md`
+2. `SKILLS.md`
+3. `AGENT_SESSION_SUMMARY.md`
+4. `FUTURE_PLAN.md`
 
-Then confirm current git/submodule state before editing:
+Then confirm current repo/submodule state:
 - `git status --short`
 - `git branch --show-current`
 - `git rev-parse --short HEAD`
 - `git submodule status iPlug2`
 - `git -C iPlug2 remote -v`
 
-After reading instructions, summarize the guardrails you will follow:
-- RT safety in audio thread
-- minimal-diff policy
-- build/test policy (no builds unless explicitly requested)
-- dev-mode policy: breaking changes are allowed when they improve architecture/iteration speed
+Current direction:
+1. Do not resume old Milestone A cleanup; it is already landed.
+2. Treat Release mode as sufficiently scaffolded for now.
+3. Focus next on the gate UX remake unless the user explicitly redirects you.
 
 Task request:
-1) Review the uncommitted amp-slot architecture WIP and convert it into one minimal, safe commit.
-2) Verify Release-mode slot-lock behavior against preset restore edge cases.
-3) Propose and start the first minimal patch from the model-bundling strategy in `FUTURE_PLAN.md`.
+1. Inspect the current gate implementation and UI wiring.
+2. Propose a minimal one-knob gate remap that keeps DSP RT-safe.
+3. Implement the smallest reviewable patch for that gate behavior.
