@@ -73,6 +73,12 @@ constexpr double kStereoSideBypassReleaseSeconds = 0.03;
 constexpr int kStereoSideBypassResumeDeClickSamples = 64;
 constexpr size_t kMinInternalPreparedFrames = 16384;
 constexpr std::array<const char*, 3> kAmpSlotDefaultModelFileNames = {"Amp1.nam", "Amp2.nam", "Amp3.nam"};
+constexpr std::array<const char*, 3> kReleaseAmpAssetTokens = {"Amp1Main", "Amp2Main", "Amp3Main"};
+constexpr std::array<const char*, 3> kReleaseAmpAssetFileNames = {"Amp1.nam", "Amp2.nam", "Amp3.nam"};
+constexpr std::array<const char*, 1> kReleaseStompAssetTokens = {"Boost1"};
+constexpr std::array<const char*, 1> kReleaseStompAssetFileNames = {"Boost1.nam"};
+constexpr std::array<const char*, 1> kReleaseIRAssetTokens = {"Cab1"};
+constexpr std::array<const char*, 1> kReleaseIRAssetFileNames = {"Cab1.wav"};
 constexpr double kDelayManualTempoDefaultBPM = 120.0;
 constexpr double kDelayManualTempoMinBPM = 10.0;
 constexpr double kDelayManualTempoMaxBPM = 350.0;
@@ -95,6 +101,33 @@ struct StereoSideSilenceAnalysis
 {
   std::array<bool, 2> sideSilent = {false, false};
 };
+
+std::vector<std::filesystem::path> GetReleaseAssetCandidateDirs(const char* bundleId)
+{
+  std::vector<std::filesystem::path> candidateDirs = {
+    "NeuralAmpModeler/resources/tmpLoad", "resources/tmpLoad", "tmpLoad"
+  };
+
+  WDL_String hostPath;
+  HostPath(hostPath, bundleId);
+  if (hostPath.GetLength() <= 0)
+    return candidateDirs;
+
+  const std::filesystem::path hostDir(hostPath.Get());
+  candidateDirs.push_back(hostDir / "tmpLoad");
+  candidateDirs.push_back(hostDir / "resources" / "tmpLoad");
+
+  std::filesystem::path cursor = hostDir;
+  for (int depth = 0; depth < 10; ++depth)
+  {
+    candidateDirs.push_back(cursor / "NeuralAmpModeler" / "resources" / "tmpLoad");
+    candidateDirs.push_back(cursor / "resources" / "tmpLoad");
+    if (!cursor.has_parent_path())
+      break;
+    cursor = cursor.parent_path();
+  }
+  return candidateDirs;
+}
 
 EffectiveMonoInputAnalysis AnalyzeEffectiveMonoInputBlock(const sample* inputLeft, const sample* inputRight,
                                                           const size_t numFrames)
@@ -600,6 +633,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     source.kind = AmpSlotModelSourceKind::ExternalPath;
     source.value.Set("");
   }
+  for (auto& path : mReleaseAmpAssetPaths)
+    path.Set("");
+  for (auto& path : mReleaseStompAssetPaths)
+    path.Set("");
+  for (auto& path : mReleaseIRAssetPaths)
+    path.Set("");
 
   mMakeGraphicsFunc = [&]() {
 
@@ -1088,6 +1127,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     // IR loader button
     auto loadStompModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String&) {
+      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+        return;
       if (fileName.GetLength())
       {
         const std::string msg = _StageStompModel(fileName);
@@ -1109,6 +1150,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     // IR loader button
     auto loadIRLeftCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
+      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+        return;
       if (fileName.GetLength())
       {
         const dsp::wav::LoadReturnCode retCode = _StageIRLeft(fileName);
@@ -1128,6 +1171,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     };
 
     auto loadIRRightCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
+      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+        return;
       if (fileName.GetLength())
       {
         const dsp::wav::LoadReturnCode retCode = _StageIRRight(fileName);
@@ -2210,6 +2255,12 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** hpfPointers = mHighPass.Process(fxReverbPointers, numChannelsInternal, numFrames);
   // sample** lpfPointers = mLowPass.Process(hpfPointers, numChannelsInternal, numFrames);
 
+  if (mPresetRecallMuteActive.load(std::memory_order_acquire))
+  {
+    for (size_t c = 0; c < numChannelsInternal; ++c)
+      std::fill_n(hpfPointers[c], numFrames, 0.0f);
+  }
+
   // Smooth the first samples after an amp slot switch to reduce hard-step clicks.
   if (numFrames > 0)
   {
@@ -2282,96 +2333,117 @@ void NeuralAmpModeler::OnReset()
   }
 #endif
 
+  if (mAmpWorkflowMode == AmpWorkflowMode::Release && !mStartupDefaultLoadAttempted)
+  {
+    mStartupDefaultLoadAttempted = true;
+    _ApplyReleaseAssetManifestToState();
+
+    for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+    {
+      if (!mAmpNAMPaths[slotIndex].GetLength())
+        continue;
+      _RequestModelLoadForSlot(mAmpNAMPaths[slotIndex], slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex));
+      mAmpSlotStates[slotIndex].modelToggle = 1.0;
+      mAmpSlotStates[slotIndex].modelToggleTouched = true;
+    }
+    _ApplyAmpSlotState(mAmpSelectorIndex);
+    if (mStompModel == nullptr && mStagedStompModel == nullptr && mStompNAMPath.GetLength())
+      _StageStompModel(mStompNAMPath);
+    if (mIR == nullptr && mStagedIR == nullptr && mIRPath.GetLength())
+    {
+      mShouldRemoveIRLeft = false;
+      _StageIRLeft(mIRPath);
+    }
+    if (mIRRight == nullptr && mStagedIRRight == nullptr && mIRPathRight.GetLength())
+    {
+      mShouldRemoveIRRight = false;
+      _StageIRRight(mIRPathRight);
+    }
+  }
+
 #if defined(APP_API) && (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
   if (!mStartupDefaultLoadAttempted)
   {
     mStartupDefaultLoadAttempted = true;
 
-    const bool anyAmpSlotPath = std::any_of(
-      mAmpNAMPaths.begin(), mAmpNAMPaths.end(), [](const WDL_String& path) { return path.GetLength() > 0; });
-    const bool hasExistingPaths =
-      anyAmpSlotPath || (mNAMPath.GetLength() > 0) || (mStompNAMPath.GetLength() > 0) || (mIRPath.GetLength() > 0) ||
-      (mIRPathRight.GetLength() > 0);
-
-    if (!hasExistingPaths)
+    if (mAmpWorkflowMode == AmpWorkflowMode::Release)
     {
-      auto existsNoThrow = [](const std::filesystem::path& path) {
-        std::error_code ec;
-        const bool exists = std::filesystem::exists(path, ec);
-        return exists && !ec;
-      };
-      auto makeAbsoluteNoThrow = [](const std::filesystem::path& path) {
-        std::error_code ec;
-        const std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
-        return ec ? path : absolutePath;
-      };
-      auto setWdlPath = [](WDL_String& target, const std::filesystem::path& path) { target.Set(path.string().c_str()); };
-      auto hasAllDefaultFiles = [&](const std::filesystem::path& baseDir) {
-        return existsNoThrow(baseDir / "Amp1.nam") && existsNoThrow(baseDir / "Amp2.nam") &&
-               existsNoThrow(baseDir / "Amp3.nam") && existsNoThrow(baseDir / "Boost1.nam") &&
-               existsNoThrow(baseDir / "Cab1.wav");
-      };
+      _ApplyReleaseAssetManifestToState();
+    }
+    else
+    {
+      const bool anyAmpSlotPath = std::any_of(
+        mAmpNAMPaths.begin(), mAmpNAMPaths.end(), [](const WDL_String& path) { return path.GetLength() > 0; });
+      const bool hasExistingPaths =
+        anyAmpSlotPath || (mNAMPath.GetLength() > 0) || (mStompNAMPath.GetLength() > 0) || (mIRPath.GetLength() > 0) ||
+        (mIRPathRight.GetLength() > 0);
 
-      std::vector<std::filesystem::path> candidateDirs = {
-        "NeuralAmpModeler/resources/tmpLoad", "resources/tmpLoad", "tmpLoad"
-      };
+      if (!hasExistingPaths)
       {
-        WDL_String hostPath;
-        HostPath(hostPath, GetBundleID());
-        if (hostPath.GetLength() > 0)
-        {
-          const std::filesystem::path hostDir(hostPath.Get());
-          candidateDirs.push_back(hostDir / "tmpLoad");
-          candidateDirs.push_back(hostDir / "resources" / "tmpLoad");
+        auto existsNoThrow = [](const std::filesystem::path& path) {
+          std::error_code ec;
+          const bool exists = std::filesystem::exists(path, ec);
+          return exists && !ec;
+        };
+        auto makeAbsoluteNoThrow = [](const std::filesystem::path& path) {
+          std::error_code ec;
+          const std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
+          return ec ? path : absolutePath;
+        };
+        auto setWdlPath = [](WDL_String& target, const std::filesystem::path& path) { target.Set(path.string().c_str()); };
+        auto hasAllDefaultFiles = [&](const std::filesystem::path& baseDir) {
+          return existsNoThrow(baseDir / "Amp1.nam") && existsNoThrow(baseDir / "Amp2.nam") &&
+                 existsNoThrow(baseDir / "Amp3.nam") && existsNoThrow(baseDir / "Boost1.nam") &&
+                 existsNoThrow(baseDir / "Cab1.wav");
+        };
 
-          std::filesystem::path cursor = hostDir;
-          for (int depth = 0; depth < 10; ++depth)
+        const std::vector<std::filesystem::path> candidateDirs = GetReleaseAssetCandidateDirs(GetBundleID());
+        std::filesystem::path defaultsDir;
+        for (const auto& candidateDir : candidateDirs)
+        {
+          if (hasAllDefaultFiles(candidateDir))
           {
-            candidateDirs.push_back(cursor / "NeuralAmpModeler" / "resources" / "tmpLoad");
-            candidateDirs.push_back(cursor / "resources" / "tmpLoad");
-            if (!cursor.has_parent_path())
-              break;
-            cursor = cursor.parent_path();
+            defaultsDir = makeAbsoluteNoThrow(candidateDir);
+            break;
           }
         }
-      }
-      std::filesystem::path defaultsDir;
-      for (const auto& candidateDir : candidateDirs)
-      {
-        if (hasAllDefaultFiles(candidateDir))
-        {
-          defaultsDir = makeAbsoluteNoThrow(candidateDir);
-          break;
-        }
-      }
 
-      if (!defaultsDir.empty())
-      {
-        for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+        if (!defaultsDir.empty())
         {
-          WDL_String slotModelPath;
-          setWdlPath(slotModelPath, defaultsDir / kAmpSlotDefaultModelFileNames[slotIndex]);
-          _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
-          _SetAmpSlotModelPath(slotIndex, slotModelPath);
-        }
-        setWdlPath(mStompNAMPath, defaultsDir / "Boost1.nam");
-        setWdlPath(mIRPath, defaultsDir / "Cab1.wav");
-
-        for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
-        {
-          if (mAmpNAMPaths[slotIndex].GetLength())
+          for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
           {
-            _RequestModelLoadForSlot(mAmpNAMPaths[slotIndex], slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex));
-            mAmpSlotStates[slotIndex].modelToggle = 1.0;
-            mAmpSlotStates[slotIndex].modelToggleTouched = true;
+            WDL_String slotModelPath;
+            setWdlPath(slotModelPath, defaultsDir / kAmpSlotDefaultModelFileNames[slotIndex]);
+            _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
+            _SetAmpSlotModelPath(slotIndex, slotModelPath);
           }
+          setWdlPath(mStompNAMPath, defaultsDir / "Boost1.nam");
+          setWdlPath(mIRPath, defaultsDir / "Cab1.wav");
         }
-        _ApplyAmpSlotState(mAmpSelectorIndex);
-        if (mStompModel == nullptr && mStagedStompModel == nullptr)
-          _StageStompModel(mStompNAMPath);
-        if (mIR == nullptr && mStagedIR == nullptr)
-          _StageIRLeft(mIRPath);
       }
+    }
+
+    for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+    {
+      if (mAmpNAMPaths[slotIndex].GetLength())
+      {
+        _RequestModelLoadForSlot(mAmpNAMPaths[slotIndex], slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex));
+        mAmpSlotStates[slotIndex].modelToggle = 1.0;
+        mAmpSlotStates[slotIndex].modelToggleTouched = true;
+      }
+    }
+    _ApplyAmpSlotState(mAmpSelectorIndex);
+    if (mStompModel == nullptr && mStagedStompModel == nullptr && mStompNAMPath.GetLength())
+      _StageStompModel(mStompNAMPath);
+    if (mIR == nullptr && mStagedIR == nullptr && mIRPath.GetLength())
+    {
+      mShouldRemoveIRLeft = false;
+      _StageIRLeft(mIRPath);
+    }
+    if (mIRRight == nullptr && mStagedIRRight == nullptr && mIRPathRight.GetLength())
+    {
+      mShouldRemoveIRRight = false;
+      _StageIRRight(mIRPathRight);
     }
   }
 #endif
@@ -2995,13 +3067,17 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       return restoredPos;
     }
 
+    const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     mAmpSelectorIndex = std::clamp(static_cast<int>(activeSlot), 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+    _BeginPresetRecallTransition(previousActiveSlot, mAmpSelectorIndex);
     mAmpNAMPaths = ampPaths;
     mNAMPath = mAmpNAMPaths[mAmpSelectorIndex];
     mStompNAMPath = stompPath;
     mIRPath = irLeftPath;
     mIRPathRight = irRightPath;
     mAmpSlotStates = slotStates;
+    if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+      _ApplyReleaseAssetManifestToState();
 
     (void) topNavActiveSection;
     mTopNavBypassed = bypassed;
@@ -3032,12 +3108,18 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       mShouldRemoveStompModel = true;
 
     if (mIRPath.GetLength())
+    {
+      mShouldRemoveIRLeft = false;
       _StageIRLeft(mIRPath);
+    }
     else
       mShouldRemoveIRLeft = true;
 
     if (mIRPathRight.GetLength())
+    {
+      mShouldRemoveIRRight = false;
       _StageIRRight(mIRPathRight);
+    }
     else
       mShouldRemoveIRRight = true;
 
@@ -3074,10 +3156,15 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       }
       return restoredPos;
     }
+    const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+    _BeginPresetRecallTransition(previousActiveSlot, mAmpSelectorIndex);
     mNAMPath = legacyNAMPath;
     mIRPath = legacyIRPath;
     mIRPathRight = legacyIRRightPath;
-    _SetAmpSlotModelPath(mAmpSelectorIndex, mNAMPath);
+    if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+      _ApplyReleaseAssetManifestToState();
+    else
+      _SetAmpSlotModelPath(mAmpSelectorIndex, mNAMPath);
 
     const WDL_String effectiveLegacyPath = _ResolveAmpSlotModelPathForMode(mAmpSelectorIndex, mNAMPath);
     if (effectiveLegacyPath.GetLength())
@@ -3091,12 +3178,18 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     mPendingAmpSlotSwitch.store(mAmpSelectorIndex, std::memory_order_release);
 
     if (mIRPath.GetLength())
+    {
+      mShouldRemoveIRLeft = false;
       _StageIRLeft(mIRPath);
+    }
     else
       mShouldRemoveIRLeft = true;
 
     if (mIRPathRight.GetLength())
+    {
+      mShouldRemoveIRRight = false;
       _StageIRRight(mIRPathRight);
+    }
     else
       mShouldRemoveIRRight = true;
 
@@ -3193,11 +3286,18 @@ void NeuralAmpModeler::OnUIOpen()
 
   if (auto* pGraphics = GetUI())
   {
+    const bool canEditExternalAssets = (mAmpWorkflowMode != AmpWorkflowMode::Release);
     for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
     {
       if (auto* pSlotModelPicker = pGraphics->GetControlWithTag(_GetAmpModelCtrlTagForSlot(slotIndex)))
         pSlotModelPicker->SetDisabled(!_CanEditAmpSlotModel(slotIndex));
     }
+    if (auto* pStompPicker = pGraphics->GetControlWithTag(kCtrlTagStompModelFileBrowser))
+      pStompPicker->SetDisabled(!canEditExternalAssets);
+    if (auto* pIRLeftPicker = pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserLeft))
+      pIRLeftPicker->SetDisabled(!canEditExternalAssets || !GetParam(kIRToggle)->Bool());
+    if (auto* pIRRightPicker = pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight))
+      pIRRightPicker->SetDisabled(!canEditExternalAssets || !GetParam(kIRToggle)->Bool());
   }
 }
 
@@ -3249,7 +3349,8 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       case kStompBoostActive:
         if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
           pBoostOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        if (source == kUI && active && (mStompModel == nullptr) && (mStagedStompModel == nullptr))
+        if (source == kUI && active && (mAmpWorkflowMode != AmpWorkflowMode::Release) && (mStompModel == nullptr)
+            && (mStagedStompModel == nullptr))
         {
           WDL_String fileName;
           WDL_String path;
@@ -3335,10 +3436,13 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
         pGraphics->ForControlInGroup("EQ_KNOBS", [active](IControl* pControl) { pControl->SetDisabled(!active); });
         break;
       case kIRToggle:
-        pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserLeft)->SetDisabled(!active);
-        pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight)->SetDisabled(!active);
+      {
+        const bool disableIRBrowsers = !active || (mAmpWorkflowMode == AmpWorkflowMode::Release);
+        pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserLeft)->SetDisabled(disableIRBrowsers);
+        pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight)->SetDisabled(disableIRBrowsers);
         pGraphics->GetControlWithParamIdx(kCabIRBlend)->SetDisabled(!active);
         break;
+      }
       case kInputStereoMode:
         if (active)
         {
@@ -3441,16 +3545,22 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
       return true;
     }
     case kMsgTagClearStompModel:
+      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+        return true;
       mShouldRemoveStompModel = true;
       _ClearStompCapabilityState();
       _RefreshModelCapabilityIndicators();
       _MarkStandalonePresetDirty();
       return true;
     case kMsgTagClearIRLeft:
+      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+        return true;
       mShouldRemoveIRLeft = true;
       _MarkStandalonePresetDirty();
       return true;
     case kMsgTagClearIRRight:
+      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+        return true;
       mShouldRemoveIRRight = true;
       _MarkStandalonePresetDirty();
       return true;
@@ -3676,100 +3786,88 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
     return false;
 
 #if defined(APP_API) && (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
-  auto existsNoThrow = [](const std::filesystem::path& path) {
-    std::error_code ec;
-    const bool exists = std::filesystem::exists(path, ec);
-    return exists && !ec;
-  };
-  auto makeAbsoluteNoThrow = [](const std::filesystem::path& path) {
-    std::error_code ec;
-    const std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
-    return ec ? path : absolutePath;
-  };
-  auto setWdlPath = [](WDL_String& target, const std::filesystem::path& path) { target.Set(path.string().c_str()); };
-  auto hasAllDefaultFiles = [&](const std::filesystem::path& baseDir) {
-    return existsNoThrow(baseDir / "Amp1.nam") && existsNoThrow(baseDir / "Amp2.nam")
-           && existsNoThrow(baseDir / "Amp3.nam") && existsNoThrow(baseDir / "Boost1.nam")
-           && existsNoThrow(baseDir / "Cab1.wav");
-  };
-
-  std::vector<std::filesystem::path> candidateDirs = {"NeuralAmpModeler/resources/tmpLoad", "resources/tmpLoad", "tmpLoad"};
-  WDL_String hostPath;
-  HostPath(hostPath, GetBundleID());
-  if (hostPath.GetLength() > 0)
+  if (mAmpWorkflowMode == AmpWorkflowMode::Release)
   {
-    const std::filesystem::path hostDir(hostPath.Get());
-    candidateDirs.push_back(hostDir / "tmpLoad");
-    candidateDirs.push_back(hostDir / "resources" / "tmpLoad");
-
-    std::filesystem::path cursor = hostDir;
-    for (int depth = 0; depth < 10; ++depth)
-    {
-      candidateDirs.push_back(cursor / "NeuralAmpModeler" / "resources" / "tmpLoad");
-      candidateDirs.push_back(cursor / "resources" / "tmpLoad");
-      if (!cursor.has_parent_path())
-        break;
-      cursor = cursor.parent_path();
-    }
+    _ApplyReleaseAssetManifestToState();
   }
-
-  std::filesystem::path defaultsDir;
-  for (const auto& candidateDir : candidateDirs)
+  else
   {
-    if (hasAllDefaultFiles(candidateDir))
-    {
-      defaultsDir = makeAbsoluteNoThrow(candidateDir);
-      break;
-    }
-  }
+    auto existsNoThrow = [](const std::filesystem::path& path) {
+      std::error_code ec;
+      const bool exists = std::filesystem::exists(path, ec);
+      return exists && !ec;
+    };
+    auto makeAbsoluteNoThrow = [](const std::filesystem::path& path) {
+      std::error_code ec;
+      const std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
+      return ec ? path : absolutePath;
+    };
+    auto setWdlPath = [](WDL_String& target, const std::filesystem::path& path) { target.Set(path.string().c_str()); };
+    auto hasAllDefaultFiles = [&](const std::filesystem::path& baseDir) {
+      return existsNoThrow(baseDir / "Amp1.nam") && existsNoThrow(baseDir / "Amp2.nam")
+             && existsNoThrow(baseDir / "Amp3.nam") && existsNoThrow(baseDir / "Boost1.nam")
+             && existsNoThrow(baseDir / "Cab1.wav");
+    };
 
-  if (!defaultsDir.empty())
-  {
-    for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
-    {
-      WDL_String slotModelPath;
-      setWdlPath(slotModelPath, defaultsDir / kAmpSlotDefaultModelFileNames[slotIndex]);
-      _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
-      _SetAmpSlotModelPath(slotIndex, slotModelPath);
-    }
-    setWdlPath(mStompNAMPath, defaultsDir / "Boost1.nam");
-    setWdlPath(mIRPath, defaultsDir / "Cab1.wav");
-    mIRPathRight.Set("");
-  }
-
-  auto resolveDefaultCabIfMissing = [&]() {
-    const std::filesystem::path currentIRPath = makeAbsoluteNoThrow(std::filesystem::path(mIRPath.Get()));
-    if (mIRPath.GetLength() > 0 && existsNoThrow(currentIRPath))
-      return;
-
+    const std::vector<std::filesystem::path> candidateDirs = GetReleaseAssetCandidateDirs(GetBundleID());
+    std::filesystem::path defaultsDir;
     for (const auto& candidateDir : candidateDirs)
     {
-      const std::filesystem::path cabPath = candidateDir / "Cab1.wav";
-      if (!existsNoThrow(cabPath))
-        continue;
-      setWdlPath(mIRPath, makeAbsoluteNoThrow(cabPath));
-      mIRPathRight.Set("");
-      return;
+      if (hasAllDefaultFiles(candidateDir))
+      {
+        defaultsDir = makeAbsoluteNoThrow(candidateDir);
+        break;
+      }
     }
 
-    for (const auto& ampPath : mAmpNAMPaths)
+    if (!defaultsDir.empty())
     {
-      if (ampPath.GetLength() <= 0)
-        continue;
-      const std::filesystem::path ampFilePath = makeAbsoluteNoThrow(std::filesystem::path(ampPath.Get()));
-      if (!existsNoThrow(ampFilePath))
-        continue;
-
-      const std::filesystem::path cabPath = ampFilePath.parent_path() / "Cab1.wav";
-      if (!existsNoThrow(cabPath))
-        continue;
-
-      setWdlPath(mIRPath, makeAbsoluteNoThrow(cabPath));
+      for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+      {
+        WDL_String slotModelPath;
+        setWdlPath(slotModelPath, defaultsDir / kAmpSlotDefaultModelFileNames[slotIndex]);
+        _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
+        _SetAmpSlotModelPath(slotIndex, slotModelPath);
+      }
+      setWdlPath(mStompNAMPath, defaultsDir / "Boost1.nam");
+      setWdlPath(mIRPath, defaultsDir / "Cab1.wav");
       mIRPathRight.Set("");
-      return;
     }
-  };
-  resolveDefaultCabIfMissing();
+
+    auto resolveDefaultCabIfMissing = [&]() {
+      const std::filesystem::path currentIRPath = makeAbsoluteNoThrow(std::filesystem::path(mIRPath.Get()));
+      if (mIRPath.GetLength() > 0 && existsNoThrow(currentIRPath))
+        return;
+
+      for (const auto& candidateDir : candidateDirs)
+      {
+        const std::filesystem::path cabPath = candidateDir / "Cab1.wav";
+        if (!existsNoThrow(cabPath))
+          continue;
+        setWdlPath(mIRPath, makeAbsoluteNoThrow(cabPath));
+        mIRPathRight.Set("");
+        return;
+      }
+
+      for (const auto& ampPath : mAmpNAMPaths)
+      {
+        if (ampPath.GetLength() <= 0)
+          continue;
+        const std::filesystem::path ampFilePath = makeAbsoluteNoThrow(std::filesystem::path(ampPath.Get()));
+        if (!existsNoThrow(ampFilePath))
+          continue;
+
+        const std::filesystem::path cabPath = ampFilePath.parent_path() / "Cab1.wav";
+        if (!existsNoThrow(cabPath))
+          continue;
+
+        setWdlPath(mIRPath, makeAbsoluteNoThrow(cabPath));
+        mIRPathRight.Set("");
+        return;
+      }
+    };
+    resolveDefaultCabIfMissing();
+  }
 #endif
 
   const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
@@ -4307,6 +4405,20 @@ void NeuralAmpModeler::_StopModelLoadWorker()
     mModelLoadWorker.join();
 }
 
+void NeuralAmpModeler::_BeginPresetRecallTransition(int previousActiveSlot, int targetActiveSlot)
+{
+  previousActiveSlot = std::clamp(previousActiveSlot, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  targetActiveSlot = std::clamp(targetActiveSlot, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  mPresetRecallTargetSlot.store(targetActiveSlot, std::memory_order_release);
+  mPresetRecallMuteActive.store(true, std::memory_order_release);
+
+  // Preset recall should not continue rendering the previous scene under the new parameter state.
+  mShouldRemoveModelSlot[previousActiveSlot].store(true, std::memory_order_release);
+  mShouldRemoveStompModel.store(true, std::memory_order_release);
+  mShouldRemoveIRLeft.store(true, std::memory_order_release);
+  mShouldRemoveIRRight.store(true, std::memory_order_release);
+}
+
 void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag,
                                                 const bool userInitiated)
 {
@@ -4363,6 +4475,160 @@ bool NeuralAmpModeler::_CanEditAmpSlotModel(int slotIndex) const
   return !mAmpSlotModelEditLocked[static_cast<size_t>(slotIndex)];
 }
 
+bool NeuralAmpModeler::_EnsureReleaseAssetManifest()
+{
+  if (mReleaseAssetManifest.valid)
+    return true;
+
+  auto existsNoThrow = [](const std::filesystem::path& path) {
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(path, ec);
+    return exists && !ec;
+  };
+  auto makeAbsoluteNoThrow = [](const std::filesystem::path& path) {
+    std::error_code ec;
+    const std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
+    return ec ? path : absolutePath;
+  };
+  auto setWdlPath = [](WDL_String& target, const std::filesystem::path& path) { target.Set(path.string().c_str()); };
+
+  const auto candidateDirs = GetReleaseAssetCandidateDirs(GetBundleID());
+  std::filesystem::path assetsRoot;
+  for (const auto& candidateDir : candidateDirs)
+  {
+    bool haveAllAssets = true;
+    for (const char* fileName : kReleaseAmpAssetFileNames)
+      haveAllAssets = haveAllAssets && existsNoThrow(candidateDir / fileName);
+    for (const char* fileName : kReleaseStompAssetFileNames)
+      haveAllAssets = haveAllAssets && existsNoThrow(candidateDir / fileName);
+    for (const char* fileName : kReleaseIRAssetFileNames)
+      haveAllAssets = haveAllAssets && existsNoThrow(candidateDir / fileName);
+    if (!haveAllAssets)
+      continue;
+
+    assetsRoot = makeAbsoluteNoThrow(candidateDir);
+    break;
+  }
+
+  if (assetsRoot.empty())
+    return false;
+
+  mReleaseAssetManifest.valid = false;
+  mReleaseAssetManifest.ampSlots = {
+    ReleaseAmpAssetId::Amp1Main,
+    ReleaseAmpAssetId::Amp2Main,
+    ReleaseAmpAssetId::Amp3Main
+  };
+  mReleaseAssetManifest.stomp = ReleaseStompAssetId::Boost1;
+  mReleaseAssetManifest.irLeft = ReleaseIRAssetId::Cab1;
+  mReleaseAssetManifest.irRight = ReleaseIRAssetId::None;
+  mReleaseAssetManifest.rootPath.Set("");
+  mReleaseAssetManifest.valid = true;
+  setWdlPath(mReleaseAssetManifest.rootPath, assetsRoot);
+
+  mReleaseAmpAssetPaths[static_cast<size_t>(ReleaseAmpAssetId::None)].Set("");
+  for (size_t i = 0; i < kReleaseAmpAssetFileNames.size(); ++i)
+    setWdlPath(mReleaseAmpAssetPaths[i + 1], assetsRoot / kReleaseAmpAssetFileNames[i]);
+
+  mReleaseStompAssetPaths[static_cast<size_t>(ReleaseStompAssetId::None)].Set("");
+  for (size_t i = 0; i < kReleaseStompAssetFileNames.size(); ++i)
+    setWdlPath(mReleaseStompAssetPaths[i + 1], assetsRoot / kReleaseStompAssetFileNames[i]);
+
+  mReleaseIRAssetPaths[static_cast<size_t>(ReleaseIRAssetId::None)].Set("");
+  for (size_t i = 0; i < kReleaseIRAssetFileNames.size(); ++i)
+    setWdlPath(mReleaseIRAssetPaths[i + 1], assetsRoot / kReleaseIRAssetFileNames[i]);
+
+  return true;
+}
+
+void NeuralAmpModeler::_ApplyReleaseAssetManifestToState()
+{
+  if (!_EnsureReleaseAssetManifest())
+    return;
+
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mReleaseAssetManifest.ampSlots.size()); ++slotIndex)
+    _SetAmpSlotReleaseAsset(slotIndex, mReleaseAssetManifest.ampSlots[slotIndex]);
+
+  mStompNAMPath = _ResolveReleaseStompAssetPath(mReleaseAssetManifest.stomp);
+  mIRPath = _ResolveReleaseIRAssetPath(mReleaseAssetManifest.irLeft);
+  mIRPathRight = _ResolveReleaseIRAssetPath(mReleaseAssetManifest.irRight);
+}
+
+WDL_String NeuralAmpModeler::_ResolveReleaseAmpAssetPath(const ReleaseAmpAssetId assetId) const
+{
+  const size_t assetIndex = static_cast<size_t>(assetId);
+  if (assetIndex >= mReleaseAmpAssetPaths.size())
+  {
+    WDL_String emptyPath;
+    emptyPath.Set("");
+    return emptyPath;
+  }
+  WDL_String path;
+  path.Set(mReleaseAmpAssetPaths[assetIndex].Get());
+  return path;
+}
+
+WDL_String NeuralAmpModeler::_ResolveReleaseAmpAssetPathFromToken(const WDL_String& token) const
+{
+  for (size_t i = 0; i < kReleaseAmpAssetTokens.size(); ++i)
+  {
+    if (std::strcmp(token.Get(), kReleaseAmpAssetTokens[i]) == 0)
+      return _ResolveReleaseAmpAssetPath(static_cast<ReleaseAmpAssetId>(i + 1));
+  }
+
+  WDL_String emptyPath;
+  emptyPath.Set("");
+  return emptyPath;
+}
+
+WDL_String NeuralAmpModeler::_ResolveReleaseStompAssetPath(const ReleaseStompAssetId assetId) const
+{
+  const size_t assetIndex = static_cast<size_t>(assetId);
+  if (assetIndex >= mReleaseStompAssetPaths.size())
+  {
+    WDL_String emptyPath;
+    emptyPath.Set("");
+    return emptyPath;
+  }
+  WDL_String path;
+  path.Set(mReleaseStompAssetPaths[assetIndex].Get());
+  return path;
+}
+
+WDL_String NeuralAmpModeler::_ResolveReleaseIRAssetPath(const ReleaseIRAssetId assetId) const
+{
+  const size_t assetIndex = static_cast<size_t>(assetId);
+  if (assetIndex >= mReleaseIRAssetPaths.size())
+  {
+    WDL_String emptyPath;
+    emptyPath.Set("");
+    return emptyPath;
+  }
+  WDL_String path;
+  path.Set(mReleaseIRAssetPaths[assetIndex].Get());
+  return path;
+}
+
+void NeuralAmpModeler::_SetAmpSlotReleaseAsset(const int slotIndex, const ReleaseAmpAssetId assetId)
+{
+  const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  const WDL_String assetPath = _ResolveReleaseAmpAssetPath(assetId);
+  _SetAmpSlotFixedModelPath(clampedSlot, assetPath);
+
+  AmpSlotModelSource source;
+  source.kind = AmpSlotModelSourceKind::EmbeddedModelId;
+  const size_t assetIndex = static_cast<size_t>(assetId);
+  if (assetIndex > 0 && assetIndex <= kReleaseAmpAssetTokens.size())
+    source.value.Set(kReleaseAmpAssetTokens[assetIndex - 1]);
+  else
+    source.value.Set("");
+  _SetAmpSlotModelSource(clampedSlot, source);
+
+  mAmpNAMPaths[clampedSlot] = assetPath;
+  if (clampedSlot == mAmpSelectorIndex)
+    mNAMPath = assetPath;
+}
+
 WDL_String NeuralAmpModeler::_ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath) const
 {
   AmpSlotModelSource requestedSource;
@@ -4388,10 +4654,7 @@ WDL_String NeuralAmpModeler::_ResolveAmpSlotModelSourceToPathForMode(int slotInd
 
   if (effectiveSource.kind == AmpSlotModelSourceKind::EmbeddedModelId)
   {
-    // Milestone-B scaffold: embedded model ids are not materialized to loadable paths yet.
-    WDL_String emptyPath;
-    emptyPath.Set("");
-    return emptyPath;
+    return _ResolveReleaseAmpAssetPathFromToken(effectiveSource.value);
   }
 
   WDL_String path;
@@ -4809,6 +5072,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
           && mAmpSlotModelState[slotIndex].load(std::memory_order_acquire) == kAmpSlotModelStateEmpty)
         mNAMPath.Set("");
       mModelCleared = true;
+      triggerOutputDeClick = true;
       updateActiveModelGainsAndLatency();
     }
   }
@@ -4851,6 +5115,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
         mNAMPath = mAmpNAMPaths[slotIndex];
       mNewModelLoadedInDSP = true;
       mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
+      triggerOutputDeClick = true;
       updateActiveModelGainsAndLatency();
     }
     else
@@ -4999,6 +5264,24 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mIRPathRight = mStagedIRPathRight;
     mStagedIRPathRight.Set("");
     triggerOutputDeClick = true;
+  }
+
+  if (mPresetRecallMuteActive.load(std::memory_order_acquire))
+  {
+    const int targetSlot =
+      std::clamp(mPresetRecallTargetSlot.load(std::memory_order_acquire), 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+    const int targetState = mAmpSlotModelState[targetSlot].load(std::memory_order_acquire);
+    const bool targetHasPath = (mAmpNAMPaths[targetSlot].GetLength() > 0);
+    const bool targetReady = targetHasPath && (targetState == kAmpSlotModelStateReady) && (mCurrentModelSlot == targetSlot)
+                             && (mModel != nullptr) && (!inputStereoMode || mModelRight != nullptr);
+    const bool targetSettledWithoutModel = !targetHasPath || (targetState == kAmpSlotModelStateEmpty)
+                                           || (targetState == kAmpSlotModelStateFailed);
+    if (targetReady || targetSettledWithoutModel)
+    {
+      mPresetRecallMuteActive.store(false, std::memory_order_release);
+      mPresetRecallTargetSlot.store(-1, std::memory_order_release);
+      triggerOutputDeClick = true;
+    }
   }
 
   if (triggerOutputDeClick)

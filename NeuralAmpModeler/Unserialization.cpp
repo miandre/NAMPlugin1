@@ -22,6 +22,7 @@
 
 void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
 {
+  const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
   auto getStringOrEmpty = [&](const char* key) -> std::string {
     auto it = config.find(key);
     if (it != config.end() && it->is_string())
@@ -73,19 +74,29 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
     mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
     mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
     mSlotLoadRequestId[slotIndex].fetch_add(1, std::memory_order_relaxed);
-    // Keep the active slot's live DSP until replacement is ready to avoid preset-switch dropouts.
+    // Non-active slots can be cleared immediately; the previous active scene is removed by the preset-transition gate.
     const bool clearSlotNow = (slotIndex != activeSlot);
     mShouldRemoveModelSlot[slotIndex].store(clearSlotNow, std::memory_order_relaxed);
   }
+  _BeginPresetRecallTransition(previousActiveSlot, activeSlot);
 
   mNAMPath.Set(getStringOrEmpty("NAMPath").c_str());
   mIRPath.Set(getStringOrEmpty("IRPath").c_str());
   _ClearStompCapabilityState();
+  auto irPathRightIt = config.find("IRPathRight");
+  if (irPathRightIt != config.end() && irPathRightIt->is_string())
+    mIRPathRight.Set(irPathRightIt->get<std::string>().c_str());
+  else
+    mIRPathRight.Set("");
+
+  if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+    _ApplyReleaseAssetManifestToState();
 
   const WDL_String effectiveActiveSlotPath = _ResolveAmpSlotModelPathForMode(activeSlot, mNAMPath);
   if (effectiveActiveSlotPath.GetLength())
   {
-    _SetAmpSlotModelPath(activeSlot, mNAMPath);
+    if (mAmpWorkflowMode != AmpWorkflowMode::Release)
+      _SetAmpSlotModelPath(activeSlot, mNAMPath);
     _RequestModelLoadForSlot(mNAMPath, activeSlot, _GetAmpModelCtrlTagForSlot(activeSlot));
     mAmpSlotStates[activeSlot].modelToggle = 1.0;
     mAmpSlotStates[activeSlot].modelToggleTouched = true;
@@ -99,18 +110,20 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
 
   if (mIRPath.GetLength())
   {
+    mShouldRemoveIRLeft = false;
     _StageIRLeft(mIRPath);
   }
   else
   {
     mShouldRemoveIRLeft = true;
   }
-  auto irPathRightIt = config.find("IRPathRight");
   if (irPathRightIt != config.end() && irPathRightIt->is_string())
   {
-    mIRPathRight.Set(irPathRightIt->get<std::string>().c_str());
     if (mIRPathRight.GetLength())
+    {
+      mShouldRemoveIRRight = false;
       _StageIRRight(mIRPathRight);
+    }
   }
   else
   {

@@ -350,6 +350,43 @@ private:
     WDL_String value;
   };
 
+  enum class ReleaseAmpAssetId : int
+  {
+    None = 0,
+    Amp1Main,
+    Amp2Main,
+    Amp3Main,
+    Count
+  };
+
+  enum class ReleaseStompAssetId : int
+  {
+    None = 0,
+    Boost1,
+    Count
+  };
+
+  enum class ReleaseIRAssetId : int
+  {
+    None = 0,
+    Cab1,
+    Count
+  };
+
+  struct ReleaseAssetManifest
+  {
+    bool valid = false;
+    std::array<ReleaseAmpAssetId, 3> ampSlots = {
+      ReleaseAmpAssetId::Amp1Main,
+      ReleaseAmpAssetId::Amp2Main,
+      ReleaseAmpAssetId::Amp3Main
+    };
+    ReleaseStompAssetId stomp = ReleaseStompAssetId::Boost1;
+    ReleaseIRAssetId irLeft = ReleaseIRAssetId::Cab1;
+    ReleaseIRAssetId irRight = ReleaseIRAssetId::None;
+    WDL_String rootPath;
+  };
+
   // Allocates mInputPointers and mOutputPointers
   void _AllocateIOPointers(const size_t nChans);
   // Moves DSP modules from staging area to the main area.
@@ -427,7 +464,15 @@ private:
   void _ApplyAmpSlotState(int slotIndex);
   void _ApplyAmpSlotStateToToneStack(int slotIndex);
   void _ApplyCurrentAmpParamsToActiveToneStack();
+  void _BeginPresetRecallTransition(int previousActiveSlot, int targetActiveSlot);
   bool _CanEditAmpSlotModel(int slotIndex) const;
+  bool _EnsureReleaseAssetManifest();
+  void _ApplyReleaseAssetManifestToState();
+  WDL_String _ResolveReleaseAmpAssetPath(ReleaseAmpAssetId assetId) const;
+  WDL_String _ResolveReleaseAmpAssetPathFromToken(const WDL_String& token) const;
+  WDL_String _ResolveReleaseStompAssetPath(ReleaseStompAssetId assetId) const;
+  WDL_String _ResolveReleaseIRAssetPath(ReleaseIRAssetId assetId) const;
+  void _SetAmpSlotReleaseAsset(int slotIndex, ReleaseAmpAssetId assetId);
   WDL_String _ResolveAmpSlotModelSourceToPathForMode(int slotIndex, const AmpSlotModelSource& requestedSource) const;
   WDL_String _ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath) const;
   void _SetAmpSlotModelSource(int slotIndex, const AmpSlotModelSource& source);
@@ -533,6 +578,10 @@ private:
   std::array<bool, 3> mAmpSlotModelEditLocked = {false, false, false};
   std::array<WDL_String, 3> mAmpSlotFixedModelPaths;
   std::array<AmpSlotModelSource, 3> mAmpSlotModelSources;
+  ReleaseAssetManifest mReleaseAssetManifest;
+  std::array<WDL_String, static_cast<size_t>(ReleaseAmpAssetId::Count)> mReleaseAmpAssetPaths;
+  std::array<WDL_String, static_cast<size_t>(ReleaseStompAssetId::Count)> mReleaseStompAssetPaths;
+  std::array<WDL_String, static_cast<size_t>(ReleaseIRAssetId::Count)> mReleaseIRAssetPaths;
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false, false};
   int mAmpSelectorIndex = 1;
@@ -596,6 +645,8 @@ private:
   std::condition_variable mModelLoadCV;
   std::deque<ModelLoadJob> mModelLoadJobs;
   bool mModelLoadWorkerExit = false;
+  std::atomic<bool> mPresetRecallMuteActive{false};
+  std::atomic<int> mPresetRecallTargetSlot{-1};
   std::atomic<int> mAmpSwitchDeClickSamplesRemaining = 0;
   std::array<double, kNumChannelsInternal> mAmpSwitchDeClickPrevSample = {};
   TunerAnalyzer mTunerAnalyzer;
