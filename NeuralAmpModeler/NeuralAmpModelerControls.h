@@ -129,6 +129,40 @@ private:
   IColor mOffColor;
 };
 
+class NAMOutlinedLEDControl : public IControl
+{
+public:
+  NAMOutlinedLEDControl(const IRECT& bounds,
+                        const IColor& onFillColor = COLOR_WHITE.WithOpacity(0.92f),
+                        const IColor& offOutlineColor = COLOR_WHITE.WithOpacity(0.92f),
+                        const IColor& onOutlineColor = COLOR_WHITE.WithOpacity(0.92f))
+  : IControl(bounds)
+  , mOnFillColor(onFillColor)
+  , mOffOutlineColor(offOutlineColor)
+  , mOnOutlineColor(onOutlineColor)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const float radius = static_cast<float>((mRECT.W() < mRECT.H() ? mRECT.W() : mRECT.H()) * 0.34f);
+    const float cx = mRECT.MW();
+    const float cy = mRECT.MH();
+    const bool isOn = GetValue() > 0.5;
+
+    if (isOn)
+      g.FillCircle(mOnFillColor, cx, cy, radius, &mBlend);
+
+    g.DrawCircle(isOn ? mOnOutlineColor : mOffOutlineColor, cx, cy, radius, &mBlend, 1.4f);
+  }
+
+private:
+  IColor mOnFillColor;
+  IColor mOffOutlineColor;
+  IColor mOnOutlineColor;
+};
+
 class NAMBitmapLEDControl : public IControl
 {
 public:
@@ -599,6 +633,147 @@ private:
   float mKnobScale = 1.0f;
   float mLabelYOffset = 0.0f;
   float mValueYOffset = 0.0f;
+};
+
+class NAMDeactivatableKnobControl : public NAMKnobControl
+{
+public:
+  NAMDeactivatableKnobControl(const IRECT& bounds, int valueParamIdx, int activeParamIdx, const char* label, const IVStyle& style,
+                              const IBitmap& bitmap, bool drawIndicatorTrack = true, bool useDarkIndicatorDot = false,
+                              float knobScale = 1.0f, float labelYOffset = 0.0f, float valueYOffset = 0.0f)
+  : NAMKnobControl(bounds,
+                   kNoParameter,
+                   label,
+                   style,
+                   bitmap,
+                   drawIndicatorTrack,
+                   useDarkIndicatorDot,
+                   knobScale,
+                   labelYOffset,
+                   valueYOffset)
+  , mValueParamIdx(valueParamIdx)
+  , mActiveParamIdx(activeParamIdx)
+  {
+  }
+
+  NAMDeactivatableKnobControl(const IRECT& bounds, int valueParamIdx, int activeParamIdx, const char* label, const IVStyle& style,
+                              const ISVG& svg, bool drawIndicatorTrack = true, bool useDarkIndicatorDot = false,
+                              float knobScale = 1.0f, float labelYOffset = 0.0f, float valueYOffset = 0.0f)
+  : NAMKnobControl(bounds,
+                   kNoParameter,
+                   label,
+                   style,
+                   svg,
+                   drawIndicatorTrack,
+                   useDarkIndicatorDot,
+                   knobScale,
+                   labelYOffset,
+                   valueYOffset)
+  , mValueParamIdx(valueParamIdx)
+  , mActiveParamIdx(activeParamIdx)
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    _SyncValueFromDelegate();
+    NAMKnobControl::Draw(g);
+
+    if (!_IsActive())
+    {
+      const IRECT dimRect = mWidgetBounds.GetCentredInside(mWidgetBounds.W(), mWidgetBounds.W()).GetScaledAboutCentre(0.92f);
+      g.FillEllipse(COLOR_BLACK.WithOpacity(0.42f), dimRect, &mBlend);
+    }
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    if (IsDisabled())
+      return;
+    if (mod.C || mod.R)
+    {
+      _ToggleActive();
+      SetDirty(false);
+      return;
+    }
+    _SyncValueFromDelegate();
+    if (auto* pDelegate = GetDelegate())
+      pDelegate->BeginInformHostOfParamChangeFromUI(mValueParamIdx);
+    mInformingHost = true;
+    NAMKnobControl::OnMouseDown(x, y, mod);
+  }
+
+  void OnMouseDrag(float x, float y, float dX, float dY, const IMouseMod& mod) override
+  {
+    NAMKnobControl::OnMouseDrag(x, y, dX, dY, mod);
+    _SendValueToDelegate();
+  }
+
+  void OnMouseWheel(float x, float y, const IMouseMod& mod, float d) override
+  {
+    if (IsDisabled())
+      return;
+
+    _SyncValueFromDelegate();
+    if (auto* pDelegate = GetDelegate())
+      pDelegate->BeginInformHostOfParamChangeFromUI(mValueParamIdx);
+    NAMKnobControl::OnMouseWheel(x, y, mod, d);
+    _SendValueToDelegate();
+    if (auto* pDelegate = GetDelegate())
+      pDelegate->EndInformHostOfParamChangeFromUI(mValueParamIdx);
+    SetDirty(false);
+  }
+
+  void OnMouseUp(float x, float y, const IMouseMod& mod) override
+  {
+    NAMKnobControl::OnMouseUp(x, y, mod);
+    _SendValueToDelegate();
+    if (mInformingHost)
+    {
+      if (auto* pDelegate = GetDelegate())
+        pDelegate->EndInformHostOfParamChangeFromUI(mValueParamIdx);
+      mInformingHost = false;
+    }
+  }
+
+private:
+  void _SyncValueFromDelegate()
+  {
+    if (const auto* pDelegate = GetDelegate())
+      if (const auto* pParam = pDelegate->GetParam(mValueParamIdx))
+        SetValue(pParam->GetNormalized());
+  }
+
+  void _SendValueToDelegate()
+  {
+    if (auto* pDelegate = GetDelegate())
+      pDelegate->SendParameterValueFromUI(mValueParamIdx, GetValue());
+  }
+
+  bool _IsActive()
+  {
+    if (const auto* pDelegate = GetDelegate())
+      if (const auto* pParam = pDelegate->GetParam(mActiveParamIdx))
+        return pParam->Bool();
+    return true;
+  }
+
+  void _ToggleActive()
+  {
+    if (auto* pDelegate = GetDelegate())
+    {
+      if (const auto* pParam = pDelegate->GetParam(mActiveParamIdx))
+      {
+        pDelegate->BeginInformHostOfParamChangeFromUI(mActiveParamIdx);
+        pDelegate->SendParameterValueFromUI(mActiveParamIdx, pParam->Bool() ? 0.0 : 1.0);
+        pDelegate->EndInformHostOfParamChangeFromUI(mActiveParamIdx);
+      }
+    }
+  }
+
+  int mValueParamIdx = kNoParameter;
+  int mActiveParamIdx = kNoParameter;
+  bool mInformingHost = false;
 };
 
 class NAMPedalKnobControl : public IVKnobControl

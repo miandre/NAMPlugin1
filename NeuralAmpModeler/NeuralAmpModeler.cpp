@@ -102,6 +102,33 @@ struct StereoSideSilenceAnalysis
   std::array<bool, 2> sideSilent = {false, false};
 };
 
+struct NoiseGateMacroParams
+{
+  double timeSeconds = 0.05;
+  double thresholdDB = -72.0;
+  double ratio = 1.4;
+  double openTimeSeconds = 0.02;
+  double holdTimeSeconds = 0.045;
+  double closeTimeSeconds = 0.125;
+};
+
+NoiseGateMacroParams GetNoiseGateMacroParams(const double gateAmountPercent)
+{
+  const double normalized = std::clamp(gateAmountPercent * 0.01, 0.0, 1.0);
+  const double inverse = 1.0 - normalized;
+  const double thresholdShape = 1.0 - inverse * inverse;
+  const double timingShape = 0.5 * ((1.0 - inverse * inverse) + (1.0 - inverse * inverse * inverse));
+
+  NoiseGateMacroParams params;
+  params.timeSeconds = 0.05 - 0.02 * timingShape;
+  params.thresholdDB = -72.0 + 34.0 * thresholdShape;
+  params.ratio = 1.4 + 0.9 * thresholdShape;
+  params.openTimeSeconds = 0.02;
+  params.holdTimeSeconds = 0.045 - 0.032 * timingShape;
+  params.closeTimeSeconds = 0.190 - 0.09 * timingShape;
+  return params;
+}
+
 std::vector<std::filesystem::path> GetReleaseAssetCandidateDirs(const char* bundleId)
 {
   std::vector<std::filesystem::path> candidateDirs = {
@@ -546,7 +573,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kTransposeSemitones)->InitDouble("Transpose", 0.0, -8.0, 8.0, 1.0, "");
   GetParam(kInputStereoMode)->InitBool("Input Stereo", false);
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
-  GetParam(kNoiseGateThreshold)->InitGain("Threshold", -50.0, -80.0, 0.0, 0.1);
+  GetParam(kNoiseGateThreshold)->InitDouble("Gate", 35.0, 0.0, 100.0, 0.1, "%");
   GetParam(kNoiseGateReleaseMs)->InitDouble("Gate Release", 40.0, 1.0, 100.0, 1.0, "");
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
   GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
@@ -697,8 +724,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto eqFaderKnobBitmap = pGraphics->LoadBitmap(EQFADERKNOB_FN);
     const auto stompButtonUpBitmap = pGraphics->LoadBitmap(STOMPBUTTONUP_FN);
     const auto stompButtonDownBitmap = pGraphics->LoadBitmap(STOMPBUTTONDOWN_FN);
-    const auto greenLedOnBitmap = pGraphics->LoadBitmap(GREENLEDON_FN);
-    const auto greenLedOffBitmap = pGraphics->LoadBitmap(GREENLEDOFF_FN);
     const auto redLedOnBitmap = pGraphics->LoadBitmap(REDLEDON_FN);
     const auto redLedOffBitmap = pGraphics->LoadBitmap(REDLEDOFF_FN);
     const auto smallOnOffOffBitmap = pGraphics->LoadBitmap(SMALLONOFF_OFF_FN);
@@ -765,11 +790,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float topSideFilterGapX = 82.0f;
     const float leftInputCenterX = contentArea.L + topSideKnobCenterInset;
     const float rightOutputCenterX = contentArea.R - topSideKnobCenterInset;
-    const float leftTransposeCenterX = leftInputCenterX + topSideFilterGapX;
+    const float leftGateCenterX = leftInputCenterX + topSideFilterGapX;
 
     const auto inputKnobArea = makeKnobArea(leftInputCenterX, topSideKnobTop);
-    const auto transposeKnobArea = makeKnobArea(leftTransposeCenterX, topSideKnobTop);
+    const auto topGateKnobArea = makeKnobArea(leftGateCenterX, topSideKnobTop);
     const auto outputKnobArea = makeKnobArea(rightOutputCenterX, topSideKnobTop);
+    const auto topGateAttenuationLedArea =
+      IRECT(topGateKnobArea.MW() - 6.0f, topGateKnobArea.MH() + 24.0f, topGateKnobArea.MW() + 6.0f, topGateKnobArea.MH() + 36.0f);
 
     // Amp-face controls (independent group)
     const float frontKnobTop = ampFaceArea.T + 150.0f;
@@ -804,31 +831,19 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     constexpr float kStompButtonAnchorOffsetY = 0.0f;
     const auto designToUIX = [&](const float x) { return b.L + (x / kDesignW) * b.W(); };
     const auto designToUIY = [&](const float y) { return b.T + kBackgroundOffsetY + (y / kDesignH) * b.H(); };
-    const float stompGateThresholdX = designToUIX(1020.0f);
-    const float stompGateReleaseX = designToUIX(1267.0f);
     const float stompBoostLevelX = designToUIX(1975.0f);
     const float stompKnobY = designToUIY(975.0f) + kStompKnobAnchorOffsetY;
-    const float stompGateSwitchX = designToUIX(1140.0f);
     const float stompBoostSwitchX = designToUIX(1976.0f);
     const float stompSwitchY = designToUIY(1476.0f) + kStompButtonAnchorOffsetY;
-    const auto stompGateThresholdArea = makePedalKnobArea(stompGateThresholdX, stompKnobY);
-    const auto stompGateReleaseArea = makePedalKnobArea(stompGateReleaseX, stompKnobY);
     const auto stompBoostLevelArea = makePedalKnobArea(stompBoostLevelX, stompKnobY);
     const float stompButtonScale = 0.15f;
     const float stompButtonW =
       stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.W()) * stompButtonScale : 46.0f;
     const float stompButtonH =
       stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.H()) * stompButtonScale : 30.0f;
-    const auto stompGateSwitchArea =
-      IRECT(stompGateSwitchX - 0.5f * stompButtonW, stompSwitchY - 0.5f * stompButtonH, stompGateSwitchX + 0.5f * stompButtonW,
-            stompSwitchY + 0.5f * stompButtonH);
     const auto stompBoostSwitchArea =
       IRECT(stompBoostSwitchX - 0.5f * stompButtonW, stompSwitchY - 0.5f * stompButtonH, stompBoostSwitchX + 0.5f * stompButtonW,
             stompSwitchY + 0.5f * stompButtonH);
-    const auto stompGateOnLedArea = IRECT(stompGateSwitchArea.MW() - 7.0f, stompGateSwitchArea.B + 11.0f,
-                                          stompGateSwitchArea.MW() + 7.0f, stompGateSwitchArea.B + 25.0f);
-    const auto stompGateActiveLedArea = IRECT(stompGateSwitchArea.MW() - 7.0f, stompGateThresholdArea.B + 6.0f,
-                                              stompGateSwitchArea.MW() + 7.0f, stompGateThresholdArea.B + 20.0f);
     const auto stompBoostOnLedArea = IRECT(stompBoostSwitchArea.MW() - 7.0f, stompBoostSwitchArea.B + 11.0f,
                                            stompBoostSwitchArea.MW() + 7.0f, stompBoostSwitchArea.B + 25.0f);
     // FX section coordinates come from the same 3x design canvas used by the stomp section.
@@ -919,7 +934,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     constexpr float kInputModeSwitchCenterYOffset = 0.0f;
     constexpr float kInputModeSwitchWidth = 38.0f;
     constexpr float kInputModeSwitchHeight = 20.0f;
-    const float inputModeSwitchCenterX = leftTransposeCenterX + kInputModeSwitchCenterXOffset;
+    const float inputModeSwitchCenterX = leftGateCenterX + kInputModeSwitchCenterXOffset;
     const float inputModeSwitchCenterY = topUtilityRowArea.MH() + kInputModeSwitchCenterYOffset;
     const auto inputModeSwitchArea = IRECT(inputModeSwitchCenterX - 0.5f * kInputModeSwitchWidth,
                                            inputModeSwitchCenterY - 0.5f * kInputModeSwitchHeight,
@@ -1338,16 +1353,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                                    {}),
                              kCtrlTagAmpSlot3)
       ->SetTooltip("Amp Slot 3");
-    pGraphics->AttachControl(
-      new NAMMomentaryBitmapButtonControl(stompGateSwitchArea, kNoiseGateActive, stompButtonUpBitmap, stompButtonDownBitmap),
-      -1,
-      "STOMP_CONTROLS");
-    pGraphics->AttachControl(new NAMBitmapLEDControl(stompGateOnLedArea, redLedOnBitmap, redLedOffBitmap),
-                             kCtrlTagGateOnLED,
-                             "STOMP_CONTROLS");
-    pGraphics->AttachControl(new NAMBitmapLEDControl(stompGateActiveLedArea, greenLedOnBitmap, greenLedOffBitmap),
-                             kCtrlTagNoiseGateLED,
-                             "STOMP_CONTROLS");
+    pGraphics->AttachControl(new NAMOutlinedLEDControl(topGateAttenuationLedArea),
+                             kCtrlTagNoiseGateLED);
     pGraphics->AttachControl(
       new NAMMomentaryBitmapButtonControl(stompBoostSwitchArea, kStompBoostActive, stompButtonUpBitmap, stompButtonDownBitmap),
       -1,
@@ -1395,19 +1402,20 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new NAMKnobControl(
       inputKnobArea, kInputLevel, "INPUT", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale, kSideLabelYOffset,
       kSideValueYOffset));
-    pGraphics->AttachControl(new NAMKnobControl(
-      transposeKnobArea, kTransposeSemitones, "TRANSPOSE", utilityStyle, outerKnobBackgroundSVG, true, false,
-      topSideKnobScale, kSideLabelYOffset, kSideValueYOffset));
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(stompGateThresholdArea, kNoiseGateThreshold, "THRESH", utilityStyle, pedalKnobBitmap,
-                              pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
-      -1,
-      "STOMP_CONTROLS");
-    pGraphics->AttachControl(
-      new NAMPedalKnobControl(stompGateReleaseArea, kNoiseGateReleaseMs, "RELEASE", utilityStyle, pedalKnobBitmap,
-                              pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
-      -1,
-      "STOMP_CONTROLS");
+      new NAMDeactivatableKnobControl(
+        topGateKnobArea,
+        kNoiseGateThreshold,
+        kNoiseGateActive,
+        "GATE",
+        utilityStyle,
+        outerKnobBackgroundSVG,
+        true,
+        false,
+        topSideKnobScale,
+        kSideLabelYOffset,
+        kSideValueYOffset))
+      ->SetTooltip("Noise gate amount. Ctrl-click or right-click toggles the gate on/off.");
     pGraphics->AttachControl(
       new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "LEVEL", utilityStyle, pedalKnobBitmap,
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
@@ -1835,7 +1843,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool haveModelForCore = (numChannelsMonoCore == 1) ? (mModel != nullptr) : haveStereoModel;
   const bool tunerActive = GetParam(kTunerActive)->Bool();
   const int transposeSemitones = static_cast<int>(std::lround(GetParam(kTransposeSemitones)->Value()));
-  const double gateReleaseValue = GetParam(kNoiseGateReleaseMs)->Value() * 0.2;
+  const NoiseGateMacroParams gateMacro = GetNoiseGateMacroParams(GetParam(kNoiseGateThreshold)->Value());
   const double boostLevelGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
   const double preModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
 
@@ -1880,12 +1888,12 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** triggerOutput = mInputPointers;
   if (noiseGateActive)
   {
-    const double time = 0.03;
-    const double threshold = GetParam(kNoiseGateThreshold)->Value(); // GetParam...
-    const double ratio = 1.5; // Quadratic...
-    const double openTime = 0.03;
-    const double holdTime = gateReleaseValue * 0.2;
-    const double closeTime = gateReleaseValue;
+    const double time = gateMacro.timeSeconds;
+    const double threshold = gateMacro.thresholdDB;
+    const double ratio = gateMacro.ratio;
+    const double openTime = gateMacro.openTimeSeconds;
+    const double holdTime = gateMacro.holdTimeSeconds;
+    const double closeTime = gateMacro.closeTimeSeconds;
     const dsp::noise_gate::TriggerParams triggerParams(time, threshold, ratio, openTime, holdTime, closeTime);
     mNoiseGateTrigger.SetParams(triggerParams);
     mNoiseGateTrigger.SetSampleRate(sampleRate);
@@ -2815,8 +2823,6 @@ void NeuralAmpModeler::OnIdle()
 
   if (auto* pGraphics = GetUI())
   {
-    if (auto* pGateOnLED = pGraphics->GetControlWithTag(kCtrlTagGateOnLED))
-      pGateOnLED->SetValueFromDelegate(GetParam(kNoiseGateActive)->Bool() ? 1.0 : 0.0, 0);
     if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
       pBoostOnLED->SetValueFromDelegate(GetParam(kStompBoostActive)->Bool() ? 1.0 : 0.0, 0);
   }
@@ -3342,10 +3348,6 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
 
     switch (paramIdx)
     {
-      case kNoiseGateActive:
-        if (auto* pGateOnLED = pGraphics->GetControlWithTag(kCtrlTagGateOnLED))
-          pGateOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        break;
       case kStompBoostActive:
         if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
           pBoostOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
@@ -4861,10 +4863,6 @@ void NeuralAmpModeler::_RefreshTopNavControls()
 
     if (auto* pModelToggle = pGraphics->GetControlWithParamIdx(kModelToggle))
       pModelToggle->Hide(!showAmpSection);
-    if (auto* pNoiseGateLED = pGraphics->GetControlWithTag(kCtrlTagNoiseGateLED))
-      pNoiseGateLED->Hide(!showStompSection);
-    if (auto* pGateOnLED = pGraphics->GetControlWithTag(kCtrlTagGateOnLED))
-      pGateOnLED->Hide(!showStompSection);
     if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
       pBoostOnLED->Hide(!showStompSection);
     pGraphics->ForControlInGroup("STOMP_CONTROLS", [showStompSection](IControl* pControl) {
