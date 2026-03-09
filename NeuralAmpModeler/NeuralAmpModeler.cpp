@@ -714,7 +714,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto settingsBackgroundBitmap = pGraphics->LoadBitmap(SETTINGSBACKGROUND_FN);
     const auto fileBackgroundBitmap = pGraphics->LoadBitmap(FILEBACKGROUND_FN);
     const auto inputLevelBackgroundBitmap = pGraphics->LoadBitmap(INPUTLEVELBACKGROUND_FN);
-    const auto ampKnobBackgroundBitmap = pGraphics->LoadBitmap(KNOBBACKGROUND_FN);
+    const std::array<IBitmap, 3> ampFaceKnobBitmaps = {
+      pGraphics->LoadBitmap(AMP1KNOB_FN),
+      pGraphics->LoadBitmap(AMP2KNOB_FN),
+      pGraphics->LoadBitmap(AMP3KNOB_FN)};
+    const std::array<IBitmap, 3> ampFaceKnobBackgroundBitmaps = {
+      pGraphics->LoadBitmap(AMP1KNOBBACKGROUND_FN),
+      pGraphics->LoadBitmap(AMP2KNOBBACKGROUND_FN),
+      pGraphics->LoadBitmap(AMP3KNOBBACKGROUND_FN)};
     const auto switchOffBitmap = pGraphics->LoadBitmap(SWITCH_OFF_FN);
     const auto switchOnBitmap = pGraphics->LoadBitmap(SWITCH_ON_FN);
     const auto switchHandleBitmap = pGraphics->LoadBitmap(SLIDESWITCHHANDLE_FN);
@@ -799,9 +806,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       IRECT(topGateKnobArea.MW() - 6.0f, topGateKnobArea.MH() + 24.0f, topGateKnobArea.MW() + 6.0f, topGateKnobArea.MH() + 36.0f);
 
     // Amp-face controls (independent group)
-    const float frontKnobTop = ampFaceArea.T + 150.0f;
-    const float frontRowCenterX = ampFaceArea.MW() - 55.0f;
-    const float frontKnobSpacing = 80.0f;
+    const float frontKnobTop = ampFaceArea.T + 158.0f;
+    const float frontRowCenterX = ampFaceArea.MW() - 95.0f;
+    const float frontKnobSpacing = 100.0f;
     const auto noiseGateArea = makeKnobArea(frontRowCenterX - 3.0f * frontKnobSpacing, frontKnobTop);
     const auto preModelGainArea = makeKnobArea(frontRowCenterX - 2.0f * frontKnobSpacing, frontKnobTop);
     const auto bassKnobArea = makeKnobArea(frontRowCenterX - 1.0f * frontKnobSpacing, frontKnobTop);
@@ -1522,36 +1529,72 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       -1,
       "FX_CONTROLS")
       ->SetTooltip("Delay DUCKER amount (0% = off)");
-    pGraphics->AttachControl(new NAMKnobControl(preModelGainArea, kPreModelGain, "PRE GAIN", ampKnobStyle,
-                                                ampKnobBackgroundBitmap, false, true, 0.7f, AP_KNOP_OFFSET));
+    pGraphics->AttachControl(new NAMAmpBitmapKnobControl(preModelGainArea,
+                                                         kPreModelGain,
+                                                         "PRE GAIN",
+                                                         ampKnobStyle,
+                                                         ampFaceKnobBitmaps,
+                                                         ampFaceKnobBackgroundBitmaps,
+                                                         mAmpSelectorIndex,
+                                                         0.7f,
+                                                         AP_KNOP_OFFSET));
     pGraphics->AttachControl(
-      new NAMKnobControl(bassKnobArea, kToneBass, "BASS", ampKnobStyle, ampKnobBackgroundBitmap, false, true, 0.7f,
-                         AP_KNOP_OFFSET),
+      new NAMAmpBitmapKnobControl(
+        bassKnobArea, kToneBass, "BASS", ampKnobStyle, ampFaceKnobBitmaps, ampFaceKnobBackgroundBitmaps, mAmpSelectorIndex,
+        0.7f, AP_KNOP_OFFSET),
       -1,
       "EQ_KNOBS");
     pGraphics->AttachControl(
-      new NAMKnobControl(midKnobArea, kToneMid, "MIDDLE", ampKnobStyle, ampKnobBackgroundBitmap, false, true, 0.7f,
-                         AP_KNOP_OFFSET),
+      new NAMAmpBitmapKnobControl(midKnobArea,
+                                  kToneMid,
+                                  "MIDDLE",
+                                  ampKnobStyle,
+                                  ampFaceKnobBitmaps,
+                                  ampFaceKnobBackgroundBitmaps,
+                                  mAmpSelectorIndex,
+                                  0.7f,
+                                  AP_KNOP_OFFSET),
       -1,
       "EQ_KNOBS");
     pGraphics->AttachControl(
-      new NAMKnobControl(
-        trebleKnobArea, kToneTreble, "TREBLE", ampKnobStyle, ampKnobBackgroundBitmap, false, true, 0.7f,
-        AP_KNOP_OFFSET),
+      new NAMAmpBitmapKnobControl(trebleKnobArea,
+                                  kToneTreble,
+                                  "TREBLE",
+                                  ampKnobStyle,
+                                  ampFaceKnobBitmaps,
+                                  ampFaceKnobBackgroundBitmaps,
+                                  mAmpSelectorIndex,
+                                  0.7f,
+                                  AP_KNOP_OFFSET),
       -1, "EQ_KNOBS");
     pGraphics->AttachControl(
-      new NAMKnobControl(presenceKnobArea, kTonePresence, "PRESENCE", ampKnobStyle, ampKnobBackgroundBitmap, false, true,
-                         0.7f, AP_KNOP_OFFSET),
+      new NAMAmpBitmapKnobControl(presenceKnobArea,
+                                  kTonePresence,
+                                  "PRESENCE",
+                                  ampKnobStyle,
+                                  ampFaceKnobBitmaps,
+                                  ampFaceKnobBackgroundBitmaps,
+                                  mAmpSelectorIndex,
+                                  0.7f,
+                                  AP_KNOP_OFFSET),
       -1,
       "EQ_KNOBS");
     pGraphics->AttachControl(
-      new NAMKnobControl(depthKnobArea, kToneDepth, "DEPTH", ampKnobStyle, ampKnobBackgroundBitmap, false, true, 0.7f,
-                         AP_KNOP_OFFSET),
+      new NAMAmpBitmapKnobControl(
+        depthKnobArea, kToneDepth, "DEPTH", ampKnobStyle, ampFaceKnobBitmaps, ampFaceKnobBackgroundBitmaps, mAmpSelectorIndex,
+        0.7f, AP_KNOP_OFFSET),
       -1,
       "EQ_KNOBS");
     pGraphics->AttachControl(
-      new NAMKnobControl(masterKnobArea, kMasterVolume, "MASTER", ampKnobStyle, ampKnobBackgroundBitmap, false, true,
-                         0.7f, AP_KNOP_OFFSET));
+      new NAMAmpBitmapKnobControl(masterKnobArea,
+                                  kMasterVolume,
+                                  "MASTER",
+                                  ampKnobStyle,
+                                  ampFaceKnobBitmaps,
+                                  ampFaceKnobBackgroundBitmaps,
+                                  mAmpSelectorIndex,
+                                  0.7f,
+                                  AP_KNOP_OFFSET));
     pGraphics->AttachControl(
       new NAMPedalKnobControl(hpfKnobArea, kUserHPFFrequency, "", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
@@ -4852,6 +4895,18 @@ void NeuralAmpModeler::_RefreshTopNavControls()
       backgroundResource = EQBACKGROUND_FN;
     if (auto* pBackground = dynamic_cast<NAMBackgroundBitmapControl*>(pGraphics->GetControlWithTag(kCtrlTagMainBackground)))
       pBackground->SetResourceName(backgroundResource);
+
+    auto updateAmpFaceKnobStyle = [this, pGraphics](const int paramIdx) {
+      if (auto* pControl = dynamic_cast<NAMAmpBitmapKnobControl*>(pGraphics->GetControlWithParamIdx(paramIdx)))
+        pControl->SetAmpStyle(mAmpSelectorIndex);
+    };
+    updateAmpFaceKnobStyle(kPreModelGain);
+    updateAmpFaceKnobStyle(kToneBass);
+    updateAmpFaceKnobStyle(kToneMid);
+    updateAmpFaceKnobStyle(kToneTreble);
+    updateAmpFaceKnobStyle(kTonePresence);
+    updateAmpFaceKnobStyle(kToneDepth);
+    updateAmpFaceKnobStyle(kMasterVolume);
 
     const bool showTunerReadout = tunerActive;
     if (auto* pTunerReadout = pGraphics->GetControlWithTag(kCtrlTagTunerReadout))

@@ -635,6 +635,94 @@ private:
   float mValueYOffset = 0.0f;
 };
 
+class NAMAmpBitmapKnobControl : public IVKnobControl
+{
+public:
+  NAMAmpBitmapKnobControl(const IRECT& bounds,
+                         int paramIdx,
+                         const char* label,
+                         const IVStyle& style,
+                         const std::array<IBitmap, 3>& knobBitmaps,
+                         const std::array<IBitmap, 3>& backgroundBitmaps,
+                         int initialAmpIndex,
+                         float knobScale = 1.0f,
+                         float labelYOffset = 0.0f,
+                         float valueYOffset = 0.0f)
+  : IVKnobControl(bounds, paramIdx, label, style, true)
+  , mKnobBitmaps(knobBitmaps)
+  , mBackgroundBitmaps(backgroundBitmaps)
+  , mAmpIndex(std::clamp(initialAmpIndex, 0, 2))
+  , mKnobScale(knobScale)
+  , mLabelYOffset(labelYOffset)
+  , mValueYOffset(valueYOffset)
+  {
+  }
+
+  void SetAmpStyle(int ampIndex)
+  {
+    const int clampedIndex = std::clamp(ampIndex, 0, 2);
+    if (mAmpIndex == clampedIndex)
+      return;
+
+    mAmpIndex = clampedIndex;
+    SetDirty(false);
+  }
+
+  void OnRescale() override
+  {
+    for (auto& bitmap : mKnobBitmaps)
+      if (bitmap.IsValid())
+        bitmap = GetUI()->GetScaledBitmap(bitmap);
+    for (auto& bitmap : mBackgroundBitmaps)
+      if (bitmap.IsValid())
+        bitmap = GetUI()->GetScaledBitmap(bitmap);
+  }
+
+  void OnResize() override
+  {
+    IVKnobControl::OnResize();
+    if (mLabelYOffset != 0.0f)
+      mLabelBounds.Translate(0.0f, mLabelYOffset);
+    if (mValueYOffset != 0.0f)
+      mValueBounds.Translate(0.0f, mValueYOffset);
+  }
+
+  void DrawWidget(IGraphics& g) override
+  {
+    const IBitmap& knobBitmap = mKnobBitmaps[static_cast<size_t>(mAmpIndex)];
+    const IBitmap& backgroundBitmap = mBackgroundBitmaps[static_cast<size_t>(mAmpIndex)];
+    if (!knobBitmap.IsValid() && !backgroundBitmap.IsValid())
+      return;
+
+    const float sourceW = backgroundBitmap.IsValid() ? static_cast<float>(backgroundBitmap.W()) : static_cast<float>(knobBitmap.W());
+    const float sourceH = backgroundBitmap.IsValid() ? static_cast<float>(backgroundBitmap.H()) : static_cast<float>(knobBitmap.H());
+    const float knobW = sourceW * mKnobScale;
+    const float knobH = sourceH * mKnobScale;
+    const IRECT knobBounds = mWidgetBounds.GetCentredInside(knobW, knobH);
+    const IBlend bitmapBlend(EBlend::Default, IsDisabled() ? 0.45f : 1.0f);
+
+    if (backgroundBitmap.IsValid())
+      g.DrawFittedBitmap(backgroundBitmap, knobBounds, &bitmapBlend);
+
+    if (!knobBitmap.IsValid())
+      return;
+
+    const double angle = -130.0 + GetValue() * 260.0;
+    g.StartLayer(this, knobBounds);
+    g.DrawFittedBitmap(knobBitmap, knobBounds, &bitmapBlend);
+    auto layer = g.EndLayer();
+    g.DrawRotatedLayer(layer, angle);
+  }
+
+private:
+  std::array<IBitmap, 3> mKnobBitmaps;
+  std::array<IBitmap, 3> mBackgroundBitmaps;
+  int mAmpIndex = 0;
+  float mKnobScale = 1.0f;
+  float mLabelYOffset = 0.0f;
+  float mValueYOffset = 0.0f;
+};
+
 class NAMDeactivatableKnobControl : public NAMKnobControl
 {
 public:

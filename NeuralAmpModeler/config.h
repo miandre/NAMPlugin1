@@ -90,6 +90,12 @@
 #define AMP3BACKGROUND_FN "Backgrounds/Amp3Background.png"
 #define AMP3BACKGROUND2X_FN "Backgrounds/Amp3Background@2x.png"
 #define AMP3BACKGROUND3X_FN "Backgrounds/Amp3Background@3x.png"
+#define AMP1KNOB_FN "Hardware/Amp1Knob.png"
+#define AMP1KNOBBACKGROUND_FN "Hardware/Amp1KnobBackground.png"
+#define AMP2KNOB_FN "Hardware/Amp2Knob.png"
+#define AMP2KNOBBACKGROUND_FN "Hardware/Amp2KnobBackground.png"
+#define AMP3KNOB_FN "Hardware/Amp3Knob.png"
+#define AMP3KNOBBACKGROUND_FN "Hardware/Amp3KnobBackground.png"
 #define STOMPBACKGROUND_FN "Backgrounds/StompBackground.jpg"
 #define STOMPBACKGROUND2X_FN "Backgrounds/StompBackground@2x.jpg"
 #define STOMPBACKGROUND3X_FN "Backgrounds/StompBackground@3x.jpg"
@@ -120,7 +126,7 @@
 #define REDLEDOFF_FN "Hardware/RedLedOff.png"
 #define SMALLONOFF_OFF_FN "Hardware/SmallOnOff_OFF.png"
 #define SMALLONOFF_ON_FN "Hardware/SmallOnOff_ON.png"
-#define AP_KNOP_OFFSET 28.0f
+#define AP_KNOP_OFFSET 23.0f
 #define SWITCH_OFF_FN "Hardware/Switch_OFF.png"
 #define SWITCH_OFF2X_FN "Hardware/Switch_OFF@2x.png"
 #define SWITCH_ON_FN "Hardware/Switch_ON.png"
