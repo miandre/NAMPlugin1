@@ -668,6 +668,15 @@ public:
     SetDirty(false);
   }
 
+  void SetLayout(float knobScale, float labelYOffset, float valueYOffset = 0.0f)
+  {
+    mKnobScale = knobScale;
+    mLabelYOffset = labelYOffset;
+    mValueYOffset = valueYOffset;
+    OnResize();
+    SetDirty(false);
+  }
+
   void OnRescale() override
   {
     for (auto& bitmap : mKnobBitmaps)

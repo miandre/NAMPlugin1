@@ -79,6 +79,46 @@ constexpr std::array<const char*, 1> kReleaseStompAssetTokens = {"Boost1"};
 constexpr std::array<const char*, 1> kReleaseStompAssetFileNames = {"Boost1.nam"};
 constexpr std::array<const char*, 1> kReleaseIRAssetTokens = {"Cab1"};
 constexpr std::array<const char*, 1> kReleaseIRAssetFileNames = {"Cab1.wav"};
+constexpr float kAmpFaceKnobAreaWidth = 80.0f;
+constexpr float kAmpFaceSwitchScale = 0.20f;
+
+struct AmpFaceLayout
+{
+  float knobTopOffset;
+  float knobCenterOffsetX;
+  float knobSpacing;
+  float knobScale;
+  float labelYOffset;
+  float switchCenterOffsetX;
+  float switchCenterOffsetY;
+};
+
+constexpr std::array<float, 7> kAmpFaceKnobColumnOffsets = {-2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
+constexpr std::array<AmpFaceLayout, 3> kAmpFaceLayouts = {{
+  {158.0f, -95.0f, 100.0f, 0.70f, AP_KNOP_OFFSET, 385.0f, 213.0f},
+  {152.0f, -95.0f, 100.0f, 0.68f, AP_KNOP_OFFSET-3, 400.0f, 205.0f},
+  {158.0f, -95.0f, 100.0f, 0.70f, AP_KNOP_OFFSET, 390.0f, 213.0f},
+}};
+
+AmpFaceLayout GetAmpFaceLayout(const int slotIndex)
+{
+  return kAmpFaceLayouts[static_cast<size_t>(std::clamp(slotIndex, 0, static_cast<int>(kAmpFaceLayouts.size()) - 1))];
+}
+
+IRECT MakeAmpFaceKnobArea(const IRECT& ampFaceArea, const AmpFaceLayout& layout, const float columnOffset)
+{
+  const float centerX = ampFaceArea.MW() + layout.knobCenterOffsetX + columnOffset * layout.knobSpacing;
+  const float topY = ampFaceArea.T + layout.knobTopOffset;
+  return IRECT(centerX - 0.5f * kAmpFaceKnobAreaWidth, topY, centerX + 0.5f * kAmpFaceKnobAreaWidth, topY + NAM_KNOB_HEIGHT);
+}
+
+IRECT MakeAmpFaceSwitchArea(const IRECT& ampFaceArea, const AmpFaceLayout& layout, const float switchWidth, const float switchHeight)
+{
+  const float centerX = ampFaceArea.MW() + layout.switchCenterOffsetX;
+  const float centerY = ampFaceArea.T + layout.switchCenterOffsetY;
+  return IRECT(centerX - 0.5f * switchWidth, centerY - 0.5f * switchHeight, centerX + 0.5f * switchWidth,
+               centerY + 0.5f * switchHeight);
+}
 constexpr double kDelayManualTempoDefaultBPM = 120.0;
 constexpr double kDelayManualTempoMinBPM = 10.0;
 constexpr double kDelayManualTempoMaxBPM = 350.0;
@@ -774,7 +814,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     // Areas for knobs
     // Keep these as explicit anchors so each group can be tuned independently.
-    const float knobWidth = 80.0f;
+    const float knobWidth = kAmpFaceKnobAreaWidth;
     auto makeKnobArea = [&](const float centerX, const float topY) {
       return IRECT(centerX - knobWidth * 0.5f, topY, centerX + knobWidth * 0.5f, topY + NAM_KNOB_HEIGHT);
     };
@@ -805,27 +845,18 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto topGateAttenuationLedArea =
       IRECT(topGateKnobArea.MW() - 6.0f, topGateKnobArea.MH() + 24.0f, topGateKnobArea.MW() + 6.0f, topGateKnobArea.MH() + 36.0f);
 
-    // Amp-face controls (independent group)
-    const float frontKnobTop = ampFaceArea.T + 158.0f;
-    const float frontRowCenterX = ampFaceArea.MW() - 95.0f;
-    const float frontKnobSpacing = 100.0f;
-    const auto noiseGateArea = makeKnobArea(frontRowCenterX - 3.0f * frontKnobSpacing, frontKnobTop);
-    const auto preModelGainArea = makeKnobArea(frontRowCenterX - 2.0f * frontKnobSpacing, frontKnobTop);
-    const auto bassKnobArea = makeKnobArea(frontRowCenterX - 1.0f * frontKnobSpacing, frontKnobTop);
-    const auto midKnobArea = makeKnobArea(frontRowCenterX, frontKnobTop);
-    const auto trebleKnobArea = makeKnobArea(frontRowCenterX + 1.0f * frontKnobSpacing, frontKnobTop);
-    const auto presenceKnobArea = makeKnobArea(frontRowCenterX + 2.0f * frontKnobSpacing, frontKnobTop);
-    const auto depthKnobArea = makeKnobArea(frontRowCenterX + 3.0f * frontKnobSpacing, frontKnobTop);
-    const auto masterKnobArea = makeKnobArea(frontRowCenterX + 4.0f * frontKnobSpacing, frontKnobTop);
-    const float modelSwitchScale = 0.20f;
-    const float modelSwitchWidth = switchOffBitmap.W() * modelSwitchScale;
-    const float modelSwitchHeight = switchOffBitmap.H() * modelSwitchScale;
-    const float modelSwitchCenterX = std::min(b.W() - 120.0f, masterKnobArea.MW() + 130.0f);
-    const float modelSwitchCenterY = noiseGateArea.MH();
-    const auto modelToggleArea = IRECT(modelSwitchCenterX - 0.5f * modelSwitchWidth,
-                                       modelSwitchCenterY - 0.5f * modelSwitchHeight,
-                                       modelSwitchCenterX + 0.5f * modelSwitchWidth,
-                                       modelSwitchCenterY + 0.5f * modelSwitchHeight);
+    // Amp-face controls: each amp slot owns its row geometry independently.
+    const AmpFaceLayout ampFaceLayout = GetAmpFaceLayout(mAmpSelectorIndex);
+    const auto preModelGainArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[0]);
+    const auto bassKnobArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[1]);
+    const auto midKnobArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[2]);
+    const auto trebleKnobArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[3]);
+    const auto presenceKnobArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[4]);
+    const auto depthKnobArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[5]);
+    const auto masterKnobArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[6]);
+    const float modelSwitchWidth = switchOffBitmap.W() * kAmpFaceSwitchScale;
+    const float modelSwitchHeight = switchOffBitmap.H() * kAmpFaceSwitchScale;
+    const auto modelToggleArea = MakeAmpFaceSwitchArea(ampFaceArea, ampFaceLayout, modelSwitchWidth, modelSwitchHeight);
 
     // Stomp section coordinates come from the user's 3x design canvas.
     constexpr float kDesignW = 3117.0f; // 3 * 1039
@@ -930,7 +961,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
 
     // Gate/EQ toggle row (independent group)
-    const float toggleTop = frontKnobTop + 86.0f;
+    const float toggleTop = ampFaceArea.T + ampFaceLayout.knobTopOffset + 86.0f;
     const auto eqToggleArea = IRECT(midKnobArea.MW() - 17.0f, toggleTop, midKnobArea.MW() + 17.0f, toggleTop + 24.0f);
 
     // EQ-page HPF/LPF anchors follow the printed marker positions on the EQ background.
@@ -1536,12 +1567,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                                          ampFaceKnobBitmaps,
                                                          ampFaceKnobBackgroundBitmaps,
                                                          mAmpSelectorIndex,
-                                                         0.7f,
-                                                         AP_KNOP_OFFSET));
+                                                         ampFaceLayout.knobScale,
+                                                         ampFaceLayout.labelYOffset));
     pGraphics->AttachControl(
       new NAMAmpBitmapKnobControl(
         bassKnobArea, kToneBass, "BASS", ampKnobStyle, ampFaceKnobBitmaps, ampFaceKnobBackgroundBitmaps, mAmpSelectorIndex,
-        0.7f, AP_KNOP_OFFSET),
+        ampFaceLayout.knobScale, ampFaceLayout.labelYOffset),
       -1,
       "EQ_KNOBS");
     pGraphics->AttachControl(
@@ -1552,8 +1583,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                   ampFaceKnobBitmaps,
                                   ampFaceKnobBackgroundBitmaps,
                                   mAmpSelectorIndex,
-                                  0.7f,
-                                  AP_KNOP_OFFSET),
+                                  ampFaceLayout.knobScale,
+                                  ampFaceLayout.labelYOffset),
       -1,
       "EQ_KNOBS");
     pGraphics->AttachControl(
@@ -1564,8 +1595,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                   ampFaceKnobBitmaps,
                                   ampFaceKnobBackgroundBitmaps,
                                   mAmpSelectorIndex,
-                                  0.7f,
-                                  AP_KNOP_OFFSET),
+                                  ampFaceLayout.knobScale,
+                                  ampFaceLayout.labelYOffset),
       -1, "EQ_KNOBS");
     pGraphics->AttachControl(
       new NAMAmpBitmapKnobControl(presenceKnobArea,
@@ -1575,14 +1606,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                   ampFaceKnobBitmaps,
                                   ampFaceKnobBackgroundBitmaps,
                                   mAmpSelectorIndex,
-                                  0.7f,
-                                  AP_KNOP_OFFSET),
+                                  ampFaceLayout.knobScale,
+                                  ampFaceLayout.labelYOffset),
       -1,
       "EQ_KNOBS");
     pGraphics->AttachControl(
       new NAMAmpBitmapKnobControl(
         depthKnobArea, kToneDepth, "DEPTH", ampKnobStyle, ampFaceKnobBitmaps, ampFaceKnobBackgroundBitmaps, mAmpSelectorIndex,
-        0.7f, AP_KNOP_OFFSET),
+        ampFaceLayout.knobScale, ampFaceLayout.labelYOffset),
       -1,
       "EQ_KNOBS");
     pGraphics->AttachControl(
@@ -1593,8 +1624,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                   ampFaceKnobBitmaps,
                                   ampFaceKnobBackgroundBitmaps,
                                   mAmpSelectorIndex,
-                                  0.7f,
-                                  AP_KNOP_OFFSET));
+                                  ampFaceLayout.knobScale,
+                                  ampFaceLayout.labelYOffset));
     pGraphics->AttachControl(
       new NAMPedalKnobControl(hpfKnobArea, kUserHPFFrequency, "", utilityStyle, pedalKnobBitmap, pedalKnobShadowBitmap,
                               kPedalKnobScale, 8.0f, -5.0f),
@@ -4896,17 +4927,35 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     if (auto* pBackground = dynamic_cast<NAMBackgroundBitmapControl*>(pGraphics->GetControlWithTag(kCtrlTagMainBackground)))
       pBackground->SetResourceName(backgroundResource);
 
-    auto updateAmpFaceKnobStyle = [this, pGraphics](const int paramIdx) {
+    constexpr float kOuterPad = 20.0f;
+    constexpr float kInnerPad = 10.0f;
+    const auto bounds = pGraphics->GetBounds();
+    const auto mainArea = bounds.GetPadded(-kOuterPad);
+    const auto contentArea = mainArea.GetPadded(-kInnerPad);
+    const auto ampFaceArea = IRECT(contentArea.L + 66.0f, contentArea.T + 215.0f, contentArea.R - 66.0f, contentArea.T + 496.0f);
+    const AmpFaceLayout ampFaceLayout = GetAmpFaceLayout(mAmpSelectorIndex);
+
+    auto updateAmpFaceKnob = [this, pGraphics, &ampFaceArea, &ampFaceLayout](const int paramIdx, const float columnOffset) {
       if (auto* pControl = dynamic_cast<NAMAmpBitmapKnobControl*>(pGraphics->GetControlWithParamIdx(paramIdx)))
+      {
         pControl->SetAmpStyle(mAmpSelectorIndex);
+        pControl->SetLayout(ampFaceLayout.knobScale, ampFaceLayout.labelYOffset);
+        pGraphics->SetControlBounds(pControl, MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, columnOffset));
+      }
     };
-    updateAmpFaceKnobStyle(kPreModelGain);
-    updateAmpFaceKnobStyle(kToneBass);
-    updateAmpFaceKnobStyle(kToneMid);
-    updateAmpFaceKnobStyle(kToneTreble);
-    updateAmpFaceKnobStyle(kTonePresence);
-    updateAmpFaceKnobStyle(kToneDepth);
-    updateAmpFaceKnobStyle(kMasterVolume);
+    updateAmpFaceKnob(kPreModelGain, kAmpFaceKnobColumnOffsets[0]);
+    updateAmpFaceKnob(kToneBass, kAmpFaceKnobColumnOffsets[1]);
+    updateAmpFaceKnob(kToneMid, kAmpFaceKnobColumnOffsets[2]);
+    updateAmpFaceKnob(kToneTreble, kAmpFaceKnobColumnOffsets[3]);
+    updateAmpFaceKnob(kTonePresence, kAmpFaceKnobColumnOffsets[4]);
+    updateAmpFaceKnob(kToneDepth, kAmpFaceKnobColumnOffsets[5]);
+    updateAmpFaceKnob(kMasterVolume, kAmpFaceKnobColumnOffsets[6]);
+
+    if (auto* pModelToggle = pGraphics->GetControlWithParamIdx(kModelToggle))
+      pGraphics->SetControlBounds(
+        pModelToggle,
+        MakeAmpFaceSwitchArea(
+          ampFaceArea, ampFaceLayout, static_cast<float>(pModelToggle->GetRECT().W()), static_cast<float>(pModelToggle->GetRECT().H())));
 
     const bool showTunerReadout = tunerActive;
     if (auto* pTunerReadout = pGraphics->GetControlWithTag(kCtrlTagTunerReadout))
