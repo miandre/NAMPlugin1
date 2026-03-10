@@ -88,8 +88,8 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
   const double targetAmount = std::clamp(GetParam(kVirtualDoubleAmount)->Value() * 0.01, 0.0, 1.0);
   constexpr double kDoubleAmountSmoothingMs = 35.0;
   constexpr double kDoubleWetGain = 0.80;
-  constexpr std::array<double, 2> kBaseDelayMs = {13.5, 31.5};
-  constexpr std::array<double, 2> kDelayJitterMs = {4.0, 6.5};
+  constexpr std::array<double, 2> kBaseDelayMs = {13.5, 33.0};
+  constexpr std::array<double, 2> kDelayJitterMs = {4.25, 7.0};
   constexpr std::array<double, 2> kToneCutoffHz = {2500.0, 7000.0};
   constexpr std::array<double, 2> kLevelSkew = {0.78, 1.20};
   constexpr std::array<double, 2> kCrossDelayMs = {4.5, 11.5};
@@ -171,14 +171,14 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
 
     if (retargetArmed && reseedCooldownSamples == 0 && fastEnvelope >= kAttackThreshold && onsetStrength >= kOnsetThreshold)
     {
-      const double separationScale = 0.45 + 0.55 * smoothedAmount;
+      const double separationScale = 0.50 + 0.58 * smoothedAmount;
       for (size_t c = 0; c < 2; ++c)
       {
         const double jitter = (2.0 * NextVirtualDoubleRandom(randomSeed[c]) - 1.0) * kDelayJitterMs[c] * separationScale;
         delayMs[c] = kBaseDelayMs[c] + jitter;
       }
-      if (delayMs[1] - delayMs[0] < 11.0)
-        delayMs[1] = delayMs[0] + 11.0;
+      if (delayMs[1] - delayMs[0] < 12.0)
+        delayMs[1] = delayMs[0] + 12.0;
       retargetArmed = false;
       reseedCooldownSamples = retargetCooldownResetSamples;
     }
