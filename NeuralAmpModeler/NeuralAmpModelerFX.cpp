@@ -104,6 +104,7 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
   constexpr double kFastEnvelopeReleaseMs = 18.0;
   constexpr double kSlowEnvelopeAttackMs = 12.0;
   constexpr double kSlowEnvelopeReleaseMs = 150.0;
+  constexpr double kDoubleOutputCompensationDB = -2.2;
   constexpr double kLowActivityThreshold = 0.010;
   constexpr double kOnsetThreshold = 0.0065;
   constexpr double kAttackThreshold = 0.018;
@@ -139,6 +140,8 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
     const double wetAmountBase = kDoubleWetGain * (0.22 + 0.78 * limitedAmount) * std::pow(spanAmount, 0.62);
     const double dryTrim = 1.0 - 0.10 * limitedAmount;
     const double takePreviewMix = limitedAmount;
+    const double outputCompensation =
+      std::pow(10.0, (kDoubleOutputCompensationDB * takePreviewMix) / 20.0);
 
     const double dryLeft = static_cast<double>(ioPointers[0][s]);
     const double dryRight = static_cast<double>(ioPointers[1][s]);
@@ -209,8 +212,10 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
         attackFocusedWet * (kTakeSecondaryShadowBlend[1] * wet[0] + kTakePrimaryShadowBlend[1] * wet[1]);
       const double takeA = takeADirect + takeAShadow;
       const double takeB = takeBDirect + takeBShadow;
-      ioPointers[0][s] = static_cast<sample>((1.0 - takePreviewMix) * (0.62 * dryLeft) + takePreviewMix * takeA);
-      ioPointers[1][s] = static_cast<sample>((1.0 - takePreviewMix) * (0.62 * dryRight) + takePreviewMix * takeB);
+      ioPointers[0][s] =
+        static_cast<sample>(((1.0 - takePreviewMix) * (0.62 * dryLeft) + takePreviewMix * takeA) * outputCompensation);
+      ioPointers[1][s] =
+        static_cast<sample>(((1.0 - takePreviewMix) * (0.62 * dryRight) + takePreviewMix * takeB) * outputCompensation);
     }
 
     ++writeIndex;
