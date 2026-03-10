@@ -87,17 +87,19 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
 
   const double targetAmount = std::clamp(GetParam(kVirtualDoubleAmount)->Value() * 0.01, 0.0, 1.0);
   constexpr double kDoubleAmountSmoothingMs = 35.0;
-  constexpr double kDoubleWetGain = 0.82;
+  constexpr double kDoubleWetGain = 0.80;
   constexpr std::array<double, 2> kBaseDelayMs = {13.5, 31.5};
   constexpr std::array<double, 2> kDelayJitterMs = {4.0, 6.5};
   constexpr std::array<double, 2> kToneCutoffHz = {2500.0, 7000.0};
   constexpr std::array<double, 2> kLevelSkew = {0.78, 1.20};
   constexpr std::array<double, 2> kCrossDelayMs = {4.5, 11.5};
   constexpr double kDoubleCrossMix = 0.015;
-  constexpr double kDoubleWidth = 1.34;
-  constexpr double kDoubleWetMidGain = 0.72;
   constexpr std::array<double, 2> kTransientWeight = {0.68, -0.24};
   constexpr std::array<double, 2> kAttackSkew = {0.28, -0.14};
+  constexpr std::array<double, 2> kTakeDirectKeep = {0.48, 0.36};
+  constexpr std::array<double, 2> kTakeOppositeDryBleed = {0.0, 0.0};
+  constexpr std::array<double, 2> kTakePrimaryShadowBlend = {1.10, 1.18};
+  constexpr std::array<double, 2> kTakeSecondaryShadowBlend = {0.0, 0.0};
   constexpr double kFastEnvelopeAttackMs = 0.8;
   constexpr double kFastEnvelopeReleaseMs = 18.0;
   constexpr double kSlowEnvelopeAttackMs = 12.0;
@@ -131,8 +133,12 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
   for (size_t s = 0; s < numFrames; ++s)
   {
     smoothedAmount += amountAlpha * (targetAmount - smoothedAmount);
-    const double wetAmountBase = kDoubleWetGain * std::pow(smoothedAmount, 0.52);
-    const double dryTrim = 1.0 - 0.16 * std::pow(smoothedAmount, 0.85);
+    const double spanAmount = 0.65 + 0.55 * smoothedAmount;
+    const double limitedAmount =
+      (smoothedAmount > 1.0e-5) ? (0.12 + 0.70 * std::pow(spanAmount, 0.82)) : 0.0;
+    const double wetAmountBase = kDoubleWetGain * (0.22 + 0.78 * limitedAmount) * std::pow(spanAmount, 0.62);
+    const double dryTrim = 1.0 - 0.10 * limitedAmount;
+    const double takePreviewMix = limitedAmount;
 
     const double dryLeft = static_cast<double>(ioPointers[0][s]);
     const double dryRight = static_cast<double>(ioPointers[1][s]);
@@ -195,10 +201,16 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
         wet[c] = toneState[c] + transientComponent * (kTransientWeight[c] + kAttackSkew[c] * attackAccent);
       }
 
-      const double wetMid = 0.5 * (wet[0] + wet[1]) * kDoubleWetMidGain;
-      const double wetSide = 0.5 * (wet[0] - wet[1]) * kDoubleWidth;
-      ioPointers[0][s] = static_cast<sample>(dryLeft * dryTrim + attackFocusedWet * (wetMid + wetSide));
-      ioPointers[1][s] = static_cast<sample>(dryRight * dryTrim + attackFocusedWet * (wetMid - wetSide));
+      const double takeADirect = dryTrim * (kTakeDirectKeep[0] * dryLeft + kTakeOppositeDryBleed[0] * dryRight);
+      const double takeBDirect = dryTrim * (kTakeDirectKeep[1] * dryRight + kTakeOppositeDryBleed[1] * dryLeft);
+      const double takeAShadow =
+        attackFocusedWet * (kTakePrimaryShadowBlend[0] * wet[0] + kTakeSecondaryShadowBlend[0] * wet[1]);
+      const double takeBShadow =
+        attackFocusedWet * (kTakeSecondaryShadowBlend[1] * wet[0] + kTakePrimaryShadowBlend[1] * wet[1]);
+      const double takeA = takeADirect + takeAShadow;
+      const double takeB = takeBDirect + takeBShadow;
+      ioPointers[0][s] = static_cast<sample>((1.0 - takePreviewMix) * (0.62 * dryLeft) + takePreviewMix * takeA);
+      ioPointers[1][s] = static_cast<sample>((1.0 - takePreviewMix) * (0.62 * dryRight) + takePreviewMix * takeB);
     }
 
     ++writeIndex;
