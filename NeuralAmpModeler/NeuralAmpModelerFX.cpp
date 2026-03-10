@@ -85,7 +85,9 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
   if (!doubleAvailable)
     return;
 
-  const double targetAmount = std::clamp(GetParam(kVirtualDoubleAmount)->Value() * 0.01, 0.0, 1.0);
+  const double doubleKnobAmount = std::clamp(GetParam(kVirtualDoubleAmount)->Value() * 0.01, 0.0, 1.0);
+  const bool doubleActive = GetParam(kVirtualDoubleActive)->Bool();
+  const double targetAmount = doubleActive ? (0.30 + 0.65 * doubleKnobAmount) : 0.0;
   constexpr double kDoubleAmountSmoothingMs = 35.0;
   constexpr double kDoubleWetGain = 0.80;
   constexpr std::array<double, 2> kBaseDelayMs = {13.5, 33.0};
@@ -96,20 +98,22 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
   constexpr double kDoubleCrossMix = 0.015;
   constexpr std::array<double, 2> kTransientWeight = {0.68, -0.24};
   constexpr std::array<double, 2> kAttackSkew = {0.28, -0.14};
-  constexpr std::array<double, 2> kTakeDirectKeep = {0.48, 0.36};
+  constexpr std::array<double, 2> kTakeDirectKeep = {0.35, 0.30};
   constexpr std::array<double, 2> kTakeOppositeDryBleed = {0.0, 0.0};
   constexpr std::array<double, 2> kTakePrimaryShadowBlend = {1.10, 1.18};
   constexpr std::array<double, 2> kTakeSecondaryShadowBlend = {0.0, 0.0};
-  constexpr std::array<double, 2> kTakeDirectAttackScale = {0.14, -0.10};
-  constexpr std::array<double, 2> kTakeShadowAttackScale = {0.04, 0.18};
-  constexpr double kTakeBSoftClipDrive = 1.14;
+  constexpr std::array<double, 2> kTakeDirectAttackScale = {0.14, -0.06};
+  constexpr std::array<double, 2> kTakeShadowAttackScale = {0.04, 0.12};
+  constexpr double kTakeBSoftClipDrive = 1.09;
   constexpr double kOtherPlayerMaxBlend = 0.45;
   constexpr double kFastEnvelopeAttackMs = 0.8;
   constexpr double kFastEnvelopeReleaseMs = 18.0;
   constexpr double kSlowEnvelopeAttackMs = 12.0;
   constexpr double kSlowEnvelopeReleaseMs = 150.0;
   constexpr double kDoubleOutputCompensationDB = -2.2;
-  constexpr double kDoubleRightBalanceTrimDB = -0.6;
+  constexpr double kDoubleRightBalanceTrimDB = -1.0;
+  constexpr double kDoubleSideWidthBoost = 1.05;
+  constexpr double kDoubleMidTrim = 0.97;
   constexpr double kLowActivityThreshold = 0.010;
   constexpr double kOnsetThreshold = 0.0065;
   constexpr double kAttackThreshold = 0.018;
@@ -228,11 +232,17 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
       const double takeBRaw = takeBDirect + takeBShadow;
       const double takeBSoftClipDriveBlended = 1.0 + (kTakeBSoftClipDrive - 1.0) * otherPlayerBlend;
       const double takeB = std::tanh(takeBSoftClipDriveBlended * takeBRaw) / std::tanh(takeBSoftClipDriveBlended);
-      ioPointers[0][s] =
-        static_cast<sample>(((1.0 - takePreviewMix) * (0.62 * dryLeft) + takePreviewMix * takeA) * outputCompensation);
-      ioPointers[1][s] =
-        static_cast<sample>(((1.0 - takePreviewMix) * (0.62 * dryRight) + takePreviewMix * takeB) * outputCompensation *
-                            rightBalanceCompensation);
+      const double renderedLeft =
+        ((1.0 - takePreviewMix) * (0.62 * dryLeft) + takePreviewMix * takeA) * outputCompensation;
+      const double renderedRight =
+        ((1.0 - takePreviewMix) * (0.62 * dryRight) + takePreviewMix * takeB) * outputCompensation *
+        rightBalanceCompensation;
+      const double widthAmount = 1.0 + (kDoubleSideWidthBoost - 1.0) * takePreviewMix;
+      const double midTrim = 1.0 + (kDoubleMidTrim - 1.0) * takePreviewMix;
+      const double mid = 0.5 * (renderedLeft + renderedRight) * midTrim;
+      const double side = 0.5 * (renderedLeft - renderedRight) * widthAmount;
+      ioPointers[0][s] = static_cast<sample>(mid + side);
+      ioPointers[1][s] = static_cast<sample>(mid - side);
     }
 
     ++writeIndex;

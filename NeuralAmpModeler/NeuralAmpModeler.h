@@ -115,6 +115,7 @@ enum EParams
   kFXDelayPingPong,
   // Delay wet ducking amount (0 = off).
   kFXDelayDucker,
+  kVirtualDoubleActive,
   kVirtualDoubleAmount,
   kNumParams
 };

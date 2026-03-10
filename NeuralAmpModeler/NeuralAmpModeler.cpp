@@ -614,6 +614,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kInputStereoMode)->InitBool("Input Stereo", false);
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
   GetParam(kNoiseGateThreshold)->InitDouble("Gate", 35.0, 0.0, 100.0, 0.1, "%");
+  GetParam(kVirtualDoubleActive)->InitBool("Double Active", true);
   GetParam(kVirtualDoubleAmount)->InitDouble("Double", 0.0, 0.0, 100.0, 0.1, "%");
   GetParam(kNoiseGateReleaseMs)->InitDouble("Gate Release", 40.0, 1.0, 100.0, 1.0, "");
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
@@ -845,6 +846,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto topGateKnobArea = makeKnobArea(leftGateCenterX, topSideKnobTop);
     const auto topDoubleKnobArea = makeKnobArea(rightDoubleCenterX, topSideKnobTop);
     const auto outputKnobArea = makeKnobArea(rightOutputCenterX, topSideKnobTop);
+    const auto topDoubleSwitchArea = IRECT(topDoubleKnobArea.MW() + 26.0f, topDoubleKnobArea.MH() + 11.0f,
+                                           topDoubleKnobArea.MW() + 66.0f, topDoubleKnobArea.MH() + 29.0f);
     const auto topGateAttenuationLedArea =
       IRECT(topGateKnobArea.MW() - 6.0f, topGateKnobArea.MH() + 24.0f, topGateKnobArea.MW() + 6.0f, topGateKnobArea.MH() + 36.0f);
 
@@ -1435,6 +1438,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap))->Hide(true);
+    pGraphics->AttachControl(
+      new NAMBitmapToggleControl(topDoubleSwitchArea, kVirtualDoubleActive, smallOnOffOffBitmap, smallOnOffOnBitmap))
+      ->SetTooltip("Virtual double on/off");
 
     // The knobs
     constexpr float kSideLabelYOffset = 18.0f;
@@ -2607,7 +2613,9 @@ void NeuralAmpModeler::OnReset()
   for (auto& channelBuffer : mVirtualDoubleBuffer)
     channelBuffer.assign(mVirtualDoubleBufferSamples, 0.0f);
   mVirtualDoubleWriteIndex = 0;
-  mVirtualDoubleSmoothedAmount = std::clamp(GetParam(kVirtualDoubleAmount)->Value() * 0.01, 0.0, 1.0);
+  const double virtualDoubleKnobAmount = std::clamp(GetParam(kVirtualDoubleAmount)->Value() * 0.01, 0.0, 1.0);
+  mVirtualDoubleSmoothedAmount =
+    GetParam(kVirtualDoubleActive)->Bool() ? (0.30 + 0.65 * virtualDoubleKnobAmount) : 0.0;
   mVirtualDoubleDelayMs = {16.0, 28.0};
   mVirtualDoubleRandomSeed = {0x13579BDFu, 0x2468ACE1u};
   mVirtualDoubleToneState = {0.0, 0.0};
@@ -2743,6 +2751,8 @@ void NeuralAmpModeler::OnIdle()
       if (doubleAvailable != mVirtualDoubleUIAvailable)
       {
         pDoubleControl->SetDisabled(!doubleAvailable);
+        if (auto* pDoubleSwitchControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleActive))
+          pDoubleSwitchControl->SetDisabled(!doubleAvailable);
         mVirtualDoubleUIAvailable = doubleAvailable;
       }
     }
@@ -3413,6 +3423,8 @@ void NeuralAmpModeler::OnUIOpen()
     if (auto* pDoubleControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleAmount))
     {
       pDoubleControl->SetDisabled(!mVirtualDoubleAvailable.load(std::memory_order_relaxed));
+      if (auto* pDoubleSwitchControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleActive))
+        pDoubleSwitchControl->SetDisabled(!mVirtualDoubleAvailable.load(std::memory_order_relaxed));
       mVirtualDoubleUIAvailable = mVirtualDoubleAvailable.load(std::memory_order_relaxed);
     }
     const bool canEditExternalAssets = (mAmpWorkflowMode != AmpWorkflowMode::Release);
