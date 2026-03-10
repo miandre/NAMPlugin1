@@ -115,6 +115,7 @@ enum EParams
   kFXDelayPingPong,
   // Delay wet ducking amount (0 = off).
   kFXDelayDucker,
+  kVirtualDoubleAmount,
   kNumParams
 };
 
@@ -671,6 +672,21 @@ private:
   double mFXEQSmoothedOutputGain = 1.0;
   std::array<std::array<double, 10>, kNumChannelsInternal> mFXEQZ1 = {};
   std::array<std::array<double, 10>, kNumChannelsInternal> mFXEQZ2 = {};
+  // Post-cab virtual doubler (preallocated in OnReset, no allocations in audio thread)
+  std::array<std::vector<iplug::sample>, kNumChannelsInternal> mVirtualDoubleBuffer;
+  size_t mVirtualDoubleBufferSamples = 1;
+  size_t mVirtualDoubleWriteIndex = 0;
+  double mVirtualDoubleSmoothedAmount = 0.0;
+  std::array<double, 2> mVirtualDoubleDelayMs = {16.0, 28.0};
+  std::array<uint32_t, 2> mVirtualDoubleRandomSeed = {0x13579BDFu, 0x2468ACE1u};
+  std::array<double, 2> mVirtualDoubleToneState = {};
+  double mVirtualDoubleFastEnvelope = 0.0;
+  double mVirtualDoubleSlowEnvelope = 0.0;
+  size_t mVirtualDoubleLowActivitySamples = 0;
+  size_t mVirtualDoubleReseedCooldownSamples = 0;
+  bool mVirtualDoubleRetargetArmed = true;
+  std::atomic<bool> mVirtualDoubleAvailable{true};
+  bool mVirtualDoubleUIAvailable = true;
   // Post-IR FX delay (preallocated in OnReset, no allocations in audio thread)
   std::array<std::vector<iplug::sample>, kNumChannelsInternal> mFXDelayBuffer;
   size_t mFXDelayBufferSamples = 1;

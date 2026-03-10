@@ -614,6 +614,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kInputStereoMode)->InitBool("Input Stereo", false);
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
   GetParam(kNoiseGateThreshold)->InitDouble("Gate", 35.0, 0.0, 100.0, 0.1, "%");
+  GetParam(kVirtualDoubleAmount)->InitDouble("Double", 0.0, 0.0, 100.0, 0.1, "%");
   GetParam(kNoiseGateReleaseMs)->InitDouble("Gate Release", 40.0, 1.0, 100.0, 1.0, "");
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
   GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
@@ -838,9 +839,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float leftInputCenterX = contentArea.L + topSideKnobCenterInset;
     const float rightOutputCenterX = contentArea.R - topSideKnobCenterInset;
     const float leftGateCenterX = leftInputCenterX + topSideFilterGapX;
+    const float rightDoubleCenterX = rightOutputCenterX - topSideFilterGapX;
 
     const auto inputKnobArea = makeKnobArea(leftInputCenterX, topSideKnobTop);
     const auto topGateKnobArea = makeKnobArea(leftGateCenterX, topSideKnobTop);
+    const auto topDoubleKnobArea = makeKnobArea(rightDoubleCenterX, topSideKnobTop);
     const auto outputKnobArea = makeKnobArea(rightOutputCenterX, topSideKnobTop);
     const auto topGateAttenuationLedArea =
       IRECT(topGateKnobArea.MW() - 6.0f, topGateKnobArea.MH() + 24.0f, topGateKnobArea.MW() + 6.0f, topGateKnobArea.MH() + 36.0f);
@@ -1454,6 +1457,18 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         kSideLabelYOffset,
         kSideValueYOffset))
       ->SetTooltip("Noise gate amount. Ctrl-click or right-click toggles the gate on/off.");
+    pGraphics->AttachControl(new NAMKnobControl(
+      topDoubleKnobArea,
+      kVirtualDoubleAmount,
+      "DOUBLE",
+      utilityStyle,
+      outerKnobBackgroundSVG,
+      true,
+      false,
+      topSideKnobScale,
+      kSideLabelYOffset,
+      kSideValueYOffset))
+      ->SetTooltip("Virtual double amount. Available only for the mono guitar path.");
     pGraphics->AttachControl(
       new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "LEVEL", utilityStyle, pedalKnobBitmap,
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
@@ -2308,16 +2323,19 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** userLowPassPointers1 = mUserLowPass1.Process(userHighPassPointers2, numChannelsInternal, numFrames);
   sample** userLowPassPointers2 = mUserLowPass2.Process(userLowPassPointers1, numChannelsInternal, numFrames);
 
-  sample** fxReverbPointers = userLowPassPointers2;
+  sample** fxStagePointers = userLowPassPointers2;
   const bool eqBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Eq)];
   const bool fxBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Fx)];
 
   if (GetParam(kFXEQActive)->Bool() && !eqBypassed && sampleRate > 0.0)
-    _ProcessPostCabEQStage(fxReverbPointers, numChannelsInternal, numFrames, sampleRate);
+    _ProcessPostCabEQStage(fxStagePointers, numChannelsInternal, numFrames, sampleRate);
+
+  if (mVirtualDoubleBufferSamples > 2 && sampleRate > 0.0)
+    _ProcessVirtualDoubleStage(fxStagePointers, numChannelsInternal, numChannelsMonoCore, numFrames, sampleRate);
 
   const bool fxDelayActive = GetParam(kFXDelayActive)->Bool() && !fxBypassed;
   if (mFXDelayBufferSamples > 2 && sampleRate > 0.0)
-    _ProcessFXDelayStage(fxReverbPointers, numChannelsInternal, numChannelsMonoCore, numFrames, sampleRate, fxDelayActive);
+    _ProcessFXDelayStage(fxStagePointers, numChannelsInternal, numChannelsMonoCore, numFrames, sampleRate, fxDelayActive);
 
   const bool fxReverbActive = GetParam(kFXReverbActive)->Bool() && !fxBypassed;
   if (fxReverbActive && !mFXReverbWasActive)
@@ -2325,7 +2343,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   mFXReverbWasActive = fxReverbActive;
 
   if (fxReverbActive && sampleRate > 0.0 && mFXReverbPreDelayBufferSamples > 2)
-    _ProcessFXReverbStage(fxReverbPointers, numChannelsInternal, numChannelsMonoCore, numFrames, sampleRate);
+    _ProcessFXReverbStage(fxStagePointers, numChannelsInternal, numChannelsMonoCore, numFrames, sampleRate);
 
   // And the HPF for DC offset (Issue 271)
   const double highPassCutoffFreq = kDCBlockerFrequency;
@@ -2334,7 +2352,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   // const recursive_linear_filter::LowPassParams lowPassParams(sampleRate, lowPassCutoffFreq);
   mHighPass.SetParams(highPassParams);
   // mLowPass.SetParams(lowPassParams);
-  sample** hpfPointers = mHighPass.Process(fxReverbPointers, numChannelsInternal, numFrames);
+  sample** hpfPointers = mHighPass.Process(fxStagePointers, numChannelsInternal, numFrames);
   // sample** lpfPointers = mLowPass.Process(hpfPointers, numChannelsInternal, numFrames);
 
   if (mPresetRecallMuteActive.load(std::memory_order_acquire))
@@ -2394,6 +2412,7 @@ void NeuralAmpModeler::OnReset()
   const int maxBlockSize = GetBlockSize();
   constexpr double kFXDelayMaxSeconds = 2.0;
   constexpr double kFXReverbMaxPreDelaySeconds = 0.30;
+  constexpr double kVirtualDoubleMaxSeconds = 0.05;
   constexpr double kFXReverbCombMaxSizeScale = 2.4;
   constexpr std::array<int, 8> kFXReverbCombBaseDelay = {1423, 1597, 1789, 1999, 2239, 2473, 2741, 3049};
   constexpr std::array<int, 8> kFXReverbCombStereoOffset = {0, 37, 53, 71, 89, 107, 131, 149};
@@ -2583,6 +2602,22 @@ void NeuralAmpModeler::OnReset()
     channelState.fill(0.0);
   for (auto& channelState : mFXEQZ2)
     channelState.fill(0.0);
+  mVirtualDoubleBufferSamples =
+    std::max<size_t>(4, static_cast<size_t>(std::ceil(kVirtualDoubleMaxSeconds * sampleRate)) + static_cast<size_t>(maxBlockSize) + 4);
+  for (auto& channelBuffer : mVirtualDoubleBuffer)
+    channelBuffer.assign(mVirtualDoubleBufferSamples, 0.0f);
+  mVirtualDoubleWriteIndex = 0;
+  mVirtualDoubleSmoothedAmount = std::clamp(GetParam(kVirtualDoubleAmount)->Value() * 0.01, 0.0, 1.0);
+  mVirtualDoubleDelayMs = {16.0, 28.0};
+  mVirtualDoubleRandomSeed = {0x13579BDFu, 0x2468ACE1u};
+  mVirtualDoubleToneState = {0.0, 0.0};
+  mVirtualDoubleFastEnvelope = 0.0;
+  mVirtualDoubleSlowEnvelope = 0.0;
+  mVirtualDoubleLowActivitySamples = 0;
+  mVirtualDoubleReseedCooldownSamples = 0;
+  mVirtualDoubleRetargetArmed = true;
+  mVirtualDoubleAvailable.store(true, std::memory_order_relaxed);
+  mVirtualDoubleUIAvailable = true;
   mFXDelayBufferSamples =
     std::max<size_t>(2, static_cast<size_t>(std::ceil(kFXDelayMaxSeconds * sampleRate)) + static_cast<size_t>(maxBlockSize) + 2);
   for (auto& channelBuffer : mFXDelayBuffer)
@@ -2701,6 +2736,15 @@ void NeuralAmpModeler::OnIdle()
 
       const double displayedTempoNormalized = GetParam(kDelayManualTempoBPM)->ToNormalized(displayedTempoBPM);
       pTempoControl->SetValueFromDelegate(displayedTempoNormalized, 0);
+    }
+    if (auto* pDoubleControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleAmount))
+    {
+      const bool doubleAvailable = mVirtualDoubleAvailable.load(std::memory_order_relaxed);
+      if (doubleAvailable != mVirtualDoubleUIAvailable)
+      {
+        pDoubleControl->SetDisabled(!doubleAvailable);
+        mVirtualDoubleUIAvailable = doubleAvailable;
+      }
     }
   }
 
@@ -3366,6 +3410,11 @@ void NeuralAmpModeler::OnUIOpen()
 
   if (auto* pGraphics = GetUI())
   {
+    if (auto* pDoubleControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleAmount))
+    {
+      pDoubleControl->SetDisabled(!mVirtualDoubleAvailable.load(std::memory_order_relaxed));
+      mVirtualDoubleUIAvailable = mVirtualDoubleAvailable.load(std::memory_order_relaxed);
+    }
     const bool canEditExternalAssets = (mAmpWorkflowMode != AmpWorkflowMode::Release);
     for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
     {

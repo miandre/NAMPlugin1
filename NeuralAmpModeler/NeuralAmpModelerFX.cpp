@@ -43,7 +43,180 @@ double GetDelaySyncTimeMsFromNormalized(const double normalizedValue, const doub
   const double delayTimeMs = quarterNoteMs * kDelaySyncDivisions[static_cast<size_t>(idx)].quarterNoteMultiplier;
   return std::clamp(delayTimeMs, 1.0, 2000.0);
 }
+
+double ReadInterpolatedCircularSample(const std::vector<sample>& buffer, const size_t writeIndex, const double delaySamples)
+{
+  if (buffer.empty())
+    return 0.0;
+
+  const double bufferSize = static_cast<double>(buffer.size());
+  double readPos = static_cast<double>(writeIndex) - delaySamples;
+  while (readPos < 0.0)
+    readPos += bufferSize;
+  while (readPos >= bufferSize)
+    readPos -= bufferSize;
+
+  const auto readIndex0 = static_cast<size_t>(readPos);
+  const auto readIndex1 = (readIndex0 + 1 < buffer.size()) ? (readIndex0 + 1) : 0;
+  const double frac = readPos - static_cast<double>(readIndex0);
+  return static_cast<double>(buffer[readIndex0]) * (1.0 - frac) + static_cast<double>(buffer[readIndex1]) * frac;
+}
+
+double NextVirtualDoubleRandom(uint32_t& seed)
+{
+  seed = 1664525u * seed + 1013904223u;
+  return static_cast<double>((seed >> 8) & 0x00FFFFFFu) / static_cast<double>(0x01000000u);
+}
 } // namespace
+
+void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const size_t numChannelsInternal,
+                                                  const size_t numChannelsMonoCore, const size_t numFrames,
+                                                  const double sampleRate)
+{
+  if (ioPointers == nullptr || ioPointers[0] == nullptr || ioPointers[1] == nullptr || sampleRate <= 0.0
+      || mVirtualDoubleBufferSamples <= 2 || numChannelsInternal < 2)
+  {
+    mVirtualDoubleAvailable.store(false, std::memory_order_relaxed);
+    return;
+  }
+
+  const bool doubleAvailable = (numChannelsMonoCore == 1);
+  mVirtualDoubleAvailable.store(doubleAvailable, std::memory_order_relaxed);
+  if (!doubleAvailable)
+    return;
+
+  const double targetAmount = std::clamp(GetParam(kVirtualDoubleAmount)->Value() * 0.01, 0.0, 1.0);
+  constexpr double kDoubleAmountSmoothingMs = 35.0;
+  constexpr double kDoubleWetGain = 0.82;
+  constexpr std::array<double, 2> kBaseDelayMs = {13.5, 31.5};
+  constexpr std::array<double, 2> kDelayJitterMs = {4.0, 6.5};
+  constexpr std::array<double, 2> kToneCutoffHz = {2500.0, 7000.0};
+  constexpr std::array<double, 2> kLevelSkew = {0.78, 1.20};
+  constexpr std::array<double, 2> kCrossDelayMs = {4.5, 11.5};
+  constexpr double kDoubleCrossMix = 0.015;
+  constexpr double kDoubleWidth = 1.34;
+  constexpr double kDoubleWetMidGain = 0.72;
+  constexpr std::array<double, 2> kTransientWeight = {0.68, -0.24};
+  constexpr std::array<double, 2> kAttackSkew = {0.28, -0.14};
+  constexpr double kFastEnvelopeAttackMs = 0.8;
+  constexpr double kFastEnvelopeReleaseMs = 18.0;
+  constexpr double kSlowEnvelopeAttackMs = 12.0;
+  constexpr double kSlowEnvelopeReleaseMs = 150.0;
+  constexpr double kLowActivityThreshold = 0.010;
+  constexpr double kOnsetThreshold = 0.0065;
+  constexpr double kAttackThreshold = 0.018;
+  constexpr double kRetargetLowActivitySeconds = 0.030;
+  constexpr double kRetargetCooldownSeconds = 0.080;
+
+  double smoothedAmount = mVirtualDoubleSmoothedAmount;
+  size_t writeIndex = mVirtualDoubleWriteIndex;
+  std::array<double, 2> delayMs = mVirtualDoubleDelayMs;
+  std::array<uint32_t, 2> randomSeed = mVirtualDoubleRandomSeed;
+  std::array<double, 2> toneState = mVirtualDoubleToneState;
+  double fastEnvelope = mVirtualDoubleFastEnvelope;
+  double slowEnvelope = mVirtualDoubleSlowEnvelope;
+  size_t lowActivitySamples = mVirtualDoubleLowActivitySamples;
+  size_t reseedCooldownSamples = mVirtualDoubleReseedCooldownSamples;
+  bool retargetArmed = mVirtualDoubleRetargetArmed;
+  const double amountAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kDoubleAmountSmoothingMs * 0.001));
+  const double fastAttackAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kFastEnvelopeAttackMs * 0.001));
+  const double fastReleaseAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kFastEnvelopeReleaseMs * 0.001));
+  const double slowAttackAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kSlowEnvelopeAttackMs * 0.001));
+  const double slowReleaseAlpha = 1.0 - std::exp(-1.0 / (sampleRate * kSlowEnvelopeReleaseMs * 0.001));
+  const size_t retargetLowActivitySamples =
+    std::max<size_t>(1, static_cast<size_t>(std::llround(kRetargetLowActivitySeconds * sampleRate)));
+  const size_t retargetCooldownResetSamples =
+    std::max<size_t>(1, static_cast<size_t>(std::llround(kRetargetCooldownSeconds * sampleRate)));
+
+  for (size_t s = 0; s < numFrames; ++s)
+  {
+    smoothedAmount += amountAlpha * (targetAmount - smoothedAmount);
+    const double wetAmountBase = kDoubleWetGain * std::pow(smoothedAmount, 0.52);
+    const double dryTrim = 1.0 - 0.16 * std::pow(smoothedAmount, 0.85);
+
+    const double dryLeft = static_cast<double>(ioPointers[0][s]);
+    const double dryRight = static_cast<double>(ioPointers[1][s]);
+    mVirtualDoubleBuffer[0][writeIndex] = static_cast<sample>(dryLeft);
+    mVirtualDoubleBuffer[1][writeIndex] = static_cast<sample>(dryRight);
+
+    const double detector = std::max(std::abs(dryLeft), std::abs(dryRight));
+    const double fastAlpha = (detector > fastEnvelope) ? fastAttackAlpha : fastReleaseAlpha;
+    const double slowAlpha = (detector > slowEnvelope) ? slowAttackAlpha : slowReleaseAlpha;
+    fastEnvelope += fastAlpha * (detector - fastEnvelope);
+    slowEnvelope += slowAlpha * (detector - slowEnvelope);
+    const double onsetStrength = std::max(0.0, fastEnvelope - slowEnvelope);
+
+    if (fastEnvelope < kLowActivityThreshold)
+    {
+      lowActivitySamples = std::min(retargetLowActivitySamples, lowActivitySamples + 1);
+      if (lowActivitySamples >= retargetLowActivitySamples)
+        retargetArmed = true;
+    }
+    else
+    {
+      lowActivitySamples = 0;
+    }
+
+    if (reseedCooldownSamples > 0)
+      --reseedCooldownSamples;
+
+    if (retargetArmed && reseedCooldownSamples == 0 && fastEnvelope >= kAttackThreshold && onsetStrength >= kOnsetThreshold)
+    {
+      const double separationScale = 0.45 + 0.55 * smoothedAmount;
+      for (size_t c = 0; c < 2; ++c)
+      {
+        const double jitter = (2.0 * NextVirtualDoubleRandom(randomSeed[c]) - 1.0) * kDelayJitterMs[c] * separationScale;
+        delayMs[c] = kBaseDelayMs[c] + jitter;
+      }
+      if (delayMs[1] - delayMs[0] < 11.0)
+        delayMs[1] = delayMs[0] + 11.0;
+      retargetArmed = false;
+      reseedCooldownSamples = retargetCooldownResetSamples;
+    }
+
+    if (wetAmountBase > 1.0e-5)
+    {
+      std::array<double, 2> wet = {};
+      const double attackAccent = std::clamp((onsetStrength - kOnsetThreshold) * 34.0, 0.0, 1.0);
+      const double attackFocusedWet =
+        wetAmountBase * (0.88 + 0.22 * attackAccent + 0.08 * std::sqrt(std::clamp(smoothedAmount, 0.0, 1.0)));
+      for (size_t c = 0; c < 2; ++c)
+      {
+        const double delaySamples =
+          std::clamp(delayMs[c] * 0.001 * sampleRate, 1.0, static_cast<double>(mVirtualDoubleBufferSamples - 2));
+        const double selfDelayed = ReadInterpolatedCircularSample(mVirtualDoubleBuffer[c], writeIndex, delaySamples);
+        const double crossDelaySamples = std::min(static_cast<double>(mVirtualDoubleBufferSamples - 2),
+                                                  delaySamples + kCrossDelayMs[c] * 0.001 * sampleRate);
+        const double crossDelayed = ReadInterpolatedCircularSample(mVirtualDoubleBuffer[1 - c], writeIndex, crossDelaySamples);
+        double wetVoice = ((1.0 - kDoubleCrossMix) * selfDelayed + kDoubleCrossMix * crossDelayed) * kLevelSkew[c];
+        const double toneAlpha = 1.0 - std::exp(-2.0 * kPi * kToneCutoffHz[c] / sampleRate);
+        toneState[c] += toneAlpha * (wetVoice - toneState[c]);
+        const double transientComponent = wetVoice - toneState[c];
+        wet[c] = toneState[c] + transientComponent * (kTransientWeight[c] + kAttackSkew[c] * attackAccent);
+      }
+
+      const double wetMid = 0.5 * (wet[0] + wet[1]) * kDoubleWetMidGain;
+      const double wetSide = 0.5 * (wet[0] - wet[1]) * kDoubleWidth;
+      ioPointers[0][s] = static_cast<sample>(dryLeft * dryTrim + attackFocusedWet * (wetMid + wetSide));
+      ioPointers[1][s] = static_cast<sample>(dryRight * dryTrim + attackFocusedWet * (wetMid - wetSide));
+    }
+
+    ++writeIndex;
+    if (writeIndex >= mVirtualDoubleBufferSamples)
+      writeIndex = 0;
+  }
+
+  mVirtualDoubleSmoothedAmount = smoothedAmount;
+  mVirtualDoubleWriteIndex = writeIndex;
+  mVirtualDoubleDelayMs = delayMs;
+  mVirtualDoubleRandomSeed = randomSeed;
+  mVirtualDoubleToneState = toneState;
+  mVirtualDoubleFastEnvelope = fastEnvelope;
+  mVirtualDoubleSlowEnvelope = slowEnvelope;
+  mVirtualDoubleLowActivitySamples = lowActivitySamples;
+  mVirtualDoubleReseedCooldownSamples = reseedCooldownSamples;
+  mVirtualDoubleRetargetArmed = retargetArmed;
+}
 
 void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t numChannelsInternal,
                                             const size_t numChannelsMonoCore, const size_t numFrames,
