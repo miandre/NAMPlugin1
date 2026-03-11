@@ -31,7 +31,7 @@ class NAMSender : public iplug::IPeakAvgSender<2>
 {
 public:
   NAMSender()
-  : iplug::IPeakAvgSender<2>(-90.0, true, 5.0f, 1.0f, 300.0f, 500.0f)
+  : iplug::IPeakAvgSender<2>(-90.0, true, 5.0f, 1.0f, 101.0f, 170.0f)
   {
   }
 };
