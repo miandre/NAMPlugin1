@@ -842,12 +842,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float leftGateCenterX = leftInputCenterX + topSideFilterGapX;
     const float rightDoubleCenterX = rightOutputCenterX - topSideFilterGapX;
 
-    const auto inputKnobArea = makeKnobArea(leftInputCenterX, topSideKnobTop);
-    const auto topGateKnobArea = makeKnobArea(leftGateCenterX, topSideKnobTop);
-    const auto topDoubleKnobArea = makeKnobArea(rightDoubleCenterX, topSideKnobTop);
-    const auto outputKnobArea = makeKnobArea(rightOutputCenterX, topSideKnobTop);
     constexpr float kTopUtilityLabelYOffset = 23.0f;
     constexpr float kTopUtilityValueYOffset = -28.0f;
+    constexpr float kTopUtilityKnobWithNoValueYOffset = 7.0f;
+    const auto inputKnobArea = makeKnobArea(leftInputCenterX, topSideKnobTop);
+    const auto topGateKnobArea = makeKnobArea(leftGateCenterX, topSideKnobTop - kTopUtilityKnobWithNoValueYOffset);
+    const auto topDoubleKnobArea = makeKnobArea(rightDoubleCenterX, topSideKnobTop);
+    const auto outputKnobArea = makeKnobArea(rightOutputCenterX, topSideKnobTop);
     constexpr float kTopDoubleSwitchVisualWidth = 20.0f;
     constexpr float kTopDoubleSwitchVisualHeight = 10.0f;
     constexpr float kTopDoubleSwitchHitWidth = 30.0f;
@@ -863,7 +864,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float topGateModuleCenterY =
       topGateKnobArea.MH()
       + kTopGateModuleBaseYOffset
-      + (kTopUtilityLabelYOffset - kTopDoubleModuleLabelReferenceYOffset);
+      + (kTopUtilityLabelYOffset - kTopDoubleModuleLabelReferenceYOffset + kTopUtilityKnobWithNoValueYOffset);
     const float topGateModuleWidth = kTopGateLabelWidth + kTopGateLabelGap + kTopDoubleSwitchHitWidth;
     const float topGateModuleLeft = topGateModuleCenterX - 0.5f * topGateModuleWidth;
     const auto topGateLabelArea = IRECT(topGateModuleLeft,
@@ -890,7 +891,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                            topDoubleLabelArea.R + kTopDoubleLabelGap + kTopDoubleSwitchHitWidth,
                                            topDoubleModuleCenterY + 0.5f * kTopDoubleSwitchHitHeight);
     const auto topGateAttenuationLedArea =
-      IRECT(topGateKnobArea.MW() - 6.0f, topGateKnobArea.MH() + 20.0f, topGateKnobArea.MW() + 6.0f, topGateKnobArea.MH() + 32.0f);
+      IRECT(topGateKnobArea.MW() - 6.0f, topGateKnobArea.MH() + 27.0f, topGateKnobArea.MW() + 6.0f, topGateKnobArea.MH() + 39.0f);
 
     // Amp-face controls: each amp slot owns its row geometry independently.
     const AmpFaceLayout ampFaceLayout = GetAmpFaceLayout(mAmpSelectorIndex);
