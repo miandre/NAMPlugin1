@@ -610,10 +610,9 @@ class NAMKnobControl : public IVKnobControl
 public:
   NAMKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, const IBitmap& bitmap,
                  bool drawIndicatorTrack = true, bool useDarkIndicatorDot = false, float knobScale = 1.0f,
-                 float labelYOffset = 0.0f, float valueYOffset = 0.0f)
-  : IVKnobControl(bounds, paramIdx, label, style, true)
+                 float labelYOffset = 0.0f, float valueYOffset = 0.0f, bool showValue = true)
+  : IVKnobControl(bounds, paramIdx, label, style.WithShowValue(showValue), true)
   , mBitmap(bitmap)
-  , mUseSVG(false)
   , mDrawIndicatorTrack(drawIndicatorTrack)
   , mUseDarkIndicatorDot(useDarkIndicatorDot)
   , mKnobScale(knobScale)
@@ -625,8 +624,8 @@ public:
 
   NAMKnobControl(const IRECT& bounds, int paramIdx, const char* label, const IVStyle& style, const ISVG& svg,
                  bool drawIndicatorTrack = true, bool useDarkIndicatorDot = false, float knobScale = 1.0f,
-                 float labelYOffset = 0.0f, float valueYOffset = 0.0f)
-  : IVKnobControl(bounds, paramIdx, label, style, true)
+                 float labelYOffset = 0.0f, float valueYOffset = 0.0f, bool showValue = true)
+  : IVKnobControl(bounds, paramIdx, label, style.WithShowValue(showValue), true)
   , mSVG(std::make_unique<ISVG>(svg))
   , mUseSVG(true)
   , mDrawIndicatorTrack(drawIndicatorTrack)
