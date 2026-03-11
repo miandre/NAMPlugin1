@@ -71,6 +71,7 @@ constexpr double kStereoSideBypassSilenceEnergy = 1.0e-14;
 constexpr double kStereoSideBypassEngageSeconds = 0.08;
 constexpr double kStereoSideBypassReleaseSeconds = 0.03;
 constexpr int kStereoSideBypassResumeDeClickSamples = 64;
+constexpr int kMeterChannelCount = 2;
 constexpr size_t kMinInternalPreparedFrames = 16384;
 constexpr std::array<const char*, 3> kAmpSlotDefaultModelFileNames = {"Amp1.nam", "Amp2.nam", "Amp3.nam"};
 constexpr std::array<const char*, 3> kReleaseAmpAssetTokens = {"Amp1Main", "Amp2Main", "Amp3Main"};
@@ -1977,8 +1978,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   }
   // Input enters the amp core as mono (standalone) or dual-mono (plugin stereo input).
   _ProcessInput(processInputs, numFrames, processNumChannelsExternalIn, numChannelsMonoCore);
-  if (numFrames > 0 && numChannelsMonoCore > 0 && mInputPointers != nullptr && mInputPointers[0] != nullptr)
-    mInputSender.ProcessBlock(mInputPointers, (int)numFrames, kCtrlTagInputMeter, 1);
+  _UpdateMeters(mInputPointers, nullptr, numFrames, numChannelsMonoCore, 0);
   _ApplyDSPStaging();
   const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
   auto* activeToneStack = mToneStacks[activeSlot].get();
@@ -6221,12 +6221,38 @@ void NeuralAmpModeler::_UpdateMeters(sample** inputPointer, sample** outputPoint
   if (nFrames == 0)
     return;
 
-  // Right now, we didn't specify MAXNC when we initialized these, so it's 1.
-  const int nChansHack = 1;
-  if (nChansIn > 0 && inputPointer != nullptr && inputPointer[0] != nullptr)
-    mInputSender.ProcessBlock(inputPointer, (int)nFrames, kCtrlTagInputMeter, nChansHack);
-  if (nChansOut > 0 && outputPointer != nullptr && outputPointer[0] != nullptr)
-    mOutputSender.ProcessBlock(outputPointer, (int)nFrames, kCtrlTagOutputMeter, nChansHack);
+  auto sendMeter = [nFrames](NAMSender& sender, sample** buffer, const size_t nChans, const int ctrlTag) {
+    if (buffer == nullptr || nChans == 0)
+      return;
+
+    sample* primary = nullptr;
+    for (size_t c = 0; c < nChans; ++c)
+    {
+      if (buffer[c] != nullptr)
+      {
+        primary = buffer[c];
+        break;
+      }
+    }
+    if (primary == nullptr)
+      return;
+
+    sample* secondary = nullptr;
+    for (size_t c = 1; c < nChans; ++c)
+    {
+      if (buffer[c] != nullptr)
+      {
+        secondary = buffer[c];
+        break;
+      }
+    }
+
+    sample* meterPointers[kMeterChannelCount] = {primary, (secondary != nullptr) ? secondary : primary};
+    sender.ProcessBlock(meterPointers, static_cast<int>(nFrames), ctrlTag, kMeterChannelCount);
+  };
+
+  sendMeter(mInputSender, inputPointer, nChansIn, kCtrlTagInputMeter);
+  sendMeter(mOutputSender, outputPointer, nChansOut, kCtrlTagOutputMeter);
 }
 
 // HACK

@@ -27,11 +27,11 @@ const int kNumPresets = 1;
 // Mono core path with stereo-capable post-cab processing/output bus.
 constexpr size_t kNumChannelsInternal = 2;
 
-class NAMSender : public iplug::IPeakAvgSender<>
+class NAMSender : public iplug::IPeakAvgSender<2>
 {
 public:
   NAMSender()
-  : iplug::IPeakAvgSender<>(-90.0, true, 5.0f, 1.0f, 300.0f, 500.0f)
+  : iplug::IPeakAvgSender<2>(-90.0, true, 5.0f, 1.0f, 300.0f, 500.0f)
   {
   }
 };

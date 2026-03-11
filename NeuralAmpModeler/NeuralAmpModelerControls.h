@@ -1906,15 +1906,18 @@ private:
   NAMSquareButtonControl* mClearButton = nullptr;
 };
 
-class NAMMeterControl : public IVPeakAvgMeterControl<>, public IBitmapBase
+class NAMMeterControl : public IVPeakAvgMeterControl<2>, public IBitmapBase
 {
   static constexpr float KMeterMin = -70.0f;
   static constexpr float KMeterMax = -0.01f;
+  static constexpr float KMeterInsetX = 0.5f;
+  static constexpr float KMeterInsetY = 1.0f;
+  static constexpr float KMeterLaneGap = 1.0f;
 
 public:
   NAMMeterControl(const IRECT& bounds, const IBitmap& bitmap, const IVStyle& style)
-  : IVPeakAvgMeterControl<>(bounds, "", style.WithShowValue(false).WithDrawFrame(false).WithWidgetFrac(0.8),
-                            EDirection::Vertical, {}, 0, KMeterMin, KMeterMax, {})
+  : IVPeakAvgMeterControl<2>(bounds, "", style.WithShowValue(false).WithDrawFrame(false).WithWidgetFrac(0.8),
+                             EDirection::Vertical, {}, 0, KMeterMin, KMeterMax, {})
   , IBitmapBase(bitmap)
   {
     SetPeakSize(1.0f);
@@ -1924,30 +1927,68 @@ public:
 
   virtual void OnResize() override
   {
-    SetTargetRECT(MakeRects(mRECT));
-    mWidgetBounds = mWidgetBounds.GetMidHPadded(5).GetVPadded(10);
+    SetTargetRECT(mRECT);
+    mWidgetBounds = IRECT(mRECT.L + KMeterInsetX,
+                          mRECT.T + KMeterInsetY,
+                          mRECT.R - KMeterInsetX,
+                          mRECT.B - KMeterInsetY);
     MakeTrackRects(mWidgetBounds);
     MakeStepRects(mWidgetBounds, mNSteps);
     SetDirty(false);
   }
 
+  void MakeTrackRects(const IRECT& bounds) override
+  {
+    const int nTracks = NVals();
+    if (nTracks <= 0)
+      return;
+
+    if (mDirection == EDirection::Vertical)
+    {
+      const float totalGap = KMeterLaneGap * static_cast<float>(std::max(0, nTracks - 1));
+      const float laneWidth = std::max(1.0f, (bounds.W() - totalGap) / static_cast<float>(nTracks));
+      float laneLeft = bounds.L;
+      for (int ch = 0; ch < nTracks; ++ch)
+      {
+        const float laneRight = (ch == nTracks - 1) ? bounds.R : (laneLeft + laneWidth);
+        mTrackBounds.Get()[ch] = IRECT(laneLeft, bounds.T, laneRight, bounds.B);
+        laneLeft = laneRight + KMeterLaneGap;
+      }
+      return;
+    }
+
+    const float totalGap = KMeterLaneGap * static_cast<float>(std::max(0, nTracks - 1));
+    const float laneHeight = std::max(1.0f, (bounds.H() - totalGap) / static_cast<float>(nTracks));
+    float laneTop = bounds.T;
+    for (int ch = 0; ch < nTracks; ++ch)
+    {
+      const float laneBottom = (ch == nTracks - 1) ? bounds.B : (laneTop + laneHeight);
+      mTrackBounds.Get()[ch] = IRECT(bounds.L, laneTop, bounds.R, laneBottom);
+      laneTop = laneBottom + KMeterLaneGap;
+    }
+  }
+
   void DrawBackground(IGraphics& g, const IRECT& r) override
   {
-    g.DrawFittedBitmap(mBitmap, r);
-    // Subtle theme-colored frame to better define meter bounds.
-    g.DrawRect(GetColor(kX1).WithOpacity(0.8f), r.GetPadded(-0.5f), &mBlend, 1.0f);
+    const IRECT bounds(r.L + 0.5f, r.T + 0.5f, r.R - 0.5f, r.B - 0.5f);
+    g.FillRect(IColor(255, 42, 42, 44), bounds, &mBlend);
+    g.DrawRect(IColor(255, 74, 74, 78), bounds, &mBlend, 1.0f);
+  }
+
+  void DrawTrackBackground(IGraphics& g, const IRECT& r, int chIdx) override
+  {
+    g.FillRect(IColor(255, 30, 30, 32), r, &mBlend);
   }
 
   void DrawTrackHandle(IGraphics& g, const IRECT& r, int chIdx, bool aboveBaseValue) override
   {
     if (r.H() > 2)
-      g.FillRect(GetColor(kX1), r, &mBlend);
+      g.FillRect(PluginColors::OFF_WHITE, r, &mBlend);
   }
 
   void DrawPeak(IGraphics& g, const IRECT& r, int chIdx, bool aboveBaseValue) override
   {
-    g.DrawGrid(COLOR_BLACK, mTrackBounds.Get()[chIdx], 10, 2);
-    g.FillRect(GetColor(kX3), r, &mBlend);
+    g.FillRect(COLOR_WHITE, r, &mBlend);
   }
 };
 
