@@ -1985,7 +1985,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool ampBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
   const bool stompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
   const bool cabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
-  const bool noiseGateActive = GetParam(kNoiseGateActive)->Value() && !stompBypassed;
+  const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
   const bool haveStereoStomp = (mStompModel != nullptr) && (mStompModelRight != nullptr);
   const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed
                             && ((numChannelsMonoCore == 1) ? (mStompModel != nullptr) : haveStereoStomp);
