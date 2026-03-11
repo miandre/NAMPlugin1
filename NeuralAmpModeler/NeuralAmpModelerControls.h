@@ -1913,6 +1913,7 @@ class NAMMeterControl : public IVPeakAvgMeterControl<2>, public IBitmapBase
   static constexpr float KMeterInsetX = 0.5f;
   static constexpr float KMeterInsetY = 1.0f;
   static constexpr float KMeterLaneGap = 1.0f;
+  static constexpr float KMeterClipIndicatorHeight = 5.0f;
 
 public:
   NAMMeterControl(const IRECT& bounds, const IBitmap& bitmap, const IVStyle& style)
@@ -1977,7 +1978,10 @@ public:
 
   void DrawTrackBackground(IGraphics& g, const IRECT& r, int chIdx) override
   {
+    _SyncClipResetState();
     g.FillRect(IColor(255, 30, 30, 32), r, &mBlend);
+    if (mClipLatched[chIdx])
+      g.FillRect(COLOR_RED, IRECT(r.L, r.T, r.R, std::min(r.B, r.T + KMeterClipIndicatorHeight)), &mBlend);
   }
 
   void DrawTrackHandle(IGraphics& g, const IRECT& r, int chIdx, bool aboveBaseValue) override
@@ -1990,6 +1994,64 @@ public:
   {
     g.FillRect(COLOR_WHITE, r, &mBlend);
   }
+
+  void OnMsgFromDelegate(int msgTag, int dataSize, const void* pData) override
+  {
+    if (!IVTrackControlBase::IsDisabled() && msgTag == ISender<>::kUpdateMessage)
+    {
+      _SyncClipResetState();
+      IByteStream stream(pData, dataSize);
+
+      int pos = 0;
+      ISenderData<2, std::pair<float, float>> d;
+      pos = stream.Get(&d, pos);
+
+      const auto lowRangeDB = IVPeakAvgMeterControl<2>::mLowRangeDB;
+      const auto highRangeDB = IVPeakAvgMeterControl<2>::mHighRangeDB;
+
+      const double lowPointAbs = std::fabs(lowRangeDB);
+      const double rangeDB = std::fabs(highRangeDB - lowRangeDB);
+
+      for (auto c = d.chanOffset; c < (d.chanOffset + d.nChans); c++)
+      {
+        const double peakValue = AmpToDB(static_cast<double>(std::get<0>(d.vals[c])));
+        const double avgValue = AmpToDB(static_cast<double>(std::get<1>(d.vals[c])));
+        const double linearPeakPos = (peakValue + lowPointAbs) / rangeDB;
+        const double linearAvgPos = (avgValue + lowPointAbs) / rangeDB;
+
+        IVTrackControlBase::SetValue(Clip(linearAvgPos, 0., 1.), c);
+        mPeakValues[c] = static_cast<float>(linearPeakPos);
+        if (peakValue >= 0.0)
+          mClipLatched[c] = true;
+      }
+
+      IVTrackControlBase::SetDirty(false);
+    }
+  }
+
+  void OnMouseDown(float x, float y, const IMouseMod& mod) override
+  {
+    ++sClipResetGeneration;
+    _SyncClipResetState();
+    if (auto* ui = GetUI())
+      ui->SetAllControlsDirty();
+    else
+      SetDirty(false);
+  }
+
+private:
+  void _SyncClipResetState()
+  {
+    if (mClipResetGenerationSeen != sClipResetGeneration)
+    {
+      mClipLatched.fill(false);
+      mClipResetGenerationSeen = sClipResetGeneration;
+    }
+  }
+
+  inline static uint32_t sClipResetGeneration = 0;
+  uint32_t mClipResetGenerationSeen = 0;
+  std::array<bool, 2> mClipLatched = {false, false};
 };
 
 // Container where we can refer to children by names instead of indices
