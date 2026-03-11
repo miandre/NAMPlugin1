@@ -158,6 +158,7 @@ enum ECtrlTags
   kCtrlTagFXDelayOnLED,
   kCtrlTagFXReverbOnLED,
   kCtrlTagFXDelayReadout,
+  kCtrlTagDoubleLabel,
   kCtrlTagAmp1HasLoudness,
   kCtrlTagAmp1HasCalibration,
   kCtrlTagAmp2HasLoudness,

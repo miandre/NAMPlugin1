@@ -530,8 +530,8 @@ const IVStyle style =
           DEFAULT_WIDGET_FRAC,
           DEFAULT_WIDGET_ANGLE};
 const IVStyle utilityStyle = style.WithLabelText(
-  IText(DEFAULT_TEXT_SIZE + 1.f, PluginColors::NAM_THEMEFONTCOLOR, "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle))
-                                .WithValueText(IText(DEFAULT_TEXT_SIZE + 0.f,
+  IText(DEFAULT_TEXT_SIZE - 2.0f, PluginColors::NAM_THEMEFONTCOLOR, "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle))
+                                .WithValueText(IText(DEFAULT_TEXT_SIZE - 1.0f,
                                                      PluginColors::NAM_THEMEFONTCOLOR.WithOpacity(0.9f),
                                                      "ArialNarrow-Bold",
                                                      EAlign::Center,
@@ -615,7 +615,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
   GetParam(kNoiseGateThreshold)->InitDouble("Gate", 35.0, 0.0, 100.0, 0.1, "%");
   GetParam(kVirtualDoubleActive)->InitBool("Double Active", true);
-  GetParam(kVirtualDoubleAmount)->InitDouble("Double", 0.0, 0.0, 100.0, 0.1, "%");
+  GetParam(kVirtualDoubleAmount)->InitDouble("Double", 65.0, 0.0, 100.0, 0.1, "");
   GetParam(kNoiseGateReleaseMs)->InitDouble("Gate Release", 40.0, 1.0, 100.0, 1.0, "");
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
   GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
@@ -846,8 +846,31 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto topGateKnobArea = makeKnobArea(leftGateCenterX, topSideKnobTop);
     const auto topDoubleKnobArea = makeKnobArea(rightDoubleCenterX, topSideKnobTop);
     const auto outputKnobArea = makeKnobArea(rightOutputCenterX, topSideKnobTop);
-    const auto topDoubleSwitchArea = IRECT(topDoubleKnobArea.MW() + 26.0f, topDoubleKnobArea.MH() + 11.0f,
-                                           topDoubleKnobArea.MW() + 66.0f, topDoubleKnobArea.MH() + 29.0f);
+    constexpr float kTopUtilityLabelYOffset = 23.0f;
+    constexpr float kTopUtilityValueYOffset = -28.0f;
+    constexpr float kTopDoubleSwitchVisualWidth = 20.0f;
+    constexpr float kTopDoubleSwitchVisualHeight = 10.0f;
+    constexpr float kTopDoubleSwitchHitWidth = 30.0f;
+    constexpr float kTopDoubleSwitchHitHeight = 15.0f;
+    constexpr float kTopDoubleLabelWidth = 34.0f;
+    constexpr float kTopDoubleLabelGap = 2.0f;
+    constexpr float kTopDoubleModuleBaseYOffset = -34.0f;
+    constexpr float kTopDoubleModuleLabelReferenceYOffset = 20.0f;
+    const float topDoubleModuleCenterX = topDoubleKnobArea.MW();
+    const float topDoubleModuleCenterY =
+      topDoubleKnobArea.MH()
+      + kTopDoubleModuleBaseYOffset
+      + (kTopUtilityLabelYOffset - kTopDoubleModuleLabelReferenceYOffset);
+    const float topDoubleModuleWidth = kTopDoubleLabelWidth + kTopDoubleLabelGap + kTopDoubleSwitchHitWidth;
+    const float topDoubleModuleLeft = topDoubleModuleCenterX - 0.5f * topDoubleModuleWidth;
+    const auto topDoubleLabelArea = IRECT(topDoubleModuleLeft,
+                                          topDoubleModuleCenterY - 11.0f,
+                                          topDoubleModuleLeft + kTopDoubleLabelWidth,
+                                          topDoubleModuleCenterY + 11.0f);
+    const auto topDoubleSwitchArea = IRECT(topDoubleLabelArea.R + kTopDoubleLabelGap,
+                                           topDoubleModuleCenterY - 0.5f * kTopDoubleSwitchHitHeight,
+                                           topDoubleLabelArea.R + kTopDoubleLabelGap + kTopDoubleSwitchHitWidth,
+                                           topDoubleModuleCenterY + 0.5f * kTopDoubleSwitchHitHeight);
     const auto topGateAttenuationLedArea =
       IRECT(topGateKnobArea.MW() - 6.0f, topGateKnobArea.MH() + 24.0f, topGateKnobArea.MW() + 6.0f, topGateKnobArea.MH() + 36.0f);
 
@@ -1438,17 +1461,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       -1,
       "FX_CONTROLS");
     pGraphics->AttachControl(new NAMSwitchControl(eqToggleArea, kEQActive, "EQ", style, switchHandleBitmap))->Hide(true);
-    pGraphics->AttachControl(
-      new NAMBitmapToggleControl(topDoubleSwitchArea, kVirtualDoubleActive, smallOnOffOffBitmap, smallOnOffOnBitmap))
-      ->SetTooltip("Virtual double on/off");
-
     // The knobs
-    constexpr float kSideLabelYOffset = 18.0f;
-    constexpr float kSideValueYOffset = -24.0f;
     const IVStyle fxKnobNoLabelStyle = utilityStyle.WithShowLabel(false);
+    const IVStyle topDoubleKnobStyle =
+      utilityStyle.WithLabelText(utilityStyle.labelText.WithFGColor(COLOR_TRANSPARENT));
     pGraphics->AttachControl(new NAMKnobControl(
-      inputKnobArea, kInputLevel, "INPUT", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale, kSideLabelYOffset,
-      kSideValueYOffset));
+      inputKnobArea, kInputLevel, "INPUT", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale, kTopUtilityLabelYOffset,
+      kTopUtilityValueYOffset));
     pGraphics->AttachControl(
       new NAMDeactivatableKnobControl(
         topGateKnobArea,
@@ -1460,21 +1479,30 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         true,
         false,
         topSideKnobScale,
-        kSideLabelYOffset,
-        kSideValueYOffset))
+        kTopUtilityLabelYOffset,
+        kTopUtilityValueYOffset))
       ->SetTooltip("Noise gate amount. Ctrl-click or right-click toggles the gate on/off.");
     pGraphics->AttachControl(new NAMKnobControl(
       topDoubleKnobArea,
       kVirtualDoubleAmount,
       "DOUBLE",
-      utilityStyle,
+      topDoubleKnobStyle,
       outerKnobBackgroundSVG,
       true,
       false,
       topSideKnobScale,
-      kSideLabelYOffset,
-      kSideValueYOffset))
+      kTopUtilityLabelYOffset,
+      kTopUtilityValueYOffset))
       ->SetTooltip("Virtual double amount. Available only for the mono guitar path.");
+    pGraphics->AttachControl(new ITextControl(
+                               topDoubleLabelArea,
+                               "DOUBLE",
+                               utilityStyle.labelText.WithFGColor(COLOR_WHITE.WithOpacity(0.92f)).WithAlign(EAlign::Center).WithVAlign(EVAlign::Middle),
+                               COLOR_TRANSPARENT),
+                             kCtrlTagDoubleLabel);
+    pGraphics->AttachControl(
+      new NAMMiniSliderToggleControl(topDoubleSwitchArea, kVirtualDoubleActive, kTopDoubleSwitchVisualWidth, kTopDoubleSwitchVisualHeight))
+      ->SetTooltip("Virtual double on/off");
     pGraphics->AttachControl(
       new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "LEVEL", utilityStyle, pedalKnobBitmap,
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
@@ -1659,8 +1687,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                              "EQ_CONTROLS");
     pGraphics->AttachControl(new NAMKnobControl(
       outputKnobArea, kOutputLevel, "OUTPUT", utilityStyle, outerKnobBackgroundSVG, true, false, topSideKnobScale,
-      kSideLabelYOffset,
-      kSideValueYOffset));
+      kTopUtilityLabelYOffset,
+      kTopUtilityValueYOffset));
 
     // The meters
     pGraphics->AttachControl(new NAMMeterControl(inputMeterArea, meterBackgroundBitmap, style), kCtrlTagInputMeter);
@@ -2748,13 +2776,13 @@ void NeuralAmpModeler::OnIdle()
     if (auto* pDoubleControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleAmount))
     {
       const bool doubleAvailable = mVirtualDoubleAvailable.load(std::memory_order_relaxed);
-      if (doubleAvailable != mVirtualDoubleUIAvailable)
-      {
-        pDoubleControl->SetDisabled(!doubleAvailable);
-        if (auto* pDoubleSwitchControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleActive))
-          pDoubleSwitchControl->SetDisabled(!doubleAvailable);
-        mVirtualDoubleUIAvailable = doubleAvailable;
-      }
+      const bool doubleActive = GetParam(kVirtualDoubleActive)->Bool();
+      pDoubleControl->SetDisabled(!(doubleAvailable && doubleActive));
+      if (auto* pDoubleSwitchControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleActive))
+        pDoubleSwitchControl->SetDisabled(!doubleAvailable);
+      if (auto* pDoubleLabel = pGraphics->GetControlWithTag(kCtrlTagDoubleLabel))
+        pDoubleLabel->SetDisabled(!doubleAvailable);
+      mVirtualDoubleUIAvailable = doubleAvailable;
     }
   }
 
@@ -3422,10 +3450,14 @@ void NeuralAmpModeler::OnUIOpen()
   {
     if (auto* pDoubleControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleAmount))
     {
-      pDoubleControl->SetDisabled(!mVirtualDoubleAvailable.load(std::memory_order_relaxed));
+      const bool doubleAvailable = mVirtualDoubleAvailable.load(std::memory_order_relaxed);
+      const bool doubleActive = GetParam(kVirtualDoubleActive)->Bool();
+      pDoubleControl->SetDisabled(!(doubleAvailable && doubleActive));
       if (auto* pDoubleSwitchControl = pGraphics->GetControlWithParamIdx(kVirtualDoubleActive))
-        pDoubleSwitchControl->SetDisabled(!mVirtualDoubleAvailable.load(std::memory_order_relaxed));
-      mVirtualDoubleUIAvailable = mVirtualDoubleAvailable.load(std::memory_order_relaxed);
+        pDoubleSwitchControl->SetDisabled(!doubleAvailable);
+      if (auto* pDoubleLabel = pGraphics->GetControlWithTag(kCtrlTagDoubleLabel))
+        pDoubleLabel->SetDisabled(!doubleAvailable);
+      mVirtualDoubleUIAvailable = doubleAvailable;
     }
     const bool canEditExternalAssets = (mAmpWorkflowMode != AmpWorkflowMode::Release);
     for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)

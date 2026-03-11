@@ -268,6 +268,64 @@ private:
   IText mOffText;
 };
 
+class NAMMiniSliderToggleControl : public IControl
+{
+public:
+  NAMMiniSliderToggleControl(const IRECT& bounds, int paramIdx, float visualWidth, float visualHeight)
+  : IControl(bounds, paramIdx)
+  , mVisualWidth(visualWidth)
+  , mVisualHeight(visualHeight)
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const bool isOn = GetValue() > 0.5;
+    const IRECT trackBounds(mRECT.MW() - 0.5f * mVisualWidth,
+                            mRECT.MH() - 0.5f * mVisualHeight,
+                            mRECT.MW() + 0.5f * mVisualWidth,
+                            mRECT.MH() + 0.5f * mVisualHeight);
+    const float cornerRadius = 3.5f;
+    const IColor borderColor = COLOR_WHITE.WithOpacity(IsDisabled() ? 0.55f : 0.92f);
+    const IColor trackColor = COLOR_BLACK.WithOpacity(IsDisabled() ? 0.55f : 0.92f);
+    const IColor activeFillColor = COLOR_WHITE.WithOpacity(IsDisabled() ? 0.0f : 0.55f);
+    const IColor handleColor = COLOR_WHITE.WithOpacity(IsDisabled() ? 0.55f : 1.0f);
+
+    g.FillRoundRect(trackColor, trackBounds, cornerRadius, &mBlend);
+
+    if (isOn)
+    {
+      const IRECT fillBounds = trackBounds.GetPadded(-2.0f).GetFromLeft((trackBounds.W() - 2.0f) * 0.56f);
+      g.FillRoundRect(activeFillColor, fillBounds, 2.0f, &mBlend);
+    }
+
+    g.DrawRoundRect(borderColor, trackBounds, cornerRadius, &mBlend, 0.8f);
+
+    const float handleInset = 2.0f;
+    const float handleWidth = std::max(8.0f, 0.26f * trackBounds.W());
+    const float handleHeight = trackBounds.H() - 2.0f * handleInset;
+    const float handleTop = trackBounds.T + handleInset;
+    const float handleLeft = isOn ? (trackBounds.R - handleInset - handleWidth) : (trackBounds.L + handleInset);
+    const IRECT handleBounds(handleLeft, handleTop, handleLeft + handleWidth, handleTop + handleHeight);
+    g.FillRoundRect(handleColor, handleBounds, 2.0f, &mBlend);
+
+    if (mMouseIsOver && !IsDisabled())
+      g.FillRoundRect(COLOR_WHITE.WithOpacity(0.07f), trackBounds.GetPadded(-1.0f), cornerRadius - 1.0f, &mBlend);
+  }
+
+  void OnMouseDown(float, float, const IMouseMod&) override
+  {
+    if (IsDisabled())
+      return;
+
+    SetValueFromUserInput(GetValue() > 0.5 ? 0.0 : 1.0);
+  }
+
+private:
+  float mVisualWidth = 20.0f;
+  float mVisualHeight = 16.0f;
+};
+
 class NAMTempoNumberBoxControl : public IVNumberBoxControl
 {
 public:
