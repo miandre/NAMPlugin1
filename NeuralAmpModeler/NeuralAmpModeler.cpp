@@ -61,6 +61,10 @@ constexpr int kPresetMenuTagUserBase = 1000;
 constexpr int kPresetMenuTagFactoryBase = 2000;
 constexpr int kCtrlTagStandalonePresetNameEntryProxy = 91000;
 constexpr std::streamoff kMaxStandaloneStateBytes = 16 * 1024 * 1024;
+#ifdef APP_API
+constexpr const char* kStandaloneStateFileHeader = "###NAMStandaloneState###";
+constexpr int32_t kStandaloneStateFileVersion = 1;
+#endif
 constexpr double kEffectiveMonoMaxPeakDiff = 3.0e-5;
 constexpr double kEffectiveMonoMaxRelativeDiff = 1.0e-7;
 constexpr double kEffectiveMonoSilenceMidEnergy = 1.0e-14;
@@ -440,14 +444,83 @@ bool SaveChunkToFile(const std::filesystem::path& filePath, const IByteChunk& ch
 }
 
 #ifdef APP_API
-bool LoadStandaloneStateChunk(IByteChunk& chunk)
+struct StandaloneStateMetadata
 {
-  return LoadChunkFromFile(GetStandaloneStateFilePath(), chunk);
+  WDL_String presetFilePath;
+  bool presetDirty = false;
+  bool defaultPresetActive = false;
+  bool hasStoredPresetContext = false;
+};
+
+bool LoadStandaloneStateChunk(IByteChunk& chunk, StandaloneStateMetadata& metadata)
+{
+  metadata.presetFilePath.Set("");
+  metadata.presetDirty = false;
+  metadata.defaultPresetActive = false;
+  metadata.hasStoredPresetContext = false;
+
+  IByteChunk fileChunk;
+  if (!LoadChunkFromFile(GetStandaloneStateFilePath(), fileChunk))
+    return false;
+
+  WDL_String header;
+  int pos = fileChunk.GetStr(header, 0);
+  if (pos > 0 && std::strcmp(header.Get(), kStandaloneStateFileHeader) == 0)
+  {
+    int32_t version = 0;
+    pos = fileChunk.Get(&version, pos);
+    if (pos < 0 || version != kStandaloneStateFileVersion)
+      return false;
+
+    int stateSize = 0;
+    pos = fileChunk.Get(&stateSize, pos);
+    if (pos < 0 || stateSize < 0 || stateSize > (fileChunk.Size() - pos))
+      return false;
+
+    chunk.Clear();
+    if (stateSize > 0)
+      chunk.PutBytes(fileChunk.GetData() + pos, stateSize);
+    pos += stateSize;
+
+    int storedDirty = 0;
+    int storedDefaultPresetActive = 0;
+    pos = fileChunk.GetStr(metadata.presetFilePath, pos);
+    if (pos < 0)
+      return false;
+    pos = fileChunk.Get(&storedDirty, pos);
+    if (pos < 0)
+      return false;
+    pos = fileChunk.Get(&storedDefaultPresetActive, pos);
+    if (pos < 0)
+      return false;
+
+    metadata.presetDirty = (storedDirty != 0);
+    metadata.defaultPresetActive = (storedDefaultPresetActive != 0);
+    metadata.hasStoredPresetContext = true;
+    return true;
+  }
+
+  chunk.Clear();
+  chunk.PutChunk(&fileChunk);
+  return true;
 }
 
-void SaveStandaloneStateChunk(const IByteChunk& chunk)
+void SaveStandaloneStateChunk(const IByteChunk& chunk, const StandaloneStateMetadata& metadata)
 {
-  SaveChunkToFile(GetStandaloneStateFilePath(), chunk);
+  IByteChunk fileChunk;
+  fileChunk.PutStr(kStandaloneStateFileHeader);
+  fileChunk.Put(&kStandaloneStateFileVersion);
+  const int stateSize = chunk.Size();
+  fileChunk.Put(&stateSize);
+  if (stateSize > 0 && chunk.GetData() != nullptr)
+    fileChunk.PutChunk(&chunk);
+  fileChunk.PutStr(metadata.presetFilePath.Get());
+  const int storedDirty = metadata.presetDirty ? 1 : 0;
+  const int storedDefaultPresetActive = metadata.defaultPresetActive ? 1 : 0;
+  fileChunk.Put(&storedDirty);
+  fileChunk.Put(&storedDefaultPresetActive);
+
+  SaveChunkToFile(GetStandaloneStateFilePath(), fileChunk);
 }
 #endif
 
@@ -1824,7 +1897,14 @@ NeuralAmpModeler::~NeuralAmpModeler()
 #ifdef APP_API
   IByteChunk stateChunk;
   if (SerializeState(stateChunk))
-    SaveStandaloneStateChunk(stateChunk);
+  {
+    StandaloneStateMetadata stateMetadata;
+    stateMetadata.presetFilePath.Set(mStandalonePresetFilePath.Get());
+    stateMetadata.presetDirty = mStandalonePresetDirty;
+    stateMetadata.defaultPresetActive = mDefaultPresetActive;
+    stateMetadata.hasStoredPresetContext = true;
+    SaveStandaloneStateChunk(stateChunk, stateMetadata);
+  }
 #endif
   _DeallocateIOPointers();
 }
@@ -2492,8 +2572,43 @@ void NeuralAmpModeler::OnReset()
   {
     mStandaloneStateLoadAttempted = true;
     IByteChunk startupStateChunk;
-    if (LoadStandaloneStateChunk(startupStateChunk))
+    StandaloneStateMetadata startupStateMetadata;
+    if (LoadStandaloneStateChunk(startupStateChunk, startupStateMetadata))
+    {
       UnserializeState(startupStateChunk, 0);
+      if (startupStateMetadata.hasStoredPresetContext)
+      {
+        mStandalonePresetFilePath.Set("");
+        mStandalonePresetIndex = -1;
+        mStandalonePresetDirty = startupStateMetadata.presetDirty;
+        mDefaultPresetActive = startupStateMetadata.defaultPresetActive;
+        mDefaultPresetPostLoadSyncPending = false;
+
+        if (startupStateMetadata.presetFilePath.GetLength() > 0)
+        {
+          std::filesystem::path presetPath =
+            EnsureStandalonePresetExtension(std::filesystem::path(startupStateMetadata.presetFilePath.Get()));
+          std::error_code ec;
+          presetPath = std::filesystem::absolute(presetPath, ec);
+          if (ec)
+            presetPath =
+              EnsureStandalonePresetExtension(std::filesystem::path(startupStateMetadata.presetFilePath.Get()));
+
+          if (std::filesystem::exists(presetPath, ec) && !ec)
+          {
+            mStandalonePresetFilePath.Set(presetPath.string().c_str());
+            mDefaultPresetActive = false;
+          }
+          else
+          {
+            mStandalonePresetDirty = false;
+          }
+        }
+
+        _RefreshStandalonePresetList();
+        _UpdatePresetLabel();
+      }
+    }
   }
 #endif
 
@@ -3068,7 +3183,7 @@ void NeuralAmpModeler::_ApplyInputStereoAutoDefaultIfNeeded()
 
 bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 {
-  constexpr int32_t kStateSchemaVersion = 3;
+  constexpr int32_t kStateSchemaVersion = 4;
 
   // If this isn't here when unserializing, then we know we're dealing with something before v0.8.0.
   WDL_String header("###NeuralAmpModeler###"); // Don't change this!
@@ -3114,18 +3229,69 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
     chunk.Put(&slotState.master);
   }
 
-  return SerializeParams(chunk);
+  if (!SerializeParams(chunk))
+    return false;
+
+  chunk.PutStr(mStandalonePresetFilePath.Get());
+  const int32_t presetDirty = mStandalonePresetDirty ? 1 : 0;
+  const int32_t defaultPresetActive = mDefaultPresetActive ? 1 : 0;
+  chunk.Put(&presetDirty);
+  chunk.Put(&defaultPresetActive);
+
+  return true;
 }
 
 int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 {
-  constexpr int32_t kStateSchemaVersion = 3;
+  constexpr int32_t kStateSchemaVersion = 4;
+  constexpr int32_t kPreviousStateSchemaVersion = 3;
   constexpr int32_t kLegacyStateSchemaVersion = 2;
   auto markStateRestored = [this]() {
     mStateRestoredFromChunk = true;
     mInputStereoAutoDefaultApplied = true;
     if (!mLoadingDefaultPreset)
       mDefaultPresetActive = false;
+  };
+  struct RestoredPresetContext
+  {
+    WDL_String presetFilePath;
+    bool presetDirty = false;
+    bool defaultPresetActive = false;
+    bool hasStoredPresetContext = false;
+  };
+  auto applyRestoredPresetContext = [this](const RestoredPresetContext& presetContext) {
+    if (!presetContext.hasStoredPresetContext)
+      return;
+
+    mStandalonePresetFilePath.Set("");
+    mStandalonePresetIndex = -1;
+    mStandalonePresetDirty = presetContext.presetDirty;
+    mDefaultPresetActive = presetContext.defaultPresetActive;
+    mDefaultPresetPostLoadSyncPending = false;
+
+    if (presetContext.presetFilePath.GetLength() > 0)
+    {
+      std::filesystem::path presetPath =
+        EnsureStandalonePresetExtension(std::filesystem::path(presetContext.presetFilePath.Get()));
+      std::error_code ec;
+      presetPath = std::filesystem::absolute(presetPath, ec);
+      if (ec)
+        presetPath = EnsureStandalonePresetExtension(std::filesystem::path(presetContext.presetFilePath.Get()));
+
+      if (std::filesystem::exists(presetPath, ec) && !ec)
+      {
+        mStandalonePresetFilePath.Set(presetPath.string().c_str());
+        mDefaultPresetActive = false;
+      }
+      else
+      {
+        mStandalonePresetDirty = false;
+        mDefaultPresetActive = false;
+      }
+    }
+
+    _RefreshStandalonePresetList();
+    _UpdatePresetLabel();
   };
   auto syncAllParamControls = [this]() {
     if (GetUI() == nullptr)
@@ -3162,7 +3328,9 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
   // Current chunk schema (v3): explicit slot paths/states + full parameter payload.
   int32_t schemaVersion = 0;
   const int schemaPos = chunk.Get(&schemaVersion, versionPos);
-  if (schemaPos >= 0 && (schemaVersion == kStateSchemaVersion || schemaVersion == kLegacyStateSchemaVersion))
+  if (schemaPos >= 0
+      && (schemaVersion == kStateSchemaVersion || schemaVersion == kPreviousStateSchemaVersion
+          || schemaVersion == kLegacyStateSchemaVersion))
   {
     int statePos = schemaPos;
 
@@ -3260,6 +3428,26 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       return restoredPos;
     }
 
+    RestoredPresetContext presetContext;
+    int restoredPos = paramsPos;
+    if (schemaVersion == kStateSchemaVersion)
+    {
+      int32_t presetDirty = 0;
+      int32_t defaultPresetActive = 0;
+      restoredPos = chunk.GetStr(presetContext.presetFilePath, restoredPos);
+      if (restoredPos < 0)
+        return startPos;
+      restoredPos = chunk.Get(&presetDirty, restoredPos);
+      if (restoredPos < 0)
+        return startPos;
+      restoredPos = chunk.Get(&defaultPresetActive, restoredPos);
+      if (restoredPos < 0)
+        return startPos;
+      presetContext.presetDirty = (presetDirty != 0);
+      presetContext.defaultPresetActive = (defaultPresetActive != 0);
+      presetContext.hasStoredPresetContext = true;
+    }
+
     const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     mAmpSelectorIndex = std::clamp(static_cast<int>(activeSlot), 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     _BeginPresetRecallTransition(previousActiveSlot, mAmpSelectorIndex);
@@ -3320,9 +3508,10 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     _SyncTunerParamToTopNav();
     _RefreshTopNavControls();
     markStateRestored();
+    applyRestoredPresetContext(presetContext);
     syncAllParamControls();
 
-    return paramsPos;
+    return restoredPos;
   }
 
   // Legacy headered chunk from this fork: version + single NAM path + IR L/R + full parameter payload.
@@ -3539,7 +3728,7 @@ void NeuralAmpModeler::OnParamChange(int paramIdx)
 
 void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
 {
-  if (source == kUI)
+  if (source == kUI && paramIdx != kInputStereoMode)
     _MarkStandalonePresetDirty();
 
   if (auto pGraphics = GetUI())
@@ -3967,9 +4156,15 @@ bool NeuralAmpModeler::_LoadStandalonePresetFromFile(const WDL_String& filePath)
   if (!LoadChunkFromFile(path, chunk))
     return false;
 
+  const bool preservedInputStereoMode = GetParam(kInputStereoMode)->Bool();
   const int unserializePos = UnserializeState(chunk, 0);
   if (unserializePos < 0)
     return false;
+  if (GetParam(kInputStereoMode)->Bool() != preservedInputStereoMode)
+  {
+    GetParam(kInputStereoMode)->Set(preservedInputStereoMode ? 1.0 : 0.0);
+    SendParameterValueFromDelegate(kInputStereoMode, GetParam(kInputStereoMode)->GetNormalized(), true);
+  }
 
   mStandalonePresetFilePath.Set(path.string().c_str());
   mDefaultPresetActive = false;
@@ -3986,10 +4181,16 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
     return false;
 
   mLoadingDefaultPreset = true;
+  const bool preservedInputStereoMode = GetParam(kInputStereoMode)->Bool();
   const int unserializePos = UnserializeState(mDefaultPresetStateChunk, 0);
   mLoadingDefaultPreset = false;
   if (unserializePos < 0)
     return false;
+  if (GetParam(kInputStereoMode)->Bool() != preservedInputStereoMode)
+  {
+    GetParam(kInputStereoMode)->Set(preservedInputStereoMode ? 1.0 : 0.0);
+    SendParameterValueFromDelegate(kInputStereoMode, GetParam(kInputStereoMode)->GetNormalized(), true);
+  }
 
 #if defined(APP_API) && (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
   if (mAmpWorkflowMode == AmpWorkflowMode::Release)
