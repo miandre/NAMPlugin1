@@ -71,6 +71,24 @@ public:
   }
 };
 
+class NAMHoverPopSVGSwitchControl : public ISVGSwitchControl
+{
+public:
+  using ISVGSwitchControl::ISVGSwitchControl;
+
+  void Draw(IGraphics& g) override
+  {
+    IRECT drawRect = mRECT.GetScaledAboutCentre(0.9f);
+    if (mMouseIsOver && !IsDisabled())
+    {
+      drawRect = drawRect.GetScaledAboutCentre(1.05f);
+      drawRect.Translate(0.0f, -1.5f);
+    }
+
+    g.DrawSVG(mSVGs[GetSelectedIdx()], drawRect, &mBlend);
+  }
+};
+
 class NAMBackgroundBitmapControl : public IBitmapControl
 {
 public:

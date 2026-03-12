@@ -1457,7 +1457,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->SetTooltip("Tuner");
     pGraphics->AttachControl(new NAMBitmapToggleControl(modelToggleArea, kModelToggle, switchOffBitmap, switchOnBitmap))
       ->SetTooltip("Model On/Off");
-    pGraphics->AttachControl(new ISVGSwitchControl(inputModeSwitchArea, {inputMonoSVG, inputStereoSVG}, kInputStereoMode))
+    pGraphics->AttachControl(
+      new NAMHoverPopSVGSwitchControl(inputModeSwitchArea, {inputMonoSVG, inputStereoSVG}, kInputStereoMode))
       ->SetTooltip("Input mode: Mono = input 1 only, Stereo = input 1+2");
     const IText syncOnText(18.0f, COLOR_WHITE.WithOpacity(0.96f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
     const IText syncOffText(18.0f, COLOR_GRAY.WithOpacity(0.9f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
