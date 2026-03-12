@@ -666,6 +666,8 @@ public:
     const float widgetRadius = 0.73f * 0.5f * knobRect.W();
     const float cx = knobRect.MW(), cy = knobRect.MH();
     const float angle = mAngle1 + (static_cast<float>(GetValue()) * (mAngle2 - mAngle1));
+    if (mMouseIsOver && !IsDisabled())
+      g.FillCircle(COLOR_WHITE.WithOpacity(0.19f), cx, cy, widgetRadius * 0.8f, &mBlend);
     if (mDrawIndicatorTrack)
       DrawIndicatorTrack(g, angle, cx + 0.5, cy, widgetRadius);
     if (mUseSVG && mSVG && mSVG->IsValid())
