@@ -368,7 +368,13 @@ public:
   void Draw(IGraphics& g) override
   {
     const bool disabled = IsDisabled();
-    const bool active = (mMouseIsOver || mMouseIsDown) && !disabled;
+    if (disabled)
+    {
+      mMouseIsOver = false;
+      mMouseIsDown = false;
+    }
+
+    const bool active = mMouseIsOver || mMouseIsDown;
     _ApplyVisualState(active);
     if (disabled)
     {
@@ -377,9 +383,12 @@ public:
       SetColor(kHL, idleFill);
       SetColor(kFG, idleFill);
     }
-    if (!active && mTextReadout != nullptr)
-      g.FillRect(IColor(40, 255, 255, 255), mTextReadout->GetRECT(), &mBlend);
-    IVNumberBoxControl::Draw(g);
+    if (mTextReadout != nullptr)
+    {
+      const IColor fillColor = active ? IColor(64, 255, 255, 255) : IColor(40, 255, 255, 255);
+      g.FillRect(fillColor, mTextReadout->GetRECT(), &mBlend);
+    }
+    DrawLabel(g);
   }
 
 private:
@@ -390,13 +399,13 @@ private:
 
     mVisualActive = active;
 
-    // Keep hover and drag the same: black text on white field.
-    SetColor(kHL, COLOR_WHITE.WithOpacity(0.92f));
-    SetColor(kFG, COLOR_WHITE.WithOpacity(0.92f));
+    const IColor activeFill = IColor(64, 255, 255, 255);
+    SetColor(kHL, activeFill);
+    SetColor(kFG, activeFill);
 
     if (mTextReadout != nullptr)
     {
-      const IColor textColor = active ? COLOR_BLACK.WithOpacity(0.95f) : COLOR_WHITE.WithOpacity(0.96f);
+      const IColor textColor = COLOR_WHITE.WithOpacity(active ? 0.98f : 0.96f);
       const IVStyle readoutStyle = mStyle.WithDrawFrame(true).WithValueText(mStyle.valueText.WithFGColor(textColor));
       mTextReadout->SetStyle(readoutStyle);
       mTextReadout->SetDirty(false);
