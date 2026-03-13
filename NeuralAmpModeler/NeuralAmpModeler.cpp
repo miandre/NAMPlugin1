@@ -790,7 +790,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 #elif defined(APP_API)
     auto scaleFactor = 1.4f;
 #else
-    auto scaleFactor = 1.4f;
+    auto scaleFactor = 1.3f;
 #endif
 
     return MakeGraphics(*this, PLUG_WIDTH, PLUG_HEIGHT, PLUG_FPS, scaleFactor);
