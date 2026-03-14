@@ -369,6 +369,25 @@ std::filesystem::path EnsureStandalonePresetExtension(std::filesystem::path file
   return filePath;
 }
 
+bool ResolvePresetRelativeAssetPath(const std::filesystem::path& presetFilePath, WDL_String& assetPath)
+{
+  if (assetPath.GetLength() <= 0)
+    return false;
+
+  std::filesystem::path path(assetPath.Get());
+  if (!path.is_relative())
+    return false;
+
+  const std::filesystem::path candidatePath = presetFilePath.parent_path() / path;
+  std::error_code ec;
+  if (!std::filesystem::exists(candidatePath, ec) || ec)
+    return false;
+
+  const std::filesystem::path absolutePath = std::filesystem::absolute(candidatePath, ec);
+  assetPath.Set((ec ? candidatePath : absolutePath).string().c_str());
+  return true;
+}
+
 std::string TrimWhitespace(std::string value)
 {
   auto isNotSpace = [](const unsigned char c) { return !std::isspace(c); };
@@ -2728,6 +2747,25 @@ void NeuralAmpModeler::OnReset()
   }
 #endif
 
+  if (sampleRate > 0.0)
+  {
+    if (mStompNAMPath.GetLength() > 0 && mStompModel == nullptr && mStagedStompModel == nullptr)
+    {
+      mShouldRemoveStompModel = false;
+      _StageStompModel(mStompNAMPath);
+    }
+    if (mIRPath.GetLength() > 0 && mIR == nullptr && mStagedIR == nullptr)
+    {
+      mShouldRemoveIRLeft = false;
+      _StageIRLeft(mIRPath);
+    }
+    if (mIRPathRight.GetLength() > 0 && mIRRight == nullptr && mStagedIRRight == nullptr)
+    {
+      mShouldRemoveIRRight = false;
+      _StageIRRight(mIRPathRight);
+    }
+  }
+
   _ApplyInputStereoAutoDefaultIfNeeded();
 
   if (!mDefaultPresetCapturedFromStartup && !mStateRestoredFromChunk)
@@ -3449,6 +3487,20 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       presetContext.hasStoredPresetContext = true;
     }
 
+    if (presetContext.hasStoredPresetContext && presetContext.presetFilePath.GetLength() > 0)
+    {
+      std::filesystem::path presetFilePath =
+        EnsureStandalonePresetExtension(std::filesystem::path(presetContext.presetFilePath.Get()));
+      std::error_code ec;
+      presetFilePath = std::filesystem::absolute(presetFilePath, ec);
+      if (ec)
+        presetFilePath = EnsureStandalonePresetExtension(std::filesystem::path(presetContext.presetFilePath.Get()));
+
+      ResolvePresetRelativeAssetPath(presetFilePath, stompPath);
+      ResolvePresetRelativeAssetPath(presetFilePath, irLeftPath);
+      ResolvePresetRelativeAssetPath(presetFilePath, irRightPath);
+    }
+
     const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     mAmpSelectorIndex = std::clamp(static_cast<int>(activeSlot), 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     _BeginPresetRecallTransition(previousActiveSlot, mAmpSelectorIndex);
@@ -3485,7 +3537,10 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     mPendingAmpSlotSwitch.store(mAmpSelectorIndex, std::memory_order_release);
 
     if (mStompNAMPath.GetLength())
+    {
+      mShouldRemoveStompModel = false;
       _StageStompModel(mStompNAMPath);
+    }
     else
       mShouldRemoveStompModel = true;
 
@@ -4167,6 +4222,26 @@ bool NeuralAmpModeler::_LoadStandalonePresetFromFile(const WDL_String& filePath)
     SendParameterValueFromDelegate(kInputStereoMode, GetParam(kInputStereoMode)->GetNormalized(), true);
   }
 
+  ResolvePresetRelativeAssetPath(path, mStompNAMPath);
+  ResolvePresetRelativeAssetPath(path, mIRPath);
+  ResolvePresetRelativeAssetPath(path, mIRPathRight);
+
+  if (mStompNAMPath.GetLength() > 0 && mStompModel == nullptr && mStagedStompModel == nullptr)
+  {
+    mShouldRemoveStompModel = false;
+    _StageStompModel(mStompNAMPath);
+  }
+  if (mIRPath.GetLength() > 0 && mIR == nullptr && mStagedIR == nullptr)
+  {
+    mShouldRemoveIRLeft = false;
+    _StageIRLeft(mIRPath);
+  }
+  if (mIRPathRight.GetLength() > 0 && mIRRight == nullptr && mStagedIRRight == nullptr)
+  {
+    mShouldRemoveIRRight = false;
+    _StageIRRight(mIRPathRight);
+  }
+
   mStandalonePresetFilePath.Set(path.string().c_str());
   mDefaultPresetActive = false;
   mDefaultPresetPostLoadSyncPending = false;
@@ -4823,8 +4898,6 @@ void NeuralAmpModeler::_BeginPresetRecallTransition(int previousActiveSlot, int 
   // Preset recall should not continue rendering the previous scene under the new parameter state.
   mShouldRemoveModelSlot[previousActiveSlot].store(true, std::memory_order_release);
   mShouldRemoveStompModel.store(true, std::memory_order_release);
-  mShouldRemoveIRLeft.store(true, std::memory_order_release);
-  mShouldRemoveIRRight.store(true, std::memory_order_release);
 }
 
 void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag,
@@ -5626,35 +5699,45 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mModelCleared = true;
     updateActiveModelGainsAndLatency();
   }
-  if (mShouldRemoveStompModel)
+  if (mShouldRemoveStompModel.exchange(false, std::memory_order_acq_rel))
   {
     _ClearStompCapabilityState();
     mStompModel = nullptr;
     mStompModelRight = nullptr;
-    mStompNAMPath.Set("");
-    mShouldRemoveStompModel = false;
+    if (mStagedStompModel == nullptr && mStagedStompModelRight == nullptr)
+      mStompNAMPath.Set("");
     _UpdateLatency();
   }
-  if (mShouldRemoveIRLeft)
+  if (mShouldRemoveIRLeft.exchange(false, std::memory_order_acq_rel))
   {
-    mStagedIR = nullptr;
-    mStagedIRChannel2 = nullptr;
-    mStagedIRPath.Set("");
+    const bool preserveStagedIR = (mStagedIR != nullptr) || (mStagedIRChannel2 != nullptr);
+    if (!preserveStagedIR)
+    {
+      mStagedIR = nullptr;
+      mStagedIRChannel2 = nullptr;
+      mStagedIRPath.Set("");
+      mIRPath.Set("");
+    }
     mIR = nullptr;
     mIRChannel2 = nullptr;
-    mIRPath.Set("");
-    mShouldRemoveIRLeft = false;
+    if (preserveStagedIR && mStagedIRPath.GetLength() > 0)
+      mIRPath = mStagedIRPath;
     triggerOutputDeClick = true;
   }
-  if (mShouldRemoveIRRight)
+  if (mShouldRemoveIRRight.exchange(false, std::memory_order_acq_rel))
   {
-    mStagedIRRight = nullptr;
-    mStagedIRRightChannel2 = nullptr;
-    mStagedIRPathRight.Set("");
+    const bool preserveStagedIR = (mStagedIRRight != nullptr) || (mStagedIRRightChannel2 != nullptr);
+    if (!preserveStagedIR)
+    {
+      mStagedIRRight = nullptr;
+      mStagedIRRightChannel2 = nullptr;
+      mStagedIRPathRight.Set("");
+      mIRPathRight.Set("");
+    }
     mIRRight = nullptr;
     mIRRightChannel2 = nullptr;
-    mIRPathRight.Set("");
-    mShouldRemoveIRRight = false;
+    if (preserveStagedIR && mStagedIRPathRight.GetLength() > 0)
+      mIRPathRight = mStagedIRPathRight;
     triggerOutputDeClick = true;
   }
   // Move things from staged to live
@@ -6017,6 +6100,7 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
 
 dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath)
 {
+  WDL_String previousIRPath = mIRPath;
   const double sampleRate = GetSampleRate();
   dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
   try
@@ -6032,6 +6116,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
       mStagedIRChannel2 = std::move(stagedIRChannel2);
       mStagedIR = std::move(stagedIR);
       mStagedIRPath = irPath;
+      mIRPath = irPath;
     }
   }
   catch (std::runtime_error& e)
@@ -6056,6 +6141,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
       mStagedIRChannel2 = nullptr;
     }
     mStagedIRPath.Set("");
+    mIRPath = previousIRPath;
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadFailed);
   }
 
@@ -6064,6 +6150,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
 
 dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPath)
 {
+  WDL_String previousIRPath = mIRPathRight;
   const double sampleRate = GetSampleRate();
   dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
   try
@@ -6079,6 +6166,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
       mStagedIRRightChannel2 = std::move(stagedIRRightChannel2);
       mStagedIRRight = std::move(stagedIRRight);
       mStagedIRPathRight = irPath;
+      mIRPathRight = irPath;
     }
   }
   catch (std::runtime_error& e)
@@ -6100,6 +6188,7 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
     if (mStagedIRRightChannel2 != nullptr)
       mStagedIRRightChannel2 = nullptr;
     mStagedIRPathRight.Set("");
+    mIRPathRight = previousIRPath;
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserRight, kMsgTagLoadFailed);
   }
 
