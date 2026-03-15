@@ -1647,6 +1647,21 @@ private:
   float mDisplayCents = 0.0f;
 };
 
+class NAMSectionDimControl : public IControl
+{
+public:
+  explicit NAMSectionDimControl(const IRECT& bounds)
+  : IControl(bounds)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    g.FillRoundRect(COLOR_BLACK.WithOpacity(0.56f), mRECT, 0.0f, &mBlend);
+  }
+};
+
 class NAMFileNameControl : public IVButtonControl
 {
 public:

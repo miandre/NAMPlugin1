@@ -877,13 +877,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Global layout tokens for consistent spacing and sectioning.
     constexpr float kOuterPad = 20.0f;
     constexpr float kInnerPad = 10.0f;
-    constexpr float kTopBarHeight = 162.0f;
+    constexpr float kTopBarHeight = 122.0f;
     constexpr float kBottomBarHeight = 62.0f;
     const auto mainArea = b.GetPadded(-kOuterPad);
     const auto contentArea = mainArea.GetPadded(-kInnerPad);
     const auto topBarArea = IRECT(contentArea.L, contentArea.T, contentArea.R, contentArea.T + kTopBarHeight);
     const auto bottomBarArea = IRECT(contentArea.L, contentArea.B - kBottomBarHeight, contentArea.R, contentArea.B);
     const auto heroArea = IRECT(contentArea.L, topBarArea.B, contentArea.R, bottomBarArea.T);
+    const auto dimmableArea = IRECT(b.L, topBarArea.B, b.R, b.B);
     pGraphics->AttachPopupMenuControl(
       IText(18.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle));
     if (auto* pPopupMenuControl = pGraphics->GetPopupMenuControl())
@@ -1395,13 +1396,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // Utility row lower boundary.
     const auto topUtilityBottomSeparatorArea = IRECT(contentArea.L, topUtilityRowArea.B, contentArea.R, topUtilityRowArea.B + 1.0f);
     pGraphics->AttachControl(new IPanelControl(topUtilityBottomSeparatorArea, separatorColor));
-
-    // Getting started page listing additional resources
-    pGraphics->AttachControl(new NAMTunerDisplayControl(tunerReadoutArea), kCtrlTagTunerReadout);
-    pGraphics->AttachControl(
-      new NAMTunerMonitorControl(tunerMonitorArea, kTunerMonitorMode, utilityStyle),
-                              kCtrlTagTunerMute)
-      ->SetTooltip("Tuner monitor mode: Mute / Bypass / Full");
     pGraphics->AttachControl(new IPanelControl(presetStripArea, IColor(40, 255, 255, 255).WithOpacity(0.10f)));
     pGraphics->AttachControl(new NAMSquareButtonControl(presetPrevArea, [this](IControl*) {
       _SelectStandalonePresetRelative(-1);
@@ -1424,19 +1418,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       });
     pGraphics->AttachControl(new StandalonePresetNameEntryControl(), kCtrlTagStandalonePresetNameEntryProxy);
     _UpdatePresetLabel();
-    pGraphics->AttachControl(new NAMSquareButtonControl(
-                               tunerCloseArea,
-                               [this](IControl*) {
-                                 const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
-                                 if (tunerIdx < mTopNavBypassed.size())
-                                 {
-                                   if (!mTopNavBypassed[tunerIdx])
-                                     _ToggleTopNavSectionBypass(TopNavSection::Tuner);
-                                 }
-                               },
-                               crossSVG),
-                             kCtrlTagTunerClose)
-      ->SetTooltip("Close tuner");
     IControl* pAmpTopIcon = new NAMTopIconControl(topNavAmpArea, ampActiveSVG, ampActiveSVG, ampActiveSVG,
                                                   [this]() { _SetTopNavActiveSection(TopNavSection::Amp); },
                                                   [this]() { _ToggleTopNavSectionBypass(TopNavSection::Amp); });
@@ -1816,6 +1797,26 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     // The meters
     pGraphics->AttachControl(new NAMMeterControl(inputMeterArea, meterBackgroundBitmap, style), kCtrlTagInputMeter);
     pGraphics->AttachControl(new NAMMeterControl(outputMeterArea, meterBackgroundBitmap, style), kCtrlTagOutputMeter);
+    pGraphics->AttachControl(new NAMSectionDimControl(dimmableArea), kCtrlTagSectionDimmer)->Hide(true);
+
+    pGraphics->AttachControl(new NAMTunerDisplayControl(tunerReadoutArea), kCtrlTagTunerReadout);
+    pGraphics->AttachControl(
+      new NAMTunerMonitorControl(tunerMonitorArea, kTunerMonitorMode, utilityStyle),
+      kCtrlTagTunerMute)
+      ->SetTooltip("Tuner monitor mode: Mute / Bypass / Full");
+    pGraphics->AttachControl(new NAMSquareButtonControl(
+                               tunerCloseArea,
+                               [this](IControl*) {
+                                 const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
+                                 if (tunerIdx < mTopNavBypassed.size())
+                                 {
+                                   if (!mTopNavBypassed[tunerIdx])
+                                     _ToggleTopNavSectionBypass(TopNavSection::Tuner);
+                                 }
+                               },
+                               crossSVG),
+                             kCtrlTagTunerClose)
+      ->SetTooltip("Close tuner");
 
     // Settings/help/about box
     pGraphics->AttachControl(new NAMCircleButtonControl(
@@ -5293,6 +5294,7 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     const bool showCabSection = (mTopNavActiveSection == TopNavSection::Cab);
     const bool showFxSection = (mTopNavActiveSection == TopNavSection::Fx);
     const bool showEqSection = (mTopNavActiveSection == TopNavSection::Eq);
+    const bool dimCurrentSection = mTopNavBypassed[static_cast<size_t>(mTopNavActiveSection)];
     const auto updateIcon = [&](const int tag, const TopNavSection section) {
       if (auto* pIcon = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
       {
@@ -5310,6 +5312,8 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     updateIcon(kCtrlTagTopNavEq, TopNavSection::Eq);
     updateIcon(kCtrlTagTopNavFx, TopNavSection::Fx);
     updateIcon(kCtrlTagTopNavTuner, TopNavSection::Tuner);
+    if (auto* pSectionDimmerFooter = pGraphics->GetControlWithTag(kCtrlTagSectionDimmer))
+      pSectionDimmerFooter->Hide(!dimCurrentSection);
 
     const char* backgroundResource = AMP2BACKGROUND_FN;
     if (mTopNavActiveSection == TopNavSection::Amp)

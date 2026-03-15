@@ -168,6 +168,7 @@ enum ECtrlTags
   kCtrlTagAmp3HasCalibration,
   kCtrlTagStompHasLoudness,
   kCtrlTagStompHasCalibration,
+  kCtrlTagSectionDimmer,
   kNumCtrlTags
 };
 
