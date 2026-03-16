@@ -1,4 +1,4 @@
-Last updated: 2026-03-11
+Last updated: 2026-03-16
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -67,6 +67,7 @@ Landed work:
 - Gate mini-slider on/off control
 - Gate attenuation indicator next to the top-row gate area
 - Old stomp-page gate controls removed
+- Stomp-section bypass no longer disables the gate
 
 ### Done: Milestone G - doubler v1
 Outcome:
@@ -80,43 +81,39 @@ Landed work:
 - Dedicated top-row doubler knob and mini-slider
 - Doubler defaults to off
 - Current knob range remapped into the musically useful span
+- Bypass transition fixed to avoid the brief wrong-image collapse when switching off
 
 Current limitation:
 - This is a strong baseline, not a final polished production doubler
 - More tuning is possible, but not required right now
 
+### Done: Milestone H - proper stereo/mono input and output metering
+Outcome:
+- Metering now clearly reflects the effective mono/stereo behavior of the current path
+
+Landed work:
+- Stereo-aware input metering
+- Stereo-aware output metering
+- Clean vector meter redraw instead of the old striped/bitmap-heavy look
+- Stereo lane layout fix
+- Latched red clip warning with click-to-clear
+- Shared clear behavior across both meters
+- Faster decay / peak timing
+
+Current limitation:
+- This is intentionally minimal and stable; avoid reopening it without a clear user request
+
+### Done: Preset/session restore stabilization follow-up
+Outcome:
+- Preset context now survives restart/session reopen much more clearly
+
+Landed work:
+- Standalone last preset name + dirty state restore
+- Plugin session preset context restore
+- `Input Stereo` removed from preset-owned behavior
+- Plugin stomp NAM / cab IR restore fixes
+
 ## Active milestones
-
-### Milestone H: Proper stereo/mono input and output metering
-Goal:
-- Make input and output metering clearly reflect mono vs stereo operation
-
-Desired outcome:
-- Mono input mode should meter the effective mono path correctly
-- Stereo input mode should meter both channels meaningfully
-- Output metering should reflect the actual delivered output image/state
-
-Why it matters:
-- The plugin now has several mode-dependent stereo behaviors:
-  - mono vs stereo input mode
-  - cab stereo behavior
-  - doubler availability and stereo spread
-- Metering should reflect that clearly for debugging and UX
-
-Suggested scope:
-1. Inspect current input/output meter feed points
-2. Define expected meter behavior for:
-   - mono input
-   - stereo input
-   - mono-core + stereo post processing
-3. Implement the smallest RT-safe improvement first
-
-Risk:
-- Low-medium
-
-RT safety watch-outs:
-- Meter taps must stay allocation-free and deterministic
-- No UI work from the callback beyond the existing meter messaging pattern
 
 ### Milestone F: Transpose decision path
 Goal:
@@ -184,16 +181,22 @@ Risk:
 RT safety watch-outs:
 - Keep interpolation and routing deterministic and allocation-free in the callback
 
-## Recommended execution order from now
-1. Milestone H: proper stereo/mono metering
-2. Milestone F: transpose decision path
-3. Resume Milestone B when final Release assets and hardware-switch behavior are clearer
-4. Milestone C after the curated cab direction is better defined
-5. Milestone D only after cab v1 proves stable
+## Low-priority polish lane
+- Continue amp-face visual polish only if the user explicitly wants it
+- Keep those changes UI-only and isolated from DSP/state work where possible
 
-## Small feature suggestion
-- Proper stereo/mono-aware metering for both input and output should remain near the top of the backlog
-- This is useful both for UX and for debugging the now more mode-dependent stereo signal path
+Examples:
+- per-slot art tweaks
+- hover-state tuning
+- off-state visual language
+- section dimming tweaks
+
+## Recommended execution order from now
+1. Milestone F: transpose decision path
+2. Resume Milestone B when final Release assets and hardware-switch behavior are clearer
+3. Milestone C after the curated cab direction is better defined
+4. Milestone D only after cab v1 proves stable
+5. Treat additional UI polish as a low-risk side lane, not the main roadmap
 
 ## Next-agent prompt
 You are continuing work in `D:\Dev\NAMPlugin` on branch `main`.
@@ -211,10 +214,15 @@ Then confirm repo/submodule state:
 - `git submodule status iPlug2`
 - `git -C iPlug2 remote -v`
 
-Task suggestion:
-1. Inspect current input/output metering behavior
-2. Propose a minimal mono/stereo-aware metering improvement
-3. Implement the smallest reviewable RT-safe patch
+Current direction:
+1. Metering, gate/stomp decoupling, preset/session restore fixes, and recent amp UI polish are already landed
+2. Do not reopen the metering or plugin preset-restore paths unless the user asks
+3. Prefer small, reviewable follow-ups from the current stable baseline
+
+Suggested next task unless the user redirects:
+1. Inspect the transpose feature path and current tradeoffs
+2. Propose whether it should stay, be simplified, or be removed
+3. Implement the smallest reviewable RT-safe patch only if the user wants code
 
 Constraints:
 - Keep diffs minimal
