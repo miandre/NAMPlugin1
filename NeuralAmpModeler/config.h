@@ -127,6 +127,8 @@
 #define SMALLONOFF_OFF_FN "Hardware/SmallOnOff_OFF.png"
 #define SMALLONOFF_ON_FN "Hardware/SmallOnOff_ON.png"
 #define AP_KNOP_OFFSET 23.0f
+#define AMP1SWITCH_OFF_FN "Hardware/Amp1Switch_OFF.png"
+#define AMP1SWITCH_ON_FN "Hardware/Amp1Switch_ON.png"
 #define SWITCH_OFF_FN "Hardware/Switch_OFF.png"
 #define SWITCH_OFF2X_FN "Hardware/Switch_OFF@2x.png"
 #define SWITCH_ON_FN "Hardware/Switch_ON.png"
