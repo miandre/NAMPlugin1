@@ -100,8 +100,8 @@ struct AmpFaceLayout
 
 constexpr std::array<float, 7> kAmpFaceKnobColumnOffsets = {-2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
 constexpr std::array<AmpFaceLayout, 3> kAmpFaceLayouts = {{
-  {140.0f, -95.0f, 100.0f, 0.70f, AP_KNOP_OFFSET, 385.0f, 197.0f},
-  {152.0f, -95.0f, 100.0f, 0.68f, AP_KNOP_OFFSET-3, 400.0f, 205.0f},
+  {151.0f, -75.0f, 90.0f, 0.7f, AP_KNOP_OFFSET+2, 385.0f, 205.0f},
+  {152.0f, -95.0f, 100.0f, 0.71f, AP_KNOP_OFFSET-3, 400.0f, 205.0f},
   {158.0f, -95.0f, 100.0f, 0.70f, AP_KNOP_OFFSET, 390.0f, 213.0f},
 }};
 
@@ -125,7 +125,7 @@ IRECT MakeAmpFaceSwitchArea(const IRECT& ampFaceArea, const AmpFaceLayout& layou
                centerY + 0.5f * switchHeight);
 }
 
-const std::array<float, 3> kAmpModelSwitchScales = {1.3f, 1.0f, 1.0f};
+const std::array<float, 3> kAmpModelSwitchScales = {1.2f, 1.0f, 1.0f};
 
 float GetMaxAmpModelSwitchScale()
 {
@@ -138,6 +138,16 @@ IRECT MakeAmpFaceSwitchControlArea(const IRECT& ampFaceArea,
                                    const float switchHeight)
 {
   return MakeAmpFaceSwitchArea(ampFaceArea, layout, switchWidth, switchHeight).GetScaledAboutCentre(GetMaxAmpModelSwitchScale());
+}
+
+const char* GetAmpBackgroundResourceName(const int ampIndex, const bool switchOn)
+{
+  switch (std::clamp(ampIndex, 0, 2))
+  {
+    case 0: return switchOn ? AMP1BACKGROUND_FN : AMP1BACKGROUND_OFF_FN;
+    case 2: return switchOn ? AMP3BACKGROUND_FN : AMP3BACKGROUND_OFF_FN;
+    default: return switchOn ? AMP2BACKGROUND_FN : AMP2BACKGROUND_OFF_FN;
+  }
 }
 constexpr double kDelayManualTempoDefaultBPM = 120.0;
 constexpr double kDelayManualTempoMinBPM = 10.0;
@@ -3944,6 +3954,7 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
             const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(activeSlot);
             _RequestModelLoadForSlot(activeSlotPath, activeSlot, slotCtrlTag);
             mPendingAmpSlotSwitch.store(activeSlot, std::memory_order_release);
+            _RefreshTopNavControls();
             break;
           }
 
@@ -3970,6 +3981,7 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
               SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
             });
         }
+        _RefreshTopNavControls();
         break;
       case kTunerActive:
       {
@@ -5338,12 +5350,7 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     const char* backgroundResource = AMP2BACKGROUND_FN;
     if (mTopNavActiveSection == TopNavSection::Amp)
     {
-      if (mAmpSelectorIndex == 0)
-        backgroundResource = AMP1BACKGROUND_FN;
-      else if (mAmpSelectorIndex == 2)
-        backgroundResource = AMP3BACKGROUND_FN;
-      else
-        backgroundResource = AMP2BACKGROUND_FN;
+      backgroundResource = GetAmpBackgroundResourceName(mAmpSelectorIndex, GetParam(kModelToggle)->Bool());
     }
     else if (mTopNavActiveSection == TopNavSection::Stomp)
       backgroundResource = STOMPBACKGROUND_FN;
