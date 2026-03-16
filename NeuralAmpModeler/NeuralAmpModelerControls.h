@@ -286,6 +286,64 @@ private:
   IText mOffText;
 };
 
+class NAMAmpBitmapToggleControl : public IControl
+{
+public:
+  NAMAmpBitmapToggleControl(const IRECT& bounds,
+                            int paramIdx,
+                            const std::array<IBitmap, 3>& offBitmaps,
+                            const std::array<IBitmap, 3>& onBitmaps,
+                            const std::array<float, 3>& drawScales,
+                            int initialAmpIndex)
+  : IControl(bounds, paramIdx)
+  , mOffBitmaps(offBitmaps)
+  , mOnBitmaps(onBitmaps)
+  , mDrawScales(drawScales)
+  , mAmpIndex(std::clamp(initialAmpIndex, 0, 2))
+  {
+  }
+
+  void SetAmpStyle(int ampIndex)
+  {
+    const int clampedIndex = std::clamp(ampIndex, 0, 2);
+    if (mAmpIndex == clampedIndex)
+      return;
+
+    mAmpIndex = clampedIndex;
+    SetDirty(false);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const size_t bitmapIndex = static_cast<size_t>(mAmpIndex);
+    const IBitmap& bitmap = (GetValue() > 0.5) ? mOnBitmaps[bitmapIndex] : mOffBitmaps[bitmapIndex];
+    const float maxDrawScale = std::max({mDrawScales[0], mDrawScales[1], mDrawScales[2]});
+    const float drawScale = std::clamp(mDrawScales[bitmapIndex] / std::max(0.1f, maxDrawScale), 0.1f, 4.0f);
+    g.DrawFittedBitmap(bitmap, mRECT.GetScaledAboutCentre(drawScale));
+  }
+
+  void OnMouseDown(float, float, const IMouseMod&) override
+  {
+    if (IsDisabled())
+      return;
+    SetValueFromUserInput(GetValue() > 0.5 ? 0.0 : 1.0);
+  }
+
+  void OnRescale() override
+  {
+    for (auto& bitmap : mOffBitmaps)
+      bitmap = GetUI()->GetScaledBitmap(bitmap);
+    for (auto& bitmap : mOnBitmaps)
+      bitmap = GetUI()->GetScaledBitmap(bitmap);
+  }
+
+private:
+  std::array<IBitmap, 3> mOffBitmaps;
+  std::array<IBitmap, 3> mOnBitmaps;
+  std::array<float, 3> mDrawScales;
+  int mAmpIndex = 0;
+};
+
 class NAMMiniSliderToggleControl : public IControl
 {
 public:

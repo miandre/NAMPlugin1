@@ -124,6 +124,21 @@ IRECT MakeAmpFaceSwitchArea(const IRECT& ampFaceArea, const AmpFaceLayout& layou
   return IRECT(centerX - 0.5f * switchWidth, centerY - 0.5f * switchHeight, centerX + 0.5f * switchWidth,
                centerY + 0.5f * switchHeight);
 }
+
+const std::array<float, 3> kAmpModelSwitchScales = {1.3f, 1.0f, 1.0f};
+
+float GetMaxAmpModelSwitchScale()
+{
+  return std::max({kAmpModelSwitchScales[0], kAmpModelSwitchScales[1], kAmpModelSwitchScales[2]});
+}
+
+IRECT MakeAmpFaceSwitchControlArea(const IRECT& ampFaceArea,
+                                   const AmpFaceLayout& layout,
+                                   const float switchWidth,
+                                   const float switchHeight)
+{
+  return MakeAmpFaceSwitchArea(ampFaceArea, layout, switchWidth, switchHeight).GetScaledAboutCentre(GetMaxAmpModelSwitchScale());
+}
 constexpr double kDelayManualTempoDefaultBPM = 120.0;
 constexpr double kDelayManualTempoMinBPM = 10.0;
 constexpr double kDelayManualTempoMaxBPM = 350.0;
@@ -859,6 +874,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       pGraphics->LoadBitmap(AMP3KNOBBACKGROUND_FN)};
     const auto switchOffBitmap = pGraphics->LoadBitmap(SWITCH_OFF_FN);
     const auto switchOnBitmap = pGraphics->LoadBitmap(SWITCH_ON_FN);
+    const auto amp1SwitchOffBitmap = pGraphics->LoadBitmap(AMP1SWITCH_OFF_FN);
+    const auto amp1SwitchOnBitmap = pGraphics->LoadBitmap(AMP1SWITCH_ON_FN);
     const auto switchHandleBitmap = pGraphics->LoadBitmap(SLIDESWITCHHANDLE_FN);
     const auto meterBackgroundBitmap = pGraphics->LoadBitmap(METERBACKGROUND_FN);
     const auto pedalKnobBitmap = pGraphics->LoadBitmap(PEDALKNOB_FN);
@@ -998,7 +1015,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto masterKnobArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[6]);
     const float modelSwitchWidth = switchOffBitmap.W() * kAmpFaceSwitchScale;
     const float modelSwitchHeight = switchOffBitmap.H() * kAmpFaceSwitchScale;
-    const auto modelToggleArea = MakeAmpFaceSwitchArea(ampFaceArea, ampFaceLayout, modelSwitchWidth, modelSwitchHeight);
+    const auto modelToggleArea = MakeAmpFaceSwitchControlArea(ampFaceArea, ampFaceLayout, modelSwitchWidth, modelSwitchHeight);
 
     // Stomp section coordinates come from the user's 3x design canvas.
     constexpr float kDesignW = 3117.0f; // 3 * 1039
@@ -1455,7 +1472,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                             false),
       kCtrlTagTopNavTuner)
       ->SetTooltip("Tuner");
-    pGraphics->AttachControl(new NAMBitmapToggleControl(modelToggleArea, kModelToggle, switchOffBitmap, switchOnBitmap))
+    const std::array<IBitmap, 3> ampModelSwitchOffBitmaps = {amp1SwitchOffBitmap, switchOffBitmap, switchOffBitmap};
+    const std::array<IBitmap, 3> ampModelSwitchOnBitmaps = {amp1SwitchOnBitmap, switchOnBitmap, switchOnBitmap};
+    pGraphics->AttachControl(
+      new NAMAmpBitmapToggleControl(modelToggleArea, kModelToggle, ampModelSwitchOffBitmaps, ampModelSwitchOnBitmaps, kAmpModelSwitchScales, mAmpSelectorIndex))
       ->SetTooltip("Model On/Off");
     pGraphics->AttachControl(
       new NAMHoverPopSVGSwitchControl(inputModeSwitchArea, {inputMonoSVG, inputStereoSVG}, kInputStereoMode))
@@ -5361,10 +5381,16 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     updateAmpFaceKnob(kMasterVolume, kAmpFaceKnobColumnOffsets[6]);
 
     if (auto* pModelToggle = pGraphics->GetControlWithParamIdx(kModelToggle))
+    {
+      if (auto* pAmpModelToggle = dynamic_cast<NAMAmpBitmapToggleControl*>(pModelToggle))
+        pAmpModelToggle->SetAmpStyle(mAmpSelectorIndex);
+      const float maxSwitchScale = GetMaxAmpModelSwitchScale();
       pGraphics->SetControlBounds(
         pModelToggle,
-        MakeAmpFaceSwitchArea(
-          ampFaceArea, ampFaceLayout, static_cast<float>(pModelToggle->GetRECT().W()), static_cast<float>(pModelToggle->GetRECT().H())));
+        MakeAmpFaceSwitchControlArea(
+          ampFaceArea, ampFaceLayout, static_cast<float>(pModelToggle->GetRECT().W()) / maxSwitchScale,
+          static_cast<float>(pModelToggle->GetRECT().H()) / maxSwitchScale));
+    }
 
     const bool showTunerReadout = tunerActive;
     if (auto* pTunerReadout = pGraphics->GetControlWithTag(kCtrlTagTunerReadout))
