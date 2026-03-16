@@ -100,7 +100,7 @@ struct AmpFaceLayout
 
 constexpr std::array<float, 7> kAmpFaceKnobColumnOffsets = {-2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
 constexpr std::array<AmpFaceLayout, 3> kAmpFaceLayouts = {{
-  {158.0f, -95.0f, 100.0f, 0.70f, AP_KNOP_OFFSET, 385.0f, 213.0f},
+  {140.0f, -95.0f, 100.0f, 0.70f, AP_KNOP_OFFSET, 385.0f, 197.0f},
   {152.0f, -95.0f, 100.0f, 0.68f, AP_KNOP_OFFSET-3, 400.0f, 205.0f},
   {158.0f, -95.0f, 100.0f, 0.70f, AP_KNOP_OFFSET, 390.0f, 213.0f},
 }};

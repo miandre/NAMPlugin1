@@ -737,11 +737,13 @@ public:
   : IVKnobControl(bounds, paramIdx, label, style, true)
   , mKnobBitmaps(knobBitmaps)
   , mBackgroundBitmaps(backgroundBitmaps)
+  , mBaseLabelText(style.labelText)
   , mAmpIndex(std::clamp(initialAmpIndex, 0, 2))
   , mKnobScale(knobScale)
   , mLabelYOffset(labelYOffset)
   , mValueYOffset(valueYOffset)
   {
+    _UpdateLabelText();
   }
 
   void SetAmpStyle(int ampIndex)
@@ -751,6 +753,7 @@ public:
       return;
 
     mAmpIndex = clampedIndex;
+    _UpdateLabelText();
     SetDirty(false);
   }
 
@@ -810,8 +813,23 @@ public:
   }
 
 private:
+  void _UpdateLabelText()
+  {
+    IColor labelColor = mBaseLabelText.mFGColor;
+    switch (mAmpIndex)
+    {
+      case 0: labelColor = COLOR_WHITE; break;
+      case 1: break;
+      case 2: break;
+      default: break;
+    }
+    const IText labelText = mBaseLabelText.WithFGColor(labelColor);
+    mStyle = mStyle.WithLabelText(labelText);
+  }
+
   std::array<IBitmap, 3> mKnobBitmaps;
   std::array<IBitmap, 3> mBackgroundBitmaps;
+  IText mBaseLabelText;
   int mAmpIndex = 0;
   float mKnobScale = 1.0f;
   float mLabelYOffset = 0.0f;
