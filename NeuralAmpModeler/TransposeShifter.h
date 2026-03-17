@@ -70,8 +70,10 @@ public:
       return;
 
     const int clampedSemitones = std::clamp(semitones, -8, 8);
-
     const bool wantsWet = (clampedSemitones != 0);
+    if (!wantsWet && !mWasActive && mWetMix <= 0.0f)
+      return;
+
     if (wantsWet && (!mWasActive || clampedSemitones != mCurrentSemitones))
     {
       if (!mWasActive)
