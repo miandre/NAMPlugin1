@@ -71,6 +71,32 @@ public:
   }
 };
 
+class NAMCabHeaderControl : public IVButtonControl
+{
+public:
+  NAMCabHeaderControl(const IRECT& bounds, const char* label, const IVStyle& style, float textHPad = 2.0f)
+  : IVButtonControl(bounds, SplashClickActionFunc, label, style)
+  , mTextHPad(textHPad)
+  {
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    DrawBackground(g, mRECT);
+    DrawWidget(g);
+
+    if (CStringHasContents(GetLabelStr()))
+    {
+      const IBlend blend = GetBlend();
+      const IRECT textBounds = mWidgetBounds.GetPadded(-3.0f).GetHPadded(-mTextHPad);
+      g.DrawText(mStyle.labelText, GetLabelStr(), textBounds, &blend);
+    }
+  }
+
+private:
+  float mTextHPad;
+};
+
 class NAMHoverPopSVGSwitchControl : public ISVGSwitchControl
 {
 public:
@@ -1517,6 +1543,88 @@ private:
   IBitmap mKnobBitmap;
 };
 
+class NAMCabMicSliderControl : public IVSliderControl
+{
+public:
+  NAMCabMicSliderControl(const IRECT& bounds, int positionParamIdx, int sourceParamIdx, const IVStyle& style,
+                         const IBitmap& mic57Bitmap, const IBitmap& mic121Bitmap)
+  : IVSliderControl(bounds, positionParamIdx, "", style.WithShowLabel(false).WithShowValue(false), false,
+                    EDirection::Horizontal, DEFAULT_GEARING, 6.0f, 3.0f, true)
+  , mSourceParamIdx(sourceParamIdx)
+  , mMic57Bitmap(mic57Bitmap)
+  , mMic121Bitmap(mic121Bitmap)
+  {
+  }
+
+  void OnRescale() override
+  {
+    IVSliderControl::OnRescale();
+    if (mMic57Bitmap.IsValid())
+      mMic57Bitmap = GetUI()->GetScaledBitmap(mMic57Bitmap);
+    if (mMic121Bitmap.IsValid())
+      mMic121Bitmap = GetUI()->GetScaledBitmap(mMic121Bitmap);
+  }
+
+  void OnResize() override
+  {
+    IVSliderControl::OnResize();
+
+    constexpr float kHorizontalHandlePadding = 14.0f;
+    mWidgetBounds = mWidgetBounds.GetHPadded(-kHorizontalHandlePadding);
+    mTrackBounds = mTrackBounds.GetHPadded(-kHorizontalHandlePadding);
+  }
+
+  void DrawTrack(IGraphics&, const IRECT&) override {}
+
+  void DrawHandle(IGraphics& g, const IRECT& bounds) override
+  {
+    const IBitmap* pBitmap = _GetMicBitmap();
+    if (pBitmap == nullptr || !pBitmap->IsValid())
+      return;
+
+    const float sourceW = static_cast<float>(pBitmap->W());
+    const float sourceH = static_cast<float>(pBitmap->H());
+    if (sourceW <= 0.0f || sourceH <= 0.0f)
+      return;
+
+    const float handleH = std::max(mRECT.H() - 4.0f, 10.0f);
+    const float handleW = handleH * (sourceW / sourceH);
+    const float centerX = bounds.MW();
+    const float centerY = mRECT.MH();
+    const IRECT handleBounds(centerX - 0.5f * handleW,
+                             centerY - 0.5f * handleH,
+                             centerX + 0.5f * handleW,
+                             centerY + 0.5f * handleH);
+    const IBlend blend(EBlend::Default, IsDisabled() ? 0.45f : 1.0f);
+    g.DrawFittedBitmap(*pBitmap, handleBounds, &blend);
+  }
+
+private:
+  const IBitmap* _GetMicBitmap()
+  {
+    IGEditorDelegate* pDelegate = GetDelegate();
+    if (pDelegate == nullptr)
+      return &mMic57Bitmap;
+
+    IParam* pSourceParam = pDelegate->GetParam(mSourceParamIdx);
+    if (pSourceParam == nullptr)
+      return &mMic57Bitmap;
+
+    switch (pSourceParam->Int())
+    {
+      case 2:
+        return &mMic121Bitmap;
+      case 1:
+      default:
+        return &mMic57Bitmap;
+    }
+  }
+
+  int mSourceParamIdx;
+  IBitmap mMic57Bitmap;
+  IBitmap mMic121Bitmap;
+};
+
 class NAMTunerMonitorControl : public IVTabSwitchControl
 {
 public:
@@ -1775,6 +1883,43 @@ public:
   }
 };
 
+class NAMCabFileNameControl : public IVButtonControl
+{
+public:
+  NAMCabFileNameControl(const IRECT& bounds, const char* label, const IVStyle& style)
+  : IVButtonControl(bounds, DefaultClickActionFunc, label, style.WithLabelText(style.labelText.WithAlign(EAlign::Center)))
+  {
+  }
+
+  void SetLabelAndTooltip(const char* str)
+  {
+    SetLabelStr(str);
+    SetTooltip(str);
+  }
+
+  void SetLabelAndTooltipEllipsizing(const WDL_String& fileName)
+  {
+    auto EllipsizeFilePath = [](const char* filePath, size_t prefixLength, size_t suffixLength, size_t maxLength) {
+      const std::string ellipses = "...";
+      assert(maxLength <= (prefixLength + suffixLength + ellipses.size()));
+      std::string str{filePath};
+
+      if (str.length() <= maxLength)
+      {
+        return str;
+      }
+      else
+      {
+        return str.substr(0, prefixLength) + ellipses + str.substr(str.length() - suffixLength);
+      }
+    };
+
+    auto ellipsizedFileName = EllipsizeFilePath(fileName.get_filepart(), 30, 30, 63);
+    SetLabelStr(ellipsizedFileName.c_str());
+    SetTooltip(fileName.get_filepart());
+  }
+};
+
 class NAMFileBrowserControl : public IDirBrowseControlBase
 {
 public:
@@ -2018,6 +2163,259 @@ private:
   WDL_String mLastDirectory;
   IFileDialogCompletionHandlerFunc mCompletionHandlerFunc;
   NAMFileNameControl* mFileNameControl = nullptr;
+  IVStyle mStyle;
+  IBitmap mBitmap;
+  ISVG mLoadSVG, mClearSVG, mLeftSVG, mRightSVG;
+  int mClearMsgTag;
+  NAMBrowserState mBrowserState;
+  NAMSquareButtonControl* mClearButton = nullptr;
+};
+
+class NAMCabFileBrowserControl : public IDirBrowseControlBase
+{
+public:
+  NAMCabFileBrowserControl(const IRECT& bounds, int clearMsgTag, const char* labelStr, const char* fileExtension,
+                           IFileDialogCompletionHandlerFunc ch, const IVStyle& style, const ISVG& loadSVG,
+                           const ISVG& clearSVG, const ISVG& leftSVG, const ISVG& rightSVG, const IBitmap& bitmap)
+  : IDirBrowseControlBase(bounds, fileExtension, false, false)
+  , mClearMsgTag(clearMsgTag)
+  , mDefaultLabelStr(labelStr)
+  , mCompletionHandlerFunc(ch)
+  , mStyle(style.WithColor(kFG, COLOR_TRANSPARENT).WithDrawFrame(false))
+  , mBitmap(bitmap)
+  , mLoadSVG(loadSVG)
+  , mClearSVG(clearSVG)
+  , mLeftSVG(leftSVG)
+  , mRightSVG(rightSVG)
+  , mBrowserState(NAMBrowserState::Empty)
+  {
+    mIgnoreMouse = true;
+  }
+
+  void Draw(IGraphics& g) override {}
+
+  void OnPopupMenuSelection(IPopupMenu* pSelectedMenu, int valIdx) override
+  {
+    if (pSelectedMenu)
+    {
+      IPopupMenu::Item* pItem = pSelectedMenu->GetChosenItem();
+
+      if (pItem)
+      {
+        mSelectedItemIndex = mItems.Find(pItem);
+        LoadFileAtCurrentIndex();
+      }
+    }
+  }
+
+  void OnAttached() override
+  {
+    auto prevFileFunc = [&](IControl* pCaller) {
+      const auto nItems = NItems();
+      if (nItems == 0)
+        return;
+      mSelectedItemIndex--;
+
+      if (mSelectedItemIndex < 0)
+        mSelectedItemIndex = nItems - 1;
+
+      LoadFileAtCurrentIndex();
+    };
+
+    auto nextFileFunc = [&](IControl* pCaller) {
+      const auto nItems = NItems();
+      if (nItems == 0)
+        return;
+      mSelectedItemIndex++;
+
+      if (mSelectedItemIndex >= nItems)
+        mSelectedItemIndex = 0;
+
+      LoadFileAtCurrentIndex();
+    };
+
+    auto loadFileFunc = [&](IControl* pCaller) {
+      WDL_String fileName;
+      WDL_String path;
+      if (mLastDirectory.GetLength())
+        path.Set(mLastDirectory.Get());
+      else
+        GetSelectedFileDirectory(path);
+#ifdef NAM_PICK_DIRECTORY
+      pCaller->GetUI()->PromptForDirectory(path, [&](const WDL_String& fileName, const WDL_String& path) {
+        if (path.GetLength())
+        {
+          mLastDirectory.Set(path.Get());
+          ClearPathList();
+          AddPath(path.Get(), "");
+          SetupMenu();
+          SelectFirstFile();
+          LoadFileAtCurrentIndex();
+        }
+      });
+#else
+      pCaller->GetUI()->PromptForFile(
+        fileName, path, EFileAction::Open, mExtension.Get(), [&](const WDL_String& fileName, const WDL_String& path) {
+          if (fileName.GetLength())
+          {
+            mLastDirectory.Set(path.Get());
+            ClearPathList();
+            AddPath(path.Get(), "");
+            SetupMenu();
+            SetSelectedFile(fileName.Get());
+            LoadFileAtCurrentIndex();
+          }
+        });
+#endif
+    };
+
+    auto clearFileFunc = [&](IControl* pCaller) {
+      pCaller->GetDelegate()->SendArbitraryMsgFromUI(mClearMsgTag, this->GetTag());
+      mFileNameControl->SetLabelAndTooltip(mDefaultLabelStr.Get());
+      SetBrowserState(NAMBrowserState::Empty);
+    };
+
+    auto chooseFileFunc = [&, loadFileFunc](IControl* pCaller) {
+      if (std::string_view(pCaller->As<IVButtonControl>()->GetLabelStr()) == mDefaultLabelStr.Get())
+      {
+        loadFileFunc(pCaller);
+      }
+      else
+      {
+        CheckSelectedItem();
+
+        if (!mMainMenu.HasSubMenus())
+        {
+          mMainMenu.SetChosenItemIdx(mSelectedItemIndex);
+        }
+        pCaller->GetUI()->CreatePopupMenu(*this, mMainMenu, pCaller->GetRECT());
+      }
+    };
+
+    IRECT padded = mRECT.GetPadded(-6.f).GetHPadded(-2.f);
+    const float buttonRowHeight = std::min(18.0f, padded.H() * 0.42f);
+    const float buttonGap = 4.0f;
+    const auto fileNameButtonBounds = padded.ReduceFromTop(std::max(14.0f, padded.H() - buttonRowHeight - buttonGap));
+    const auto buttonRowBounds = padded.GetReducedFromTop(buttonGap);
+    const float buttonWidth = std::min(buttonRowHeight, buttonRowBounds.W() * 0.18f);
+    const float distributedGap = std::max(buttonGap, (buttonRowBounds.W() - 4.0f * buttonWidth) / 3.0f);
+    IRECT fullWidthButtonRow = IRECT(buttonRowBounds.L, buttonRowBounds.T, buttonRowBounds.R, buttonRowBounds.T + buttonRowHeight);
+    const auto loadFileButtonBounds = fullWidthButtonRow.ReduceFromLeft(buttonWidth);
+    fullWidthButtonRow.ReduceFromLeft(distributedGap);
+    const auto leftButtonBounds = fullWidthButtonRow.ReduceFromLeft(buttonWidth);
+    fullWidthButtonRow.ReduceFromLeft(distributedGap);
+    const auto rightButtonBounds = fullWidthButtonRow.ReduceFromLeft(buttonWidth);
+    fullWidthButtonRow.ReduceFromLeft(distributedGap);
+    const auto clearButtonBounds = fullWidthButtonRow.ReduceFromLeft(buttonWidth);
+
+    AddChildControl(new NAMSquareButtonControl(loadFileButtonBounds, DefaultClickActionFunc, mLoadSVG))
+      ->SetAnimationEndActionFunction(loadFileFunc);
+    AddChildControl(new NAMSquareButtonControl(leftButtonBounds, DefaultClickActionFunc, mLeftSVG))
+      ->SetAnimationEndActionFunction(prevFileFunc);
+    AddChildControl(new NAMSquareButtonControl(rightButtonBounds, DefaultClickActionFunc, mRightSVG))
+      ->SetAnimationEndActionFunction(nextFileFunc);
+    AddChildControl(mFileNameControl = new NAMCabFileNameControl(fileNameButtonBounds, mDefaultLabelStr.Get(), mStyle))
+      ->SetAnimationEndActionFunction(chooseFileFunc);
+
+    mClearButton = new NAMSquareButtonControl(clearButtonBounds, DefaultClickActionFunc, mClearSVG);
+    mClearButton->SetAnimationEndActionFunction(clearFileFunc);
+    AddChildControl(mClearButton);
+
+    SetBrowserState(NAMBrowserState::Empty);
+  }
+
+  void LoadFileAtCurrentIndex()
+  {
+    if (mSelectedItemIndex > -1 && mSelectedItemIndex < NItems())
+    {
+      WDL_String fileName, path;
+      GetSelectedFile(fileName);
+      mFileNameControl->SetLabelAndTooltipEllipsizing(fileName);
+      mCompletionHandlerFunc(fileName, path);
+    }
+  }
+
+  void OnMsgFromDelegate(int msgTag, int dataSize, const void* pData) override
+  {
+    switch (msgTag)
+    {
+      case kMsgTagLoadFailed:
+      {
+        std::string label(std::string("(FAILED) ") + std::string(mFileNameControl->GetLabelStr()));
+        mFileNameControl->SetLabelAndTooltip(label.c_str());
+        SetBrowserState(NAMBrowserState::Empty);
+      }
+      break;
+      case kMsgTagLoadedModel:
+      case kMsgTagLoadedStompModel:
+      case kMsgTagLoadedIRLeft:
+      case kMsgTagLoadedIRRight:
+      {
+        WDL_String fileName, directory;
+        fileName.Set(reinterpret_cast<const char*>(pData));
+        directory.Set(reinterpret_cast<const char*>(pData));
+        directory.remove_filepart(true);
+        mLastDirectory.Set(directory.Get());
+
+        ClearPathList();
+        AddPath(directory.Get(), "");
+        SetupMenu();
+        SetSelectedFile(fileName.Get());
+        mFileNameControl->SetLabelAndTooltipEllipsizing(fileName);
+        SetBrowserState(NAMBrowserState::Loaded);
+      }
+      break;
+      case kMsgTagClearModel:
+      case kMsgTagClearStompModel:
+      case kMsgTagClearIRLeft:
+      case kMsgTagClearIRRight:
+        mFileNameControl->SetLabelAndTooltip(mDefaultLabelStr.Get());
+        SetBrowserState(NAMBrowserState::Empty);
+        break;
+      default: break;
+    }
+  }
+
+  void RefreshBrowserStateVisibility() { SetBrowserState(mBrowserState); }
+
+private:
+  void SelectFirstFile() { mSelectedItemIndex = mFiles.GetSize() ? 0 : -1; }
+
+  void GetSelectedFileDirectory(WDL_String& path)
+  {
+    GetSelectedFile(path);
+    path.remove_filepart();
+    return;
+  }
+
+  void SetBrowserState(NAMBrowserState newState)
+  {
+    mBrowserState = newState;
+    if (mClearButton == nullptr)
+      return;
+
+    const bool parentHidden = (GetParent() != nullptr) && GetParent()->IsHidden();
+    if (IsHidden() || parentHidden)
+    {
+      mClearButton->Hide(true);
+      return;
+    }
+
+    switch (mBrowserState)
+    {
+      case NAMBrowserState::Empty:
+        mClearButton->Hide(true);
+        break;
+      case NAMBrowserState::Loaded:
+        mClearButton->Hide(false);
+        break;
+    }
+  }
+
+  WDL_String mDefaultLabelStr;
+  WDL_String mLastDirectory;
+  IFileDialogCompletionHandlerFunc mCompletionHandlerFunc;
+  NAMCabFileNameControl* mFileNameControl = nullptr;
   IVStyle mStyle;
   IBitmap mBitmap;
   ISVG mLoadSVG, mClearSVG, mLeftSVG, mRightSVG;

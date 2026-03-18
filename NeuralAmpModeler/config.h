@@ -145,6 +145,8 @@
 #define FILEBACKGROUND_FN "General/FileBackground.png"
 #define FILEBACKGROUND2X_FN "General/FileBackground@2x.png"
 #define FILEBACKGROUND3X_FN "General/FileBackground@3x.png"
+#define MIC57_FN "Mic/57.png"
+#define MIC121_FN "Mic/121.png"
 #define INPUTLEVELBACKGROUND_FN "General/InputLevelBackground.png"
 #define INPUTLEVELBACKGROUND2X_FN "General/InputLevelBackground@2x.png"
 #define INPUTLEVELBACKGROUND3X_FN "General/InputLevelBackground@3x.png"

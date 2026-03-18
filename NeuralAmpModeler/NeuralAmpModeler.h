@@ -56,8 +56,12 @@ enum EParams
   // Post-cab filters
   kUserHPFFrequency,
   kUserLPFFrequency,
-  // Cab IR blend (append-only to preserve old serialization order)
-  kCabIRBlend,
+  // Dual cab slots
+  kCabAEnabled,
+  kCabASource,
+  kCabAPosition,
+  kCabALevel,
+  kCabAPan,
   // Model on/off (bypass model stage when off)
   kModelToggle,
   // Gain trim directly before the model stage
@@ -117,6 +121,11 @@ enum EParams
   kFXDelayDucker,
   kVirtualDoubleActive,
   kVirtualDoubleAmount,
+  kCabBEnabled,
+  kCabBSource,
+  kCabBPosition,
+  kCabBLevel,
+  kCabBPan,
   kNumParams
 };
 
@@ -169,6 +178,12 @@ enum ECtrlTags
   kCtrlTagStompHasLoudness,
   kCtrlTagStompHasCalibration,
   kCtrlTagSectionDimmer,
+  kCtrlTagCabSourceSelectorA,
+  kCtrlTagCabSourceSelectorB,
+  kCtrlTagCabHeaderA,
+  kCtrlTagCabHeaderB,
+  kCtrlTagCabMicLabelA,
+  kCtrlTagCabMicLabelB,
   kNumCtrlTags
 };
 
@@ -420,9 +435,11 @@ private:
   // Loads left cab IR and stores it to mStagedIR.
   // Return status code so that error messages can be relayed if
   // it wasn't successful.
-  dsp::wav::LoadReturnCode _StageIRLeft(const WDL_String& irPath);
+  dsp::wav::LoadReturnCode _StageIRLeft(const WDL_String& irPath, bool notifyUI = true);
   // Loads right cab IR and stores it to mStagedIRRight.
-  dsp::wav::LoadReturnCode _StageIRRight(const WDL_String& irPath);
+  dsp::wav::LoadReturnCode _StageIRRight(const WDL_String& irPath, bool notifyUI = true);
+  dsp::wav::LoadReturnCode _StageCabBIRPrimary(const WDL_String& irPath);
+  dsp::wav::LoadReturnCode _StageCabBIRSecondary(const WDL_String& irPath);
 
   bool _HaveModel() const { return this->mModel != nullptr; };
   // Prepare the input & output buffers
@@ -477,6 +494,11 @@ private:
   WDL_String _ResolveReleaseAmpAssetPathFromToken(const WDL_String& token) const;
   WDL_String _ResolveReleaseStompAssetPath(ReleaseStompAssetId assetId) const;
   WDL_String _ResolveReleaseIRAssetPath(ReleaseIRAssetId assetId) const;
+  WDL_String _ResolveCuratedCabIRPath(int sourceChoice, int captureIndex) const;
+  void _ApplyCabSlotSource(int slotIndex, bool forceReload = false);
+  void _RefreshCabControls();
+  void _RefreshCabSlotControls(int slotIndex);
+  void _ShowCabSourceMenu(int slotIndex, const iplug::igraphics::IRECT& anchorArea);
   void _SetAmpSlotReleaseAsset(int slotIndex, ReleaseAmpAssetId assetId);
   WDL_String _ResolveAmpSlotModelSourceToPathForMode(int slotIndex, const AmpSlotModelSource& requestedSource) const;
   WDL_String _ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath) const;
@@ -554,6 +576,10 @@ private:
   std::unique_ptr<dsp::ImpulseResponse> mIRRight;
   // Stereo core: right-channel state for right IR.
   std::unique_ptr<dsp::ImpulseResponse> mIRRightChannel2;
+  std::unique_ptr<dsp::ImpulseResponse> mCabBIR;
+  std::unique_ptr<dsp::ImpulseResponse> mCabBIRChannel2;
+  std::unique_ptr<dsp::ImpulseResponse> mCabBIRSecondary;
+  std::unique_ptr<dsp::ImpulseResponse> mCabBIRSecondaryChannel2;
   // Manages switching what DSP is being used.
   std::unique_ptr<ResamplingNAM> mStagedModel;
   std::unique_ptr<ResamplingNAM> mStagedModelRight;
@@ -563,14 +589,22 @@ private:
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRChannel2;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRRight;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRRightChannel2;
+  std::unique_ptr<dsp::ImpulseResponse> mStagedCabBIR;
+  std::unique_ptr<dsp::ImpulseResponse> mStagedCabBIRChannel2;
+  std::unique_ptr<dsp::ImpulseResponse> mStagedCabBIRSecondary;
+  std::unique_ptr<dsp::ImpulseResponse> mStagedCabBIRSecondaryChannel2;
   WDL_String mStagedIRPath;
   WDL_String mStagedIRPathRight;
+  WDL_String mStagedCabBIRPath;
+  WDL_String mStagedCabBIRSecondaryPath;
   // Flags to take away the modules at a safe time.
   std::atomic<bool> mShouldRemoveModel = false;
   std::array<std::atomic<bool>, 3> mShouldRemoveModelSlot;
   std::atomic<bool> mShouldRemoveStompModel = false;
   std::atomic<bool> mShouldRemoveIRLeft = false;
   std::atomic<bool> mShouldRemoveIRRight = false;
+  std::atomic<bool> mShouldRemoveCabBIRPrimary = false;
+  std::atomic<bool> mShouldRemoveCabBIRSecondary = false;
 
   std::atomic<bool> mNewModelLoadedInDSP = false;
   std::atomic<bool> mModelCleared = false;
@@ -626,6 +660,8 @@ private:
   std::atomic<bool> mDelayHostTempoValid{false};
   std::atomic<bool> mDelayUsingManualTempo{true};
   iplug::igraphics::IPopupMenu mStandalonePresetMenu;
+  iplug::igraphics::IPopupMenu mCabSourceMenuA;
+  iplug::igraphics::IPopupMenu mCabSourceMenuB;
   std::array<AmpSlotState, 3> mAmpSlotStates = {};
   std::array<std::atomic<bool>, 3> mAmpSlotHasLoudness;
   std::array<std::atomic<bool>, 3> mAmpSlotHasCalibration;
@@ -745,6 +781,9 @@ private:
   // Path to IR (.wav file)
   WDL_String mIRPath;
   WDL_String mIRPathRight;
+  WDL_String mCabBIRPath;
+  WDL_String mCabBIRSecondaryPath;
+  std::array<WDL_String, 2> mCabCustomIRPaths;
 
   WDL_String mHighLightColor{PluginColors::NAM_THEMECOLOR.ToColorCode()};
 

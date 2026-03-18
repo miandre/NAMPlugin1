@@ -84,8 +84,86 @@ constexpr std::array<const char*, 1> kReleaseStompAssetTokens = {"Boost1"};
 constexpr std::array<const char*, 1> kReleaseStompAssetFileNames = {"Boost1.nam"};
 constexpr std::array<const char*, 1> kReleaseIRAssetTokens = {"Cab1"};
 constexpr std::array<const char*, 1> kReleaseIRAssetFileNames = {"Cab1.wav"};
+constexpr std::array<const char*, 2> kCuratedCabMicFolderNames = {"57", "121"};
+constexpr std::array<const char*, 3> kCabSourceLabels = {"Custom IR", "S-57", "R-121"};
+constexpr std::array<int, 5> kCuratedCabPositionAnchors = {0, 24, 49, 74, 99};
 constexpr float kAmpFaceKnobAreaWidth = 80.0f;
 constexpr float kAmpFaceSwitchScale = 0.20f;
+constexpr int kCabSlotCount = 2;
+
+int GetCabSlotEnabledParamIdx(const int slotIndex)
+{
+  return (slotIndex == 0) ? kCabAEnabled : kCabBEnabled;
+}
+
+int GetCabSlotSourceParamIdx(const int slotIndex)
+{
+  return (slotIndex == 0) ? kCabASource : kCabBSource;
+}
+
+int GetCabSlotPositionParamIdx(const int slotIndex)
+{
+  return (slotIndex == 0) ? kCabAPosition : kCabBPosition;
+}
+
+int GetCabSlotLevelParamIdx(const int slotIndex)
+{
+  return (slotIndex == 0) ? kCabALevel : kCabBLevel;
+}
+
+int GetCabSlotPanParamIdx(const int slotIndex)
+{
+  return (slotIndex == 0) ? kCabAPan : kCabBPan;
+}
+
+int GetCabSlotFileBrowserCtrlTag(const int slotIndex)
+{
+  return (slotIndex == 0) ? kCtrlTagIRFileBrowserLeft : kCtrlTagIRFileBrowserRight;
+}
+
+int GetCabSlotSourceSelectorCtrlTag(const int slotIndex)
+{
+  return (slotIndex == 0) ? kCtrlTagCabSourceSelectorA : kCtrlTagCabSourceSelectorB;
+}
+
+struct CuratedCabSegment
+{
+  int leftIndex = 0;
+  int rightIndex = 1;
+  double blend = 0.0;
+};
+
+CuratedCabSegment GetCuratedCabSegment(const double position)
+{
+  const double clampedPosition =
+    std::clamp(position, static_cast<double>(kCuratedCabPositionAnchors.front()),
+               static_cast<double>(kCuratedCabPositionAnchors.back()));
+
+  for (size_t i = 0; i + 1 < kCuratedCabPositionAnchors.size(); ++i)
+  {
+    const int start = kCuratedCabPositionAnchors[i];
+    const int end = kCuratedCabPositionAnchors[i + 1];
+    if (clampedPosition > end && i + 2 < kCuratedCabPositionAnchors.size())
+      continue;
+
+    const double denom = static_cast<double>(std::max(1, end - start));
+    CuratedCabSegment segment;
+    segment.leftIndex = static_cast<int>(i);
+    segment.rightIndex = static_cast<int>(i + 1);
+    segment.blend = std::clamp((clampedPosition - start) / denom, 0.0, 1.0);
+    return segment;
+  }
+
+  return {};
+}
+
+double GetCabSlotCuratedPosition(const int slotIndex, const double position)
+{
+  if (slotIndex == 0)
+    return static_cast<double>(kCuratedCabPositionAnchors.back()) - position;
+
+  return position;
+}
 
 struct AmpFaceLayout
 {
@@ -95,7 +173,7 @@ struct AmpFaceLayout
   float knobScale;
   float labelYOffset;
   float switchCenterOffsetX;
-  float switchCenterOffsetY;
+  float switchCenterOffsetY; 
 };
 
 constexpr std::array<float, 7> kAmpFaceKnobColumnOffsets = {-2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
@@ -223,6 +301,57 @@ std::vector<std::filesystem::path> GetReleaseAssetCandidateDirs(const char* bund
       break;
     cursor = cursor.parent_path();
   }
+  return candidateDirs;
+}
+
+std::vector<std::filesystem::path> GetCuratedCabCandidateDirs(const char* bundleId)
+{
+  std::vector<std::filesystem::path> candidateDirs = {
+    "NeuralAmpModeler/resources/tmpLoad/IR", "resources/tmpLoad/IR", "tmpLoad/IR", "IR"
+  };
+
+  WDL_String pluginPath;
+  PluginPath(pluginPath, gHINSTANCE);
+  if (pluginPath.GetLength() > 0)
+  {
+    const std::filesystem::path pluginDir(pluginPath.Get());
+    candidateDirs.push_back(pluginDir / "IR");
+    candidateDirs.push_back(pluginDir / "tmpLoad" / "IR");
+    candidateDirs.push_back(pluginDir / "resources" / "tmpLoad" / "IR");
+
+    std::filesystem::path cursor = pluginDir;
+    for (int depth = 0; depth < 10; ++depth)
+    {
+      candidateDirs.push_back(cursor / "NeuralAmpModeler" / "resources" / "tmpLoad" / "IR");
+      candidateDirs.push_back(cursor / "resources" / "tmpLoad" / "IR");
+      candidateDirs.push_back(cursor / "tmpLoad" / "IR");
+      if (!cursor.has_parent_path())
+        break;
+      cursor = cursor.parent_path();
+    }
+  }
+
+  WDL_String hostPath;
+  HostPath(hostPath, bundleId);
+  if (hostPath.GetLength() <= 0)
+    return candidateDirs;
+
+  const std::filesystem::path hostDir(hostPath.Get());
+  candidateDirs.push_back(hostDir / "IR");
+  candidateDirs.push_back(hostDir / "tmpLoad" / "IR");
+  candidateDirs.push_back(hostDir / "resources" / "tmpLoad" / "IR");
+
+  std::filesystem::path cursor = hostDir;
+  for (int depth = 0; depth < 10; ++depth)
+  {
+    candidateDirs.push_back(cursor / "NeuralAmpModeler" / "resources" / "tmpLoad" / "IR");
+    candidateDirs.push_back(cursor / "resources" / "tmpLoad" / "IR");
+    candidateDirs.push_back(cursor / "tmpLoad" / "IR");
+    if (!cursor.has_parent_path())
+      break;
+    cursor = cursor.parent_path();
+  }
+
   return candidateDirs;
 }
 
@@ -788,7 +917,32 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kOutputMode)->InitEnum("OutputMode", 1, {"Raw", "Normalized", "Calibrated"}); // TODO DRY w/ control
   GetParam(kIRToggle)->InitBool("IRToggle", true);
   GetParam(kModelToggle)->InitBool("ModelToggle", false);
-  GetParam(kCabIRBlend)->InitDouble("Cab Blend", 50.0, 0.0, 100.0, 0.1, "%");
+  GetParam(kCabAEnabled)->InitBool("Cab A Enable", true);
+  GetParam(kCabASource)->InitEnum("Cab A Source", 0, {"Custom IR", "57", "121"});
+  GetParam(kCabAPosition)->InitDouble("Cab A Position", 0.0, 0.0, 99.0, 1.0, "");
+  GetParam(kCabALevel)->InitGain("Cab A Level", 0.0, -24.0, 12.0, 0.1);
+  GetParam(kCabAPan)->InitDouble("Cab A Pan", 0.0, -100.0, 100.0, 1.0, "");
+  GetParam(kCabBEnabled)->InitBool("Cab B Enable", false);
+  GetParam(kCabBSource)->InitEnum("Cab B Source", 0, {"Custom IR", "57", "121"});
+  GetParam(kCabBPosition)->InitDouble("Cab B Position", 0.0, 0.0, 99.0, 1.0, "");
+  GetParam(kCabBLevel)->InitGain("Cab B Level", 0.0, -24.0, 12.0, 0.1);
+  GetParam(kCabBPan)->InitDouble("Cab B Pan", 0.0, -100.0, 100.0, 1.0, "");
+  auto setCabPanDisplayFunc = [this](const int paramIdx) {
+    GetParam(paramIdx)->SetDisplayFunc([](double value, WDL_String& str) {
+      const int panValue = std::clamp(static_cast<int>(std::lround(value)), -100, 100);
+      if (panValue == 0)
+      {
+        str.Set("C");
+        return;
+      }
+
+      const int magnitude = std::abs(panValue);
+      const char side = (panValue < 0) ? 'L' : 'R';
+      str.SetFormatted(16, "%d %c", magnitude, side);
+    });
+  };
+  setCabPanDisplayFunc(kCabAPan);
+  setCabPanDisplayFunc(kCabBPan);
   GetParam(kUserHPFFrequency)->InitDouble("HPF", 20.0, 20.0, 500.0, 1.0, "Hz");
   GetParam(kUserLPFFrequency)->InitDouble("LPF", 22000.0, 5000.0, 22000.0, 10.0, "Hz");
   GetParam(kCalibrateInput)->InitBool(kCalibrateInputParamName.c_str(), kDefaultCalibrateInput);
@@ -857,8 +1011,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto crossSVG = pGraphics->LoadSVG(CLOSE_BUTTON_FN);
     const auto rightArrowSVG = pGraphics->LoadSVG(RIGHT_ARROW_FN);
     const auto leftArrowSVG = pGraphics->LoadSVG(LEFT_ARROW_FN);
-    const auto irIconOnSVG = pGraphics->LoadSVG(IR_ICON_ON_FN);
-    const auto irIconOffSVG = pGraphics->LoadSVG(IR_ICON_OFF_FN);
     const auto inputMonoSVG = pGraphics->LoadSVG(INPUT_MONO_SVG_FN);
     const auto inputStereoSVG = pGraphics->LoadSVG(INPUT_STEREO_SVG_FN);
     const auto ampActiveSVG = pGraphics->LoadSVG(AMP_ACTIVE_SVG_FN);
@@ -873,6 +1025,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto amp2BackgroundBitmap = pGraphics->LoadBitmap(AMP2BACKGROUND_FN);
     const auto settingsBackgroundBitmap = pGraphics->LoadBitmap(SETTINGSBACKGROUND_FN);
     const auto fileBackgroundBitmap = pGraphics->LoadBitmap(FILEBACKGROUND_FN);
+    const auto mic57Bitmap = pGraphics->LoadBitmap(MIC57_FN);
+    const auto mic121Bitmap = pGraphics->LoadBitmap(MIC121_FN);
     const auto inputLevelBackgroundBitmap = pGraphics->LoadBitmap(INPUTLEVELBACKGROUND_FN);
     const std::array<IBitmap, 3> ampFaceKnobBitmaps = {
       pGraphics->LoadBitmap(AMP1KNOB_FN),
@@ -1274,21 +1428,97 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                        presetStripArea.T,
                                        presetNextArea.L - 10.0f,
                                        presetStripArea.B);
-    // Footer IR strip: align both pickers and blend control on one visual baseline.
-    const float irRowHeight = 30.0f;
-    const float irRowTop = bottomBarArea.MH() - 0.5f * irRowHeight + 17.0f;
-    const float irPickerWidth = 292.0f;
-    const float irCenterGap = 132.0f;
-    const float leftIRRight = b.MW() - 0.5f * irCenterGap;
-    const float rightIRLeft = b.MW() + 0.5f * irCenterGap;
-    const auto irLeftArea = IRECT(leftIRRight - irPickerWidth, irRowTop, leftIRRight, irRowTop + irRowHeight);
-    const auto irRightArea = IRECT(rightIRLeft, irRowTop, rightIRLeft + irPickerWidth, irRowTop + irRowHeight);
-    const auto irSwitchArea = irLeftArea.GetFromLeft(30.0f).GetHShifted(-36.0f).GetVShifted(-1.0f).GetScaledAboutCentre(0.6f);
-    const float blendSliderWidth = 130.0f;
-    const float blendSliderHeight = 60.0f;
-    const float blendSliderTop = irRowTop - 12.0f;
-    const auto cabBlendArea = IRECT(heroArea.MW() - 0.5f * blendSliderWidth, blendSliderTop, heroArea.MW() + 0.5f * blendSliderWidth,
-                                    blendSliderTop + blendSliderHeight);
+    // Cab section: two always-visible mono cab slots flanking the central cabinet art.
+    constexpr float kCabSidePanelWidth = 112.0f;
+    constexpr float kCabSidePanelInset = 5.0f;
+    constexpr float kCabSourceSelectorWidth = 65.0f;
+    constexpr float kCabSourceSelectorHeight = 20.0f;
+    constexpr float kCabEnableWidth = 20.0f;
+    constexpr float kCabEnableHeight = 28.0f;
+    constexpr float kCabMicLabelWidth = 25.0f;
+    constexpr float kCabHeaderHeight = 22.0f;
+    constexpr float kCabHeaderToMicGap = 10.0f;
+    constexpr float kCabMicHeaderHeight = 15.0f;
+    constexpr float kMicLabelPadding = 6.0f;
+    constexpr float kMicSelectorPadding = 4.0f;
+    constexpr float kCabKnobSize = 72.0f;
+    constexpr float kCabFileBrowserHeight = 52.0f;
+    constexpr float kCabPositionSliderWidth = 135.0f;
+    constexpr float kCabPositionSliderHeight = 140.0f;
+    constexpr float kCabPositionSliderSidePadding = 14.0f;
+    constexpr float kCabUtilityKnobScale = 0.70f;
+    constexpr float kCabUtilityLabelYOffset = 0.0f;
+    constexpr float kCabUtilityValueYOffset = -5.0f;
+    constexpr float kCabSourceTopDesignY = 665.0f;
+    constexpr float kCabPositionCenterYDesign = 1350.0f;
+    const float cabSourceTop = b.T + (kCabSourceTopDesignY / 1998.0f) * b.H();
+    const auto cabLeftPanelArea =
+      IRECT(contentArea.L + kCabSidePanelInset, cabSourceTop, contentArea.L + kCabSidePanelInset + kCabSidePanelWidth, heroArea.B - 26.0f);
+    const auto cabRightPanelArea =
+      IRECT(contentArea.R - kCabSidePanelInset - kCabSidePanelWidth, cabSourceTop, contentArea.R - kCabSidePanelInset, heroArea.B - 26.0f);
+    const auto cabAHeaderArea =
+      IRECT(cabLeftPanelArea.L, cabSourceTop, cabLeftPanelArea.R, cabSourceTop + kCabHeaderHeight);
+    const auto cabAMicLabelArea =
+      IRECT(cabLeftPanelArea.L + kMicLabelPadding,
+            cabAHeaderArea.B + kCabHeaderToMicGap,
+            cabLeftPanelArea.L + kCabMicLabelWidth,
+            cabAHeaderArea.B + kCabHeaderToMicGap + kCabMicHeaderHeight);
+    const auto cabAEnableArea = IRECT(cabLeftPanelArea.R - kCabEnableWidth - kMicLabelPadding,
+                                      cabAHeaderArea.MH() - 0.5f * kCabEnableHeight,
+                                      cabLeftPanelArea.R - kMicLabelPadding,
+                                      cabAHeaderArea.MH() + 0.5f * kCabEnableHeight);
+    const auto cabASourceSelectorArea = IRECT(cabLeftPanelArea.R - kCabSourceSelectorWidth - kMicSelectorPadding,
+                                              cabAMicLabelArea.MH() - 0.5f * kCabSourceSelectorHeight,
+                                              cabLeftPanelArea.R - kMicSelectorPadding,
+                                              cabAMicLabelArea.MH() + 0.5f * kCabSourceSelectorHeight);
+    const auto cabBHeaderArea =
+      IRECT(cabRightPanelArea.L, cabSourceTop, cabRightPanelArea.R, cabSourceTop + kCabHeaderHeight);
+    const auto cabBMicLabelArea =
+      IRECT(cabRightPanelArea.L + kMicLabelPadding,
+            cabBHeaderArea.B + kCabHeaderToMicGap,
+            cabRightPanelArea.L + kCabMicLabelWidth,
+            cabBHeaderArea.B + kCabHeaderToMicGap + kCabMicHeaderHeight);
+    const auto cabBEnableArea = IRECT(cabRightPanelArea.R - kCabEnableWidth - kMicLabelPadding,
+                                      cabBHeaderArea.MH() - 0.5f * kCabEnableHeight,
+                                      cabRightPanelArea.R - kMicLabelPadding,
+                                      cabBHeaderArea.MH() + 0.5f * kCabEnableHeight);
+    const auto cabBSourceSelectorArea = IRECT(cabRightPanelArea.R - kCabSourceSelectorWidth - kMicSelectorPadding,
+                                              cabBMicLabelArea.MH() - 0.5f * kCabSourceSelectorHeight,
+                                              cabRightPanelArea.R - kMicSelectorPadding,
+                                              cabBMicLabelArea.MH() + 0.5f * kCabSourceSelectorHeight);
+    const float cabLevelTop = cabASourceSelectorArea.B + 36.0f;
+    const auto cabALevelArea =
+      IRECT(cabLeftPanelArea.MW() - 0.5f * kCabKnobSize, cabLevelTop, cabLeftPanelArea.MW() + 0.5f * kCabKnobSize, cabLevelTop + kCabKnobSize);
+    const auto cabBLevelArea =
+      IRECT(cabRightPanelArea.MW() - 0.5f * kCabKnobSize, cabLevelTop, cabRightPanelArea.MW() + 0.5f * kCabKnobSize, cabLevelTop + kCabKnobSize);
+    const float cabPanTop = cabALevelArea.B + 24.0f;
+    const auto cabAPanArea =
+      IRECT(cabLeftPanelArea.MW() - 0.5f * kCabKnobSize, cabPanTop, cabLeftPanelArea.MW() + 0.5f * kCabKnobSize, cabPanTop + kCabKnobSize);
+    const auto cabBPanArea =
+      IRECT(cabRightPanelArea.MW() - 0.5f * kCabKnobSize, cabPanTop, cabRightPanelArea.MW() + 0.5f * kCabKnobSize, cabPanTop + kCabKnobSize);
+    const float irATop = cabAPanArea.B + 24.0f;
+    const float irBTop = cabBPanArea.B + 24.0f;
+    const auto irLeftArea = IRECT(cabLeftPanelArea.L,
+                                  irATop,
+                                  cabLeftPanelArea.R,
+                                  irATop + kCabFileBrowserHeight);
+    const auto irRightArea = IRECT(cabRightPanelArea.L,
+                                   irBTop,
+                                   cabRightPanelArea.R,
+                                   irBTop + kCabFileBrowserHeight);
+    const float cabAPositionCenterX = heroArea.L + 0.33f * heroArea.W();
+    const float cabBPositionCenterX = heroArea.L + 0.68f * heroArea.W();
+    const float cabPositionCenterY = b.T + (kCabPositionCenterYDesign / 1998.0f) * b.H();
+    const auto cabAPositionArea =
+      IRECT(cabAPositionCenterX - kCabPositionSliderWidth - kCabPositionSliderSidePadding,
+            cabPositionCenterY - 0.5f * kCabPositionSliderHeight,
+            cabAPositionCenterX + kCabPositionSliderSidePadding,
+            cabPositionCenterY + 0.5f * kCabPositionSliderHeight);
+    const auto cabBPositionArea =
+      IRECT(cabBPositionCenterX - kCabPositionSliderSidePadding,
+            cabPositionCenterY - 0.5f * kCabPositionSliderHeight,
+            cabBPositionCenterX + kCabPositionSliderWidth + kCabPositionSliderSidePadding,
+            cabPositionCenterY + 0.5f * kCabPositionSliderHeight);
     // Footer amp selector strip uses dedicated picker icon art.
     const float footerAmpIconHeight = 43.0f;
     const float footerAmpIconWidth =
@@ -1298,7 +1528,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float footerAmpIconGap = 36.0f;
     const float footerAmpRowWidth = 3.0f * footerAmpIconWidth + 2.0f * footerAmpIconGap;
     const float footerAmpRowLeft = bottomBarArea.MW() - 0.5f * footerAmpRowWidth;
-    const float footerAmpRowTop = irRowTop - 4.0f;
+    const float footerAmpRowTop = bottomBarArea.MH() - 2.0f;
     const auto footerAmpSlot1Area =
       IRECT(footerAmpRowLeft, footerAmpRowTop, footerAmpRowLeft + footerAmpIconWidth, footerAmpRowTop + footerAmpIconHeight);
     const auto footerAmpSlot2Area = IRECT(footerAmpSlot1Area.R + footerAmpIconGap,
@@ -1376,7 +1606,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         return;
       if (fileName.GetLength())
       {
-        const dsp::wav::LoadReturnCode retCode = _StageIRLeft(fileName);
+        mCabCustomIRPaths[0].Set(fileName.Get());
+        dsp::wav::LoadReturnCode retCode = dsp::wav::LoadReturnCode::SUCCESS;
+        if (GetParam(kCabASource)->Int() == 0)
+          retCode = _StageIRLeft(fileName, false);
         if (retCode != dsp::wav::LoadReturnCode::SUCCESS)
         {
           std::stringstream message;
@@ -1387,6 +1620,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         }
         else
         {
+          SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, fileName.GetLength(), fileName.Get());
           _MarkStandalonePresetDirty();
         }
       }
@@ -1397,7 +1631,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         return;
       if (fileName.GetLength())
       {
-        const dsp::wav::LoadReturnCode retCode = _StageIRRight(fileName);
+        mCabCustomIRPaths[1].Set(fileName.Get());
+        dsp::wav::LoadReturnCode retCode = dsp::wav::LoadReturnCode::SUCCESS;
+        if (GetParam(kCabBSource)->Int() == 0)
+          retCode = _StageCabBIRPrimary(fileName);
         if (retCode != dsp::wav::LoadReturnCode::SUCCESS)
         {
           std::stringstream message;
@@ -1408,6 +1645,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         }
         else
         {
+          SendControlMsgFromDelegate(
+            kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, fileName.GetLength(), fileName.Get());
           _MarkStandalonePresetDirty();
         }
       }
@@ -1439,12 +1678,53 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         .WithColor(EVColor::kFR, IColor(0, 255, 255, 255))
         .WithColor(EVColor::kHL, IColor(30, 255, 255, 255))
         .WithLabelText(IText(18.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle));
+    const IVStyle cabSourcePickerStyle =
+      utilityStyle.WithShowValue(false)
+        .WithColor(EVColor::kBG, IColor(140, 88, 88, 90))
+        .WithColor(EVColor::kOFF, IColor(210, 88, 88, 90))
+        .WithColor(EVColor::kON, IColor(220, 104, 104, 106))
+        .WithColor(EVColor::kPR, IColor(230, 118, 118, 120))
+        .WithColor(EVColor::kFR, COLOR_WHITE.WithOpacity(0.48f))
+        .WithColor(EVColor::kHL, COLOR_WHITE.WithOpacity(0.38f))
+        .WithRoundness(0.25f)
+        .WithDrawFrame(true)
+        .WithFrameThickness(0.8f)
+        .WithLabelText(IText(13.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle));
+    const IVStyle cabHeaderStyle =
+      utilityStyle.WithShowValue(false)
+        .WithColor(EVColor::kBG, COLOR_TRANSPARENT)
+        .WithColor(EVColor::kOFF, IColor(24, 255, 255, 255))
+        .WithColor(EVColor::kON, IColor(24, 255, 255, 255))
+        .WithColor(EVColor::kPR, IColor(24, 255, 255, 255))
+        .WithColor(EVColor::kFR, COLOR_WHITE.WithOpacity(0.56f))
+        .WithColor(EVColor::kHL, COLOR_TRANSPARENT)
+        .WithRoundness(0.32f)
+        .WithDrawFrame(true)
+        .WithFrameThickness(0.9f)
+        .WithLabelText(IText(15.0f, COLOR_WHITE.WithOpacity(0.96f), "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle));
+    const IText cabMicLabelText(15.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle);
     pGraphics->AttachControl(new IVButtonControl(presetLabelArea, SplashClickActionFunc, "Preset", presetPickerStyle), kCtrlTagPresetLabel)
       ->SetAnimationEndActionFunction([this](IControl* pCaller) {
         _ShowStandalonePresetMenu(pCaller->GetRECT());
       });
     pGraphics->AttachControl(new StandalonePresetNameEntryControl(), kCtrlTagStandalonePresetNameEntryProxy);
     _UpdatePresetLabel();
+    pGraphics->AttachControl(
+      new IVButtonControl(cabASourceSelectorArea, SplashClickActionFunc, "Custom IR", cabSourcePickerStyle), kCtrlTagCabSourceSelectorA)
+      ->SetAnimationEndActionFunction([this](IControl* pCaller) {
+        _ShowCabSourceMenu(0, pCaller->GetRECT());
+      });
+    pGraphics->AttachControl(
+      new IVButtonControl(cabBSourceSelectorArea, SplashClickActionFunc, "Custom IR", cabSourcePickerStyle), kCtrlTagCabSourceSelectorB)
+      ->SetAnimationEndActionFunction([this](IControl* pCaller) {
+        _ShowCabSourceMenu(1, pCaller->GetRECT());
+      });
+    pGraphics->AttachControl(new NAMCabHeaderControl(cabAHeaderArea, "CAB A", cabHeaderStyle), kCtrlTagCabHeaderA)
+      ->SetIgnoreMouse(true);
+    pGraphics->AttachControl(new NAMCabHeaderControl(cabBHeaderArea, "CAB B", cabHeaderStyle), kCtrlTagCabHeaderB)
+      ->SetIgnoreMouse(true);
+    pGraphics->AttachControl(new ITextControl(cabAMicLabelArea, "MIC", cabMicLabelText, COLOR_TRANSPARENT), kCtrlTagCabMicLabelA);
+    pGraphics->AttachControl(new ITextControl(cabBMicLabelArea, "MIC", cabMicLabelText, COLOR_TRANSPARENT), kCtrlTagCabMicLabelB);
     IControl* pAmpTopIcon = new NAMTopIconControl(topNavAmpArea, ampActiveSVG, ampActiveSVG, ampActiveSVG,
                                                   [this]() { _SetTopNavActiveSection(TopNavSection::Amp); },
                                                   [this]() { _ToggleTopNavSectionBypass(TopNavSection::Amp); });
@@ -1512,17 +1792,93 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                        "BPM",
                        IText(16.0f, COLOR_WHITE.WithOpacity(0.96f), "Roboto-Regular", EAlign::Near, EVAlign::Middle),
                        COLOR_TRANSPARENT));
-    pGraphics->AttachControl(new ISVGSwitchControl(irSwitchArea, {irIconOffSVG, irIconOnSVG}, kIRToggle), kCtrlTagIRToggle);
-    pGraphics->AttachControl(new NAMFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Select cab IR L...", "wav",
-                                                       loadIRLeftCompletionHandler, utilityStyle, fileSVG, crossSVG,
-                                                       leftArrowSVG, rightArrowSVG, fileBackgroundBitmap),
+    pGraphics->AttachControl(
+      new NAMMiniSliderToggleControl(cabAEnableArea, kCabAEnabled, 20.0f, 12.0f));
+    pGraphics->AttachControl(
+      new NAMMiniSliderToggleControl(cabBEnableArea, kCabBEnabled, 20.0f, 12.0f));
+    pGraphics->AttachControl(
+      new NAMKnobControl(
+        cabALevelArea,
+        kCabALevel,
+        "LEVEL",
+        utilityStyle,
+        outerKnobBackgroundSVG,
+        true,
+        false,
+        kCabUtilityKnobScale,
+        kCabUtilityLabelYOffset,
+        kCabUtilityValueYOffset),
+      -1,
+      "CAB_A_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMKnobControl(
+        cabAPanArea,
+        kCabAPan,
+        "PAN",
+        utilityStyle,
+        outerKnobBackgroundSVG,
+        true,
+        false,
+        kCabUtilityKnobScale,
+        kCabUtilityLabelYOffset,
+        kCabUtilityValueYOffset),
+      -1,
+      "CAB_A_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMKnobControl(
+        cabBLevelArea,
+        kCabBLevel,
+        "LEVEL",
+        utilityStyle,
+        outerKnobBackgroundSVG,
+        true,
+        false,
+        kCabUtilityKnobScale,
+        kCabUtilityLabelYOffset,
+        kCabUtilityValueYOffset),
+      -1,
+      "CAB_B_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMKnobControl(
+        cabBPanArea,
+        kCabBPan,
+        "PAN",
+        utilityStyle,
+        outerKnobBackgroundSVG,
+        true,
+        false,
+        kCabUtilityKnobScale,
+        kCabUtilityLabelYOffset,
+        kCabUtilityValueYOffset),
+      -1,
+      "CAB_B_CONTROLS");
+    pGraphics->AttachControl(new NAMCabFileBrowserControl(irLeftArea, kMsgTagClearIRLeft, "Load IR", "wav",
+                                                          loadIRLeftCompletionHandler, utilityStyle, fileSVG, crossSVG,
+                                                          leftArrowSVG, rightArrowSVG, fileBackgroundBitmap),
                              kCtrlTagIRFileBrowserLeft);
     pGraphics->AttachControl(
-      new NAMFileBrowserControl(irRightArea, kMsgTagClearIRRight, "Select cab IR R...", "wav",
-                                loadIRRightCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
-                                fileBackgroundBitmap),
+      new NAMCabFileBrowserControl(irRightArea, kMsgTagClearIRRight, "Load IR", "wav",
+                                   loadIRRightCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                   fileBackgroundBitmap),
       kCtrlTagIRFileBrowserRight);
-    pGraphics->AttachControl(new NAMBlendSliderControl(cabBlendArea, kCabIRBlend, utilityStyle));
+    pGraphics->AttachControl(
+      new NAMCabMicSliderControl(cabAPositionArea,
+                                 kCabAPosition,
+                                 kCabASource,
+                                 utilityStyle.WithShowLabel(false).WithShowValue(false),
+                                 mic57Bitmap,
+                                 mic121Bitmap),
+      -1,
+      "CAB_A_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMCabMicSliderControl(cabBPositionArea,
+                                 kCabBPosition,
+                                 kCabBSource,
+                                 utilityStyle.WithShowLabel(false).WithShowValue(false),
+                                 mic57Bitmap,
+                                 mic121Bitmap),
+      -1,
+      "CAB_B_CONTROLS");
     pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot1Area, ampPickerActiveSVG, ampPickerActiveSVG, ampPickerActiveSVG,
                                                    [this]() {
                                                      _SelectAmpSlot(0);
@@ -2392,113 +2748,117 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     copyMonoToStereo(toneStackOutPointers);
   else
     irPointers = toneStackOutPointers;
-  if (GetParam(kIRToggle)->Value() && !cabBypassed)
+  if (!cabBypassed)
   {
-    const bool haveLeftIR = (mIR != nullptr);
-    const bool haveRightIR = (mIRRight != nullptr);
-    auto processSingleChannelIR = [numFrames](dsp::ImpulseResponse* ir, sample* inChannel, sample* outChannel) {
-      if (ir == nullptr || inChannel == nullptr || outChannel == nullptr)
-      {
-        if (outChannel != nullptr)
-          std::fill(outChannel, outChannel + numFrames, 0.0f);
-        return;
-      }
+    const bool cabAEnabled = GetParam(kCabAEnabled)->Bool();
+    const bool cabBEnabled = GetParam(kCabBEnabled)->Bool();
+    const int activeCabSlots = (cabAEnabled ? 1 : 0) + (cabBEnabled ? 1 : 0);
+    auto processMonoIR = [numFrames](dsp::ImpulseResponse* ir, sample* input, sample* output) {
+      if (ir == nullptr || input == nullptr || output == nullptr)
+        return false;
 
-      sample* inPtrs[1] = {inChannel};
-      sample** irOutPointers = ir->Process(inPtrs, 1, numFrames);
+      sample* monoPtrs[1] = {input};
+      sample** irOutPointers = ir->Process(monoPtrs, 1, numFrames);
       if (irOutPointers == nullptr || irOutPointers[0] == nullptr)
-      {
-        std::fill(outChannel, outChannel + numFrames, 0.0f);
+        return false;
+
+      std::copy_n(irOutPointers[0], numFrames, output);
+      return true;
+    };
+    auto processCabSlot = [&](const int slotIndex, sample* monoInput, sample* slotOutput) {
+      if (slotOutput == nullptr)
         return;
+
+      const int sourceChoice = GetParam(GetCabSlotSourceParamIdx(slotIndex))->Int();
+      dsp::ImpulseResponse* primaryIR = nullptr;
+      dsp::ImpulseResponse* secondaryIR = nullptr;
+      if (slotIndex == 0)
+      {
+        primaryIR = mIR.get();
+        secondaryIR = mIRRight.get();
+      }
+      else
+      {
+        primaryIR = mCabBIR.get();
+        secondaryIR = mCabBIRSecondary.get();
       }
 
-      for (size_t s = 0; s < numFrames; ++s)
-        outChannel[s] = irOutPointers[0][s];
+      if (sourceChoice > 0 && primaryIR != nullptr && secondaryIR != nullptr)
+      {
+        const CuratedCabSegment segment =
+          GetCuratedCabSegment(GetCabSlotCuratedPosition(slotIndex, GetParam(GetCabSlotPositionParamIdx(slotIndex))->Value()));
+        sample* primaryInput = monoInput;
+        sample** primaryPtrs = primaryIR->Process(&primaryInput, 1, numFrames);
+        sample** secondaryPtrs = secondaryIR->Process(&primaryInput, 1, numFrames);
+        if (primaryPtrs != nullptr && primaryPtrs[0] != nullptr && secondaryPtrs != nullptr && secondaryPtrs[0] != nullptr)
+        {
+          const double primaryGain = 1.0 - segment.blend;
+          const double secondaryGain = segment.blend;
+          for (size_t s = 0; s < numFrames; ++s)
+            slotOutput[s] = static_cast<sample>(primaryGain * primaryPtrs[0][s] + secondaryGain * secondaryPtrs[0][s]);
+          return;
+        }
+      }
+
+      if (primaryIR != nullptr && processMonoIR(primaryIR, monoInput, slotOutput))
+        return;
+
+      std::copy_n(monoInput, numFrames, slotOutput);
     };
 
-    if (haveLeftIR && haveRightIR)
+    if (activeCabSlots > 0)
     {
-      const double blend = GetParam(kCabIRBlend)->Value() * 0.01;
-      const double leftGain = 1.0 - blend;
-      const double rightGain = blend;
-
-      if (numChannelsMonoCore == 1)
+      sample* monoCabInput = toneStackOutPointers[0];
+      if (numChannelsMonoCore > 1)
       {
-        sample** irLeftPointers = mIR->Process(toneStackOutPointers, 1, numFrames);
-        sample** irRightPointers = mIRRight->Process(toneStackOutPointers, 1, numFrames);
+        monoCabInput = mInputArray[0].data();
         for (size_t s = 0; s < numFrames; ++s)
-        {
-          const sample irLeft = irLeftPointers[0][s];
-          const sample irRight = irRightPointers[0][s];
-          mOutputArray[0][s] = static_cast<sample>(leftGain * irLeft + rightGain * irRight);
-          mOutputArray[1][s] = static_cast<sample>(leftGain * irRight + rightGain * irLeft);
-        }
+          monoCabInput[s] = static_cast<sample>(0.5 * (toneStackOutPointers[0][s] + toneStackOutPointers[1][s]));
       }
-      else if (mIRChannel2 != nullptr && mIRRightChannel2 != nullptr)
-      {
-        processSingleChannelIR(mIR.get(), toneStackOutPointers[0], mInputArray[0].data());
-        processSingleChannelIR(mIRRight.get(), toneStackOutPointers[0], mOutputArray[0].data());
-        processSingleChannelIR(mIRChannel2.get(), toneStackOutPointers[1], mInputArray[1].data());
-        processSingleChannelIR(mIRRightChannel2.get(), toneStackOutPointers[1], mOutputArray[1].data());
 
+      std::fill_n(mOutputArray[0].data(), numFrames, 0.0f);
+      std::fill_n(mOutputArray[1].data(), numFrames, 0.0f);
+
+      auto mixCabSlot = [&](const int slotIndex, const bool stereoMix) {
+        sample* slotOutput = mInputArray[1].data();
+        processCabSlot(slotIndex, monoCabInput, slotOutput);
+
+        if (!stereoMix)
+        {
+          const double levelGain = DBToAmp(GetParam(GetCabSlotLevelParamIdx(slotIndex))->Value());
+          for (size_t s = 0; s < numFrames; ++s)
+          {
+            const sample value = static_cast<sample>(static_cast<double>(slotOutput[s]) * levelGain);
+            mOutputArray[0][s] = value;
+            mOutputArray[1][s] = value;
+          }
+          return;
+        }
+
+        const double levelGain = DBToAmp(GetParam(GetCabSlotLevelParamIdx(slotIndex))->Value());
+        const double panNormalized = std::clamp((GetParam(GetCabSlotPanParamIdx(slotIndex))->Value() + 100.0) * 0.005, 0.0, 1.0);
+        const double leftGain = (1.0 - panNormalized) * levelGain;
+        const double rightGain = panNormalized * levelGain;
         for (size_t s = 0; s < numFrames; ++s)
         {
-          const sample irLeftL = mInputArray[0][s];
-          const sample irRightL = mOutputArray[0][s];
-          const sample irLeftR = mInputArray[1][s];
-          const sample irRightR = mOutputArray[1][s];
-          mOutputArray[0][s] = static_cast<sample>(leftGain * irLeftL + rightGain * irRightL);
-          mOutputArray[1][s] = static_cast<sample>(leftGain * irRightR + rightGain * irLeftR);
+          const double value = static_cast<double>(slotOutput[s]);
+          mOutputArray[0][s] += static_cast<sample>(value * leftGain);
+          mOutputArray[1][s] += static_cast<sample>(value * rightGain);
         }
+      };
+
+      if (activeCabSlots == 1)
+      {
+        mixCabSlot(cabAEnabled ? 0 : 1, false);
       }
       else
       {
-        // If stereo IR state isn't ready yet, keep signal path alive.
-        for (size_t s = 0; s < numFrames; ++s)
-        {
-          mOutputArray[0][s] = toneStackOutPointers[0][s];
-          mOutputArray[1][s] = toneStackOutPointers[1][s];
-        }
+        if (cabAEnabled)
+          mixCabSlot(0, true);
+        if (cabBEnabled)
+          mixCabSlot(1, true);
       }
       irPointers = mOutputPointers;
-    }
-    else if (haveLeftIR)
-    {
-      if (numChannelsMonoCore == 1)
-      {
-        sample** leftIRPointers = mIR->Process(toneStackOutPointers, 1, numFrames);
-        copyMonoToStereo(leftIRPointers);
-        irPointers = mOutputPointers;
-      }
-      else if (mIRChannel2 != nullptr)
-      {
-        processSingleChannelIR(mIR.get(), toneStackOutPointers[0], mOutputArray[0].data());
-        processSingleChannelIR(mIRChannel2.get(), toneStackOutPointers[1], mOutputArray[1].data());
-        irPointers = mOutputPointers;
-      }
-      else
-      {
-        irPointers = toneStackOutPointers;
-      }
-    }
-    else if (haveRightIR)
-    {
-      if (numChannelsMonoCore == 1)
-      {
-        sample** rightIRPointers = mIRRight->Process(toneStackOutPointers, 1, numFrames);
-        copyMonoToStereo(rightIRPointers);
-        irPointers = mOutputPointers;
-      }
-      else if (mIRRightChannel2 != nullptr)
-      {
-        processSingleChannelIR(mIRRight.get(), toneStackOutPointers[0], mOutputArray[0].data());
-        processSingleChannelIR(mIRRightChannel2.get(), toneStackOutPointers[1], mOutputArray[1].data());
-        irPointers = mOutputPointers;
-      }
-      else
-      {
-        irPointers = toneStackOutPointers;
-      }
     }
   }
 
@@ -2679,16 +3039,6 @@ void NeuralAmpModeler::OnReset()
     _ApplyAmpSlotState(mAmpSelectorIndex);
     if (mStompModel == nullptr && mStagedStompModel == nullptr && mStompNAMPath.GetLength())
       _StageStompModel(mStompNAMPath);
-    if (mIR == nullptr && mStagedIR == nullptr && mIRPath.GetLength())
-    {
-      mShouldRemoveIRLeft = false;
-      _StageIRLeft(mIRPath);
-    }
-    if (mIRRight == nullptr && mStagedIRRight == nullptr && mIRPathRight.GetLength())
-    {
-      mShouldRemoveIRRight = false;
-      _StageIRRight(mIRPathRight);
-    }
   }
 
 #if defined(APP_API) && (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
@@ -2706,7 +3056,7 @@ void NeuralAmpModeler::OnReset()
         mAmpNAMPaths.begin(), mAmpNAMPaths.end(), [](const WDL_String& path) { return path.GetLength() > 0; });
       const bool hasExistingPaths =
         anyAmpSlotPath || (mNAMPath.GetLength() > 0) || (mStompNAMPath.GetLength() > 0) || (mIRPath.GetLength() > 0) ||
-        (mIRPathRight.GetLength() > 0);
+        (mIRPathRight.GetLength() > 0) || (mCabCustomIRPaths[0].GetLength() > 0) || (mCabCustomIRPaths[1].GetLength() > 0);
 
       if (!hasExistingPaths)
       {
@@ -2765,16 +3115,6 @@ void NeuralAmpModeler::OnReset()
     _ApplyAmpSlotState(mAmpSelectorIndex);
     if (mStompModel == nullptr && mStagedStompModel == nullptr && mStompNAMPath.GetLength())
       _StageStompModel(mStompNAMPath);
-    if (mIR == nullptr && mStagedIR == nullptr && mIRPath.GetLength())
-    {
-      mShouldRemoveIRLeft = false;
-      _StageIRLeft(mIRPath);
-    }
-    if (mIRRight == nullptr && mStagedIRRight == nullptr && mIRPathRight.GetLength())
-    {
-      mShouldRemoveIRRight = false;
-      _StageIRRight(mIRPathRight);
-    }
   }
 #endif
 
@@ -2785,18 +3125,14 @@ void NeuralAmpModeler::OnReset()
       mShouldRemoveStompModel = false;
       _StageStompModel(mStompNAMPath);
     }
-    if (mIRPath.GetLength() > 0 && mIR == nullptr && mStagedIR == nullptr)
-    {
-      mShouldRemoveIRLeft = false;
-      _StageIRLeft(mIRPath);
-    }
-    if (mIRPathRight.GetLength() > 0 && mIRRight == nullptr && mStagedIRRight == nullptr)
-    {
-      mShouldRemoveIRRight = false;
-      _StageIRRight(mIRPathRight);
-    }
   }
 
+  if (GetParam(kCabASource)->Int() == 0 && mCabCustomIRPaths[0].GetLength() == 0 && mIRPath.GetLength() > 0)
+    mCabCustomIRPaths[0].Set(mIRPath.Get());
+  if (GetParam(kCabBSource)->Int() == 0 && mCabCustomIRPaths[1].GetLength() == 0 && mCabBIRPath.GetLength() > 0)
+    mCabCustomIRPaths[1].Set(mCabBIRPath.Get());
+  _ApplyCabSlotSource(0);
+  _ApplyCabSlotSource(1);
   _ApplyInputStereoAutoDefaultIfNeeded();
 
   if (!mDefaultPresetCapturedFromStartup && !mStateRestoredFromChunk)
@@ -3071,15 +3407,12 @@ void NeuralAmpModeler::OnIdle()
         keepSyncPending = true;
     }
 
-    if (mIRPath.GetLength() > 0)
-    {
-      mShouldRemoveIRLeft = false;
-      if (mIR == nullptr && mStagedIR == nullptr)
-        _StageIRLeft(mIRPath);
-      if (mIR == nullptr && mStagedIR != nullptr)
-        keepSyncPending = true;
-    }
-    else
+    if (GetParam(kCabASource)->Int() == 0 && mCabCustomIRPaths[0].GetLength() == 0 && mIRPath.GetLength() > 0)
+      mCabCustomIRPaths[0].Set(mIRPath.Get());
+    if (GetParam(kCabBSource)->Int() == 0 && mCabCustomIRPaths[1].GetLength() == 0 && mCabBIRPath.GetLength() > 0)
+      mCabCustomIRPaths[1].Set(mCabBIRPath.Get());
+
+    if (GetParam(kCabASource)->Int() == 0 && mCabCustomIRPaths[0].GetLength() == 0)
     {
       for (const auto& ampPath : mAmpNAMPaths)
       {
@@ -3094,22 +3427,18 @@ void NeuralAmpModeler::OnIdle()
           continue;
 
         mIRPath.Set(cabPath.string().c_str());
-        mIRPathRight.Set("");
-        mShouldRemoveIRLeft = false;
-        _StageIRLeft(mIRPath);
-        keepSyncPending = true;
+        mCabCustomIRPaths[0].Set(mIRPath.Get());
         break;
       }
     }
 
-    if (mIRPathRight.GetLength() > 0)
-    {
-      mShouldRemoveIRRight = false;
-      if (mIRRight == nullptr && mStagedIRRight == nullptr)
-        _StageIRRight(mIRPathRight);
-      if (mIRRight == nullptr && mStagedIRRight != nullptr)
-        keepSyncPending = true;
-    }
+    _ApplyCabSlotSource(0);
+    _ApplyCabSlotSource(1);
+    if ((mIR == nullptr && mStagedIR != nullptr) ||
+        (GetParam(kCabASource)->Int() > 0 && mIRRight == nullptr && mStagedIRRight != nullptr) ||
+        (mCabBIR == nullptr && mStagedCabBIR != nullptr) ||
+        (GetParam(kCabBSource)->Int() > 0 && mCabBIRSecondary == nullptr && mStagedCabBIRSecondary != nullptr))
+      keepSyncPending = true;
 
     mDefaultPresetPostLoadSyncPending = keepSyncPending;
   }
@@ -3129,8 +3458,8 @@ void NeuralAmpModeler::OnIdle()
       lastSentPath.Set(currentPath.Get());
     };
 
-    syncIRPicker(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, kMsgTagClearIRLeft, mIRPath, mLastSentIRPath);
-    syncIRPicker(kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, kMsgTagClearIRRight, mIRPathRight, mLastSentIRPathRight);
+    syncIRPicker(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, kMsgTagClearIRLeft, mCabCustomIRPaths[0], mLastSentIRPath);
+    syncIRPicker(kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, kMsgTagClearIRRight, mCabCustomIRPaths[1], mLastSentIRPathRight);
   }
 
   mInputSender.TransmitData(*this);
@@ -3253,7 +3582,7 @@ void NeuralAmpModeler::_ApplyInputStereoAutoDefaultIfNeeded()
 
 bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 {
-  constexpr int32_t kStateSchemaVersion = 4;
+  constexpr int32_t kStateSchemaVersion = 5;
 
   // If this isn't here when unserializing, then we know we're dealing with something before v0.8.0.
   WDL_String header("###NeuralAmpModeler###"); // Don't change this!
@@ -3273,6 +3602,8 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
   chunk.PutStr(mStompNAMPath.Get());
   chunk.PutStr(mIRPath.Get());
   chunk.PutStr(mIRPathRight.Get());
+  chunk.PutStr(mCabCustomIRPaths[0].Get());
+  chunk.PutStr(mCabCustomIRPaths[1].Get());
 
   // Presets should not force which UI section is visible.
   const int32_t topNavActiveSection = static_cast<int32_t>(TopNavSection::Amp);
@@ -3313,9 +3644,9 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
 int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 {
-  constexpr int32_t kStateSchemaVersion = 4;
-  constexpr int32_t kPreviousStateSchemaVersion = 3;
-  constexpr int32_t kLegacyStateSchemaVersion = 2;
+  constexpr int32_t kStateSchemaVersion = 5;
+  constexpr int32_t kPreviousStateSchemaVersion = 4;
+  constexpr int32_t kLegacyStateSchemaVersion = 3;
   auto markStateRestored = [this]() {
     mStateRestoredFromChunk = true;
     mInputStereoAutoDefaultApplied = true;
@@ -3420,6 +3751,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     WDL_String stompPath;
     WDL_String irLeftPath;
     WDL_String irRightPath;
+    WDL_String customIRPathA;
+    WDL_String customIRPathB;
     statePos = chunk.GetStr(stompPath, statePos);
     if (statePos < 0)
       return startPos;
@@ -3429,6 +3762,15 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     statePos = chunk.GetStr(irRightPath, statePos);
     if (statePos < 0)
       return startPos;
+    if (schemaVersion == kStateSchemaVersion)
+    {
+      statePos = chunk.GetStr(customIRPathA, statePos);
+      if (statePos < 0)
+        return startPos;
+      statePos = chunk.GetStr(customIRPathB, statePos);
+      if (statePos < 0)
+        return startPos;
+    }
 
     int32_t topNavActiveSection = static_cast<int32_t>(TopNavSection::Amp);
     statePos = chunk.Get(&topNavActiveSection, statePos);
@@ -3530,6 +3872,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       ResolvePresetRelativeAssetPath(presetFilePath, stompPath);
       ResolvePresetRelativeAssetPath(presetFilePath, irLeftPath);
       ResolvePresetRelativeAssetPath(presetFilePath, irRightPath);
+      ResolvePresetRelativeAssetPath(presetFilePath, customIRPathA);
+      ResolvePresetRelativeAssetPath(presetFilePath, customIRPathB);
     }
 
     const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
@@ -3540,6 +3884,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     mStompNAMPath = stompPath;
     mIRPath = irLeftPath;
     mIRPathRight = irRightPath;
+    mCabCustomIRPaths[0] = customIRPathA;
+    mCabCustomIRPaths[1] = customIRPathB;
     mAmpSlotStates = slotStates;
     if (mAmpWorkflowMode == AmpWorkflowMode::Release)
       _ApplyReleaseAssetManifestToState();
@@ -3575,21 +3921,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     else
       mShouldRemoveStompModel = true;
 
-    if (mIRPath.GetLength())
-    {
-      mShouldRemoveIRLeft = false;
-      _StageIRLeft(mIRPath);
-    }
-    else
-      mShouldRemoveIRLeft = true;
-
-    if (mIRPathRight.GetLength())
-    {
-      mShouldRemoveIRRight = false;
-      _StageIRRight(mIRPathRight);
-    }
-    else
-      mShouldRemoveIRRight = true;
+    _ApplyCabSlotSource(0, true);
+    _ApplyCabSlotSource(1, true);
 
     _ApplyAmpSlotState(mAmpSelectorIndex);
     _SyncTunerParamToTopNav();
@@ -3630,6 +3963,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     mNAMPath = legacyNAMPath;
     mIRPath = legacyIRPath;
     mIRPathRight = legacyIRRightPath;
+    mCabCustomIRPaths[0].Set(legacyIRPath.Get());
+    mCabCustomIRPaths[1].Set("");
     if (mAmpWorkflowMode == AmpWorkflowMode::Release)
       _ApplyReleaseAssetManifestToState();
     else
@@ -3646,21 +3981,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     }
     mPendingAmpSlotSwitch.store(mAmpSelectorIndex, std::memory_order_release);
 
-    if (mIRPath.GetLength())
-    {
-      mShouldRemoveIRLeft = false;
-      _StageIRLeft(mIRPath);
-    }
-    else
-      mShouldRemoveIRLeft = true;
-
-    if (mIRPathRight.GetLength())
-    {
-      mShouldRemoveIRRight = false;
-      _StageIRRight(mIRPathRight);
-    }
-    else
-      mShouldRemoveIRRight = true;
+    _ApplyCabSlotSource(0, true);
+    _ApplyCabSlotSource(1, true);
 
     _ApplyAmpSlotState(mAmpSelectorIndex);
     _SyncTunerParamToTopNav();
@@ -3704,31 +4026,36 @@ void NeuralAmpModeler::OnUIOpen()
       SendControlMsgFromDelegate(kCtrlTagStompModelFileBrowser, kMsgTagLoadFailed);
   }
 
-  if (mIRPath.GetLength())
+  if (GetParam(kCabASource)->Int() == 0 && mCabCustomIRPaths[0].GetLength() == 0 && mIRPath.GetLength() > 0)
+    mCabCustomIRPaths[0].Set(mIRPath.Get());
+  if (GetParam(kCabBSource)->Int() == 0 && mCabCustomIRPaths[1].GetLength() == 0 && mCabBIRPath.GetLength() > 0)
+    mCabCustomIRPaths[1].Set(mCabBIRPath.Get());
+
+  if (mCabCustomIRPaths[0].GetLength())
   {
-    SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, mIRPath.GetLength(), mIRPath.Get());
-    mLastSentIRPath.Set(mIRPath.Get());
-    if (mIR == nullptr && mStagedIR == nullptr)
-      SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadFailed);
+    SendControlMsgFromDelegate(
+      kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, mCabCustomIRPaths[0].GetLength(), mCabCustomIRPaths[0].Get());
+    mLastSentIRPath.Set(mCabCustomIRPaths[0].Get());
   }
   else
   {
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagClearIRLeft, 0, nullptr);
     mLastSentIRPath.Set("");
   }
-  if (mIRPathRight.GetLength())
+  if (mCabCustomIRPaths[1].GetLength())
   {
     SendControlMsgFromDelegate(
-      kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, mIRPathRight.GetLength(), mIRPathRight.Get());
-    mLastSentIRPathRight.Set(mIRPathRight.Get());
-    if (mIRRight == nullptr && mStagedIRRight == nullptr)
-      SendControlMsgFromDelegate(kCtrlTagIRFileBrowserRight, kMsgTagLoadFailed);
+      kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, mCabCustomIRPaths[1].GetLength(), mCabCustomIRPaths[1].Get());
+    mLastSentIRPathRight.Set(mCabCustomIRPaths[1].Get());
   }
   else
   {
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserRight, kMsgTagClearIRRight, 0, nullptr);
     mLastSentIRPathRight.Set("");
   }
+
+  _ApplyCabSlotSource(0, true);
+  _ApplyCabSlotSource(1, true);
 
   if (mModel != nullptr)
   {
@@ -3776,10 +4103,7 @@ void NeuralAmpModeler::OnUIOpen()
     }
     if (auto* pStompPicker = pGraphics->GetControlWithTag(kCtrlTagStompModelFileBrowser))
       pStompPicker->SetDisabled(!canEditExternalAssets);
-    if (auto* pIRLeftPicker = pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserLeft))
-      pIRLeftPicker->SetDisabled(!canEditExternalAssets || !GetParam(kIRToggle)->Bool());
-    if (auto* pIRRightPicker = pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight))
-      pIRRightPicker->SetDisabled(!canEditExternalAssets || !GetParam(kIRToggle)->Bool());
+    _RefreshCabControls();
   }
 }
 
@@ -3915,12 +4239,35 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
         break;
       case kIRToggle:
       {
-        const bool disableIRBrowsers = !active || (mAmpWorkflowMode == AmpWorkflowMode::Release);
-        pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserLeft)->SetDisabled(disableIRBrowsers);
-        pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight)->SetDisabled(disableIRBrowsers);
-        pGraphics->GetControlWithParamIdx(kCabIRBlend)->SetDisabled(!active);
+        _RefreshCabControls();
         break;
       }
+      case kCabAEnabled:
+      case kCabALevel:
+      case kCabAPan:
+      case kCabBEnabled:
+      case kCabBLevel:
+      case kCabBPan:
+        _RefreshCabControls();
+        break;
+      case kCabASource:
+        _ApplyCabSlotSource(0);
+        _RefreshCabControls();
+        break;
+      case kCabAPosition:
+        if (GetParam(kCabASource)->Int() > 0)
+          _ApplyCabSlotSource(0);
+        _RefreshCabControls();
+        break;
+      case kCabBSource:
+        _ApplyCabSlotSource(1);
+        _RefreshCabControls();
+        break;
+      case kCabBPosition:
+        if (GetParam(kCabBSource)->Int() > 0)
+          _ApplyCabSlotSource(1);
+        _RefreshCabControls();
+        break;
       case kNoiseGateActive:
         if (auto* pGateControl = pGraphics->GetControlWithParamIdx(kNoiseGateThreshold))
           pGateControl->SetDisabled(!active);
@@ -3936,9 +4283,13 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
           if (mStompModelRight == nullptr && mStompNAMPath.GetLength())
             _StageStompModel(mStompNAMPath);
           if (mIRChannel2 == nullptr && mIRPath.GetLength())
-            _StageIRLeft(mIRPath);
+            _StageIRLeft(mIRPath, false);
           if (mIRRightChannel2 == nullptr && mIRPathRight.GetLength())
-            _StageIRRight(mIRPathRight);
+            _StageIRRight(mIRPathRight, false);
+          if (mCabBIRChannel2 == nullptr && mCabBIRPath.GetLength())
+            _StageCabBIRPrimary(mCabBIRPath);
+          if (mCabBIRSecondaryChannel2 == nullptr && mCabBIRSecondaryPath.GetLength())
+            _StageCabBIRSecondary(mCabBIRSecondaryPath);
         }
         break;
       case kModelToggle:
@@ -4039,13 +4390,17 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
     case kMsgTagClearIRLeft:
       if (mAmpWorkflowMode == AmpWorkflowMode::Release)
         return true;
-      mShouldRemoveIRLeft = true;
+      mCabCustomIRPaths[0].Set("");
+      if (GetParam(kCabASource)->Int() == 0)
+        mShouldRemoveIRLeft = true;
       _MarkStandalonePresetDirty();
       return true;
     case kMsgTagClearIRRight:
       if (mAmpWorkflowMode == AmpWorkflowMode::Release)
         return true;
-      mShouldRemoveIRRight = true;
+      mCabCustomIRPaths[1].Set("");
+      if (GetParam(kCabBSource)->Int() == 0)
+        mShouldRemoveCabBIRPrimary = true;
       _MarkStandalonePresetDirty();
       return true;
     case kMsgTagHighlightColor:
@@ -4258,22 +4613,16 @@ bool NeuralAmpModeler::_LoadStandalonePresetFromFile(const WDL_String& filePath)
   ResolvePresetRelativeAssetPath(path, mStompNAMPath);
   ResolvePresetRelativeAssetPath(path, mIRPath);
   ResolvePresetRelativeAssetPath(path, mIRPathRight);
+  ResolvePresetRelativeAssetPath(path, mCabCustomIRPaths[0]);
+  ResolvePresetRelativeAssetPath(path, mCabCustomIRPaths[1]);
 
   if (mStompNAMPath.GetLength() > 0 && mStompModel == nullptr && mStagedStompModel == nullptr)
   {
     mShouldRemoveStompModel = false;
     _StageStompModel(mStompNAMPath);
   }
-  if (mIRPath.GetLength() > 0 && mIR == nullptr && mStagedIR == nullptr)
-  {
-    mShouldRemoveIRLeft = false;
-    _StageIRLeft(mIRPath);
-  }
-  if (mIRPathRight.GetLength() > 0 && mIRRight == nullptr && mStagedIRRight == nullptr)
-  {
-    mShouldRemoveIRRight = false;
-    _StageIRRight(mIRPathRight);
-  }
+  _ApplyCabSlotSource(0, true);
+  _ApplyCabSlotSource(1, true);
 
   mStandalonePresetFilePath.Set(path.string().c_str());
   mDefaultPresetActive = false;
@@ -4410,20 +4759,10 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
   }
   else
     mShouldRemoveStompModel = true;
-  if (mIRPath.GetLength())
-  {
-    mShouldRemoveIRLeft = false;
-    _StageIRLeft(mIRPath);
-  }
-  else
-    mShouldRemoveIRLeft = true;
-  if (mIRPathRight.GetLength())
-  {
-    mShouldRemoveIRRight = false;
-    _StageIRRight(mIRPathRight);
-  }
-  else
-    mShouldRemoveIRRight = true;
+  if (GetParam(kCabASource)->Int() == 0 && mCabCustomIRPaths[0].GetLength() == 0 && mIRPath.GetLength() > 0)
+    mCabCustomIRPaths[0].Set(mIRPath.Get());
+  _ApplyCabSlotSource(0, true);
+  _ApplyCabSlotSource(1, true);
   mPendingAmpSlotSwitch.store(activeSlot, std::memory_order_release);
 
   const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
@@ -4816,6 +5155,8 @@ void NeuralAmpModeler::_ShowStandalonePresetMenu(const IRECT& anchorArea)
   auto* pPresetControl = pGraphics->GetControlWithTag(kCtrlTagPresetLabel);
   if (pPresetControl == nullptr)
     return;
+  if (auto* pPopupMenuControl = pGraphics->GetPopupMenuControl())
+    pPopupMenuControl->SetText(IText(18.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle));
   pGraphics->CreatePopupMenu(*pPresetControl, mStandalonePresetMenu, anchorArea);
 }
 
@@ -5121,6 +5462,247 @@ WDL_String NeuralAmpModeler::_ResolveReleaseIRAssetPath(const ReleaseIRAssetId a
   WDL_String path;
   path.Set(mReleaseIRAssetPaths[assetIndex].Get());
   return path;
+}
+
+WDL_String NeuralAmpModeler::_ResolveCuratedCabIRPath(const int sourceChoice, const int captureIndex) const
+{
+  WDL_String emptyPath;
+  emptyPath.Set("");
+
+  const int micIndex = sourceChoice - 1;
+  if (micIndex < 0 || micIndex >= static_cast<int>(kCuratedCabMicFolderNames.size()))
+    return emptyPath;
+
+  const int clampedCaptureIndex = std::clamp(captureIndex, 0, static_cast<int>(kCuratedCabPositionAnchors.size()) - 1);
+  const auto candidateDirs = GetCuratedCabCandidateDirs(GetBundleID());
+  const std::filesystem::path relativePath =
+    std::filesystem::path(kCuratedCabMicFolderNames[micIndex]) / (std::to_string(clampedCaptureIndex) + ".wav");
+
+  for (const auto& candidateDir : candidateDirs)
+  {
+    std::error_code ec;
+    const std::filesystem::path absolutePath = std::filesystem::absolute(candidateDir / relativePath, ec);
+    const std::filesystem::path resolvedPath = ec ? (candidateDir / relativePath) : absolutePath;
+    if (std::filesystem::exists(resolvedPath, ec) && !ec)
+    {
+      emptyPath.Set(resolvedPath.string().c_str());
+      return emptyPath;
+    }
+  }
+
+  return emptyPath;
+}
+
+void NeuralAmpModeler::_ApplyCabSlotSource(const int slotIndex, const bool forceReload)
+{
+  if (slotIndex < 0 || slotIndex >= kCabSlotCount)
+    return;
+
+  const int sourceParamIdx = GetCabSlotSourceParamIdx(slotIndex);
+  const int positionParamIdx = GetCabSlotPositionParamIdx(slotIndex);
+  const int sourceChoice = GetParam(sourceParamIdx)->Int();
+  WDL_String& customPath = mCabCustomIRPaths[static_cast<size_t>(slotIndex)];
+  auto stagePrimary = [this, slotIndex](const WDL_String& path) {
+    return (slotIndex == 0) ? _StageIRLeft(path, false) : _StageCabBIRPrimary(path);
+  };
+  auto stageSecondary = [this, slotIndex](const WDL_String& path) {
+    return (slotIndex == 0) ? _StageIRRight(path, false) : _StageCabBIRSecondary(path);
+  };
+  auto getPrimaryPath = [this, slotIndex]() -> WDL_String& {
+    return (slotIndex == 0) ? mIRPath : mCabBIRPath;
+  };
+  auto getSecondaryPath = [this, slotIndex]() -> WDL_String& {
+    return (slotIndex == 0) ? mIRPathRight : mCabBIRSecondaryPath;
+  };
+  auto primaryMissing = [this, slotIndex]() {
+    return (slotIndex == 0) ? (mIR == nullptr && mStagedIR == nullptr) : (mCabBIR == nullptr && mStagedCabBIR == nullptr);
+  };
+  auto secondaryMissing = [this, slotIndex]() {
+    return (slotIndex == 0) ? (mIRRight == nullptr && mStagedIRRight == nullptr)
+                            : (mCabBIRSecondary == nullptr && mStagedCabBIRSecondary == nullptr);
+  };
+  auto setRemovePrimary = [this, slotIndex]() {
+    if (slotIndex == 0)
+      mShouldRemoveIRLeft = true;
+    else
+      mShouldRemoveCabBIRPrimary = true;
+  };
+  auto setRemoveSecondary = [this, slotIndex]() {
+    if (slotIndex == 0)
+      mShouldRemoveIRRight = true;
+    else
+      mShouldRemoveCabBIRSecondary = true;
+  };
+  auto clearRemovePrimary = [this, slotIndex]() {
+    if (slotIndex == 0)
+      mShouldRemoveIRLeft = false;
+    else
+      mShouldRemoveCabBIRPrimary = false;
+  };
+  auto clearRemoveSecondary = [this, slotIndex]() {
+    if (slotIndex == 0)
+      mShouldRemoveIRRight = false;
+    else
+      mShouldRemoveCabBIRSecondary = false;
+  };
+
+  if (sourceChoice == 0)
+  {
+    if (customPath.GetLength() > 0)
+    {
+      if (forceReload || primaryMissing() || std::strcmp(getPrimaryPath().Get(), customPath.Get()) != 0)
+      {
+        clearRemovePrimary();
+        stagePrimary(customPath);
+      }
+    }
+    else
+      setRemovePrimary();
+    setRemoveSecondary();
+    return;
+  }
+
+  const CuratedCabSegment segment =
+    GetCuratedCabSegment(GetCabSlotCuratedPosition(slotIndex, GetParam(positionParamIdx)->Value()));
+  const WDL_String primaryPath = _ResolveCuratedCabIRPath(sourceChoice, segment.leftIndex);
+  const WDL_String secondaryPath = _ResolveCuratedCabIRPath(sourceChoice, segment.rightIndex);
+
+  if (primaryPath.GetLength() > 0)
+  {
+    if (forceReload || primaryMissing() || std::strcmp(getPrimaryPath().Get(), primaryPath.Get()) != 0)
+    {
+      clearRemovePrimary();
+      stagePrimary(primaryPath);
+    }
+  }
+  else
+    setRemovePrimary();
+
+  if (secondaryPath.GetLength() > 0)
+  {
+    if (forceReload || secondaryMissing() || std::strcmp(getSecondaryPath().Get(), secondaryPath.Get()) != 0)
+    {
+      clearRemoveSecondary();
+      stageSecondary(secondaryPath);
+    }
+  }
+  else
+    setRemoveSecondary();
+}
+
+void NeuralAmpModeler::_RefreshCabControls()
+{
+  auto* pGraphics = GetUI();
+  if (pGraphics == nullptr)
+    return;
+
+  const bool showCabSection = (mTopNavActiveSection == TopNavSection::Cab);
+  for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
+    _RefreshCabSlotControls(slotIndex);
+}
+
+void NeuralAmpModeler::_RefreshCabSlotControls(const int slotIndex)
+{
+  auto* pGraphics = GetUI();
+  if (pGraphics == nullptr)
+    return;
+
+  if (slotIndex < 0 || slotIndex >= kCabSlotCount)
+    return;
+
+  const bool canEditCabAssets = (mAmpWorkflowMode != AmpWorkflowMode::Release);
+  const bool showCabSection = (mTopNavActiveSection == TopNavSection::Cab);
+  const int sourceParamIdx = GetCabSlotSourceParamIdx(slotIndex);
+  const int positionParamIdx = GetCabSlotPositionParamIdx(slotIndex);
+  const int levelParamIdx = GetCabSlotLevelParamIdx(slotIndex);
+  const int panParamIdx = GetCabSlotPanParamIdx(slotIndex);
+  const bool slotEnabled = GetParam(GetCabSlotEnabledParamIdx(slotIndex))->Bool();
+  const int sourceChoice = std::clamp(GetParam(sourceParamIdx)->Int(), 0, static_cast<int>(kCabSourceLabels.size()) - 1);
+  const bool customSource = (sourceChoice == 0);
+  const bool controlsEnabled = canEditCabAssets && slotEnabled;
+
+  if (auto* pSourceSelector = dynamic_cast<IVButtonControl*>(pGraphics->GetControlWithTag(GetCabSlotSourceSelectorCtrlTag(slotIndex))))
+  {
+    pSourceSelector->SetLabelStr(kCabSourceLabels[static_cast<size_t>(sourceChoice)]);
+    pSourceSelector->SetDisabled(!controlsEnabled);
+    pSourceSelector->Hide(!showCabSection);
+    pSourceSelector->SetDirty(false);
+  }
+  if (auto* pCabHeader = pGraphics->GetControlWithTag(slotIndex == 0 ? kCtrlTagCabHeaderA : kCtrlTagCabHeaderB))
+  {
+    pCabHeader->SetDisabled(!controlsEnabled);
+    pCabHeader->Hide(!showCabSection);
+  }
+  if (auto* pMicLabel = pGraphics->GetControlWithTag(slotIndex == 0 ? kCtrlTagCabMicLabelA : kCtrlTagCabMicLabelB))
+  {
+    pMicLabel->SetDisabled(!controlsEnabled);
+    pMicLabel->Hide(!showCabSection);
+  }
+  if (auto* pEnable = pGraphics->GetControlWithParamIdx(GetCabSlotEnabledParamIdx(slotIndex)))
+    pEnable->Hide(!showCabSection);
+  if (auto* pBrowser = pGraphics->GetControlWithTag(GetCabSlotFileBrowserCtrlTag(slotIndex)))
+  {
+    pBrowser->SetDisabled(!controlsEnabled || !customSource);
+    pBrowser->Hide(!showCabSection);
+  }
+  if (auto* pPosition = pGraphics->GetControlWithParamIdx(positionParamIdx))
+  {
+    pPosition->SetDisabled(!controlsEnabled || customSource);
+    pPosition->Hide(!showCabSection || customSource);
+    pPosition->SetDirty(false);
+  }
+  if (auto* pLevel = pGraphics->GetControlWithParamIdx(levelParamIdx))
+  {
+    pLevel->SetDisabled(!controlsEnabled);
+    pLevel->Hide(!showCabSection);
+  }
+  if (auto* pPan = pGraphics->GetControlWithParamIdx(panParamIdx))
+  {
+    pPan->SetDisabled(!controlsEnabled);
+    pPan->Hide(!showCabSection);
+  }
+}
+
+void NeuralAmpModeler::_ShowCabSourceMenu(const int slotIndex, const IRECT& anchorArea)
+{
+  auto* pGraphics = GetUI();
+  if (pGraphics == nullptr || slotIndex < 0 || slotIndex >= kCabSlotCount)
+    return;
+
+  const int sourceParamIdx = GetCabSlotSourceParamIdx(slotIndex);
+  auto& menu = (slotIndex == 0) ? mCabSourceMenuA : mCabSourceMenuB;
+  menu.Clear();
+  menu.SetFunction([this, slotIndex, sourceParamIdx](IPopupMenu* pMenu) {
+    if (pMenu == nullptr)
+      return;
+    if (auto* pItem = pMenu->GetChosenItem())
+    {
+      const int chosenSource = pItem->GetTag();
+      if (chosenSource < 0 || chosenSource >= static_cast<int>(kCabSourceLabels.size()))
+        return;
+      GetParam(sourceParamIdx)->Set(static_cast<double>(chosenSource));
+      SendParameterValueFromDelegate(sourceParamIdx, GetParam(sourceParamIdx)->GetNormalized(), true);
+    }
+  });
+
+  const int currentChoice = std::clamp(GetParam(sourceParamIdx)->Int(), 0, static_cast<int>(kCabSourceLabels.size()) - 1);
+  for (int i = 1; i < static_cast<int>(kCabSourceLabels.size()); ++i)
+  {
+    const int flags = (i == currentChoice) ? IPopupMenu::Item::kChecked : IPopupMenu::Item::kNoFlags;
+    menu.AddItem(new IPopupMenu::Item(kCabSourceLabels[static_cast<size_t>(i)], flags, i));
+  }
+  menu.AddSeparator();
+  {
+    const int flags = (currentChoice == 0) ? IPopupMenu::Item::kChecked : IPopupMenu::Item::kNoFlags;
+    menu.AddItem(new IPopupMenu::Item(kCabSourceLabels[0], flags, 0));
+  }
+
+  if (auto* pSourceControl = pGraphics->GetControlWithTag(GetCabSlotSourceSelectorCtrlTag(slotIndex)))
+  {
+    if (auto* pPopupMenuControl = pGraphics->GetPopupMenuControl())
+      pPopupMenuControl->SetText(IText(13.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle));
+    pGraphics->CreatePopupMenu(*pSourceControl, menu, anchorArea);
+  }
 }
 
 void NeuralAmpModeler::_SetAmpSlotReleaseAsset(const int slotIndex, const ReleaseAmpAssetId assetId)
@@ -5439,15 +6021,6 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     hideAmpParamControl(kToneDepth);
     hideAmpParamControl(kMasterVolume);
 
-    if (auto* pIRToggle = pGraphics->GetControlWithTag(kCtrlTagIRToggle))
-      pIRToggle->Hide(!showCabSection);
-    if (auto* pIRLeft = pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserLeft))
-      pIRLeft->Hide(!showCabSection);
-    if (auto* pIRRight = pGraphics->GetControlWithTag(kCtrlTagIRFileBrowserRight))
-      pIRRight->Hide(!showCabSection);
-    if (auto* pCabBlend = pGraphics->GetControlWithParamIdx(kCabIRBlend))
-      pCabBlend->Hide(!showCabSection);
-
     const auto updateAmpSlot = [&](const int tag, const int slotIndex) {
       if (auto* pAmpSlot = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
       {
@@ -5460,6 +6033,7 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     updateAmpSlot(kCtrlTagAmpSlot1, 0);
     updateAmpSlot(kCtrlTagAmpSlot2, 1);
     updateAmpSlot(kCtrlTagAmpSlot3, 2);
+    _RefreshCabControls();
   }
 }
 
@@ -5777,6 +6351,38 @@ void NeuralAmpModeler::_ApplyDSPStaging()
       mIRPathRight = mStagedIRPathRight;
     triggerOutputDeClick = true;
   }
+  if (mShouldRemoveCabBIRPrimary.exchange(false, std::memory_order_acq_rel))
+  {
+    const bool preserveStagedIR = (mStagedCabBIR != nullptr) || (mStagedCabBIRChannel2 != nullptr);
+    if (!preserveStagedIR)
+    {
+      mStagedCabBIR = nullptr;
+      mStagedCabBIRChannel2 = nullptr;
+      mStagedCabBIRPath.Set("");
+      mCabBIRPath.Set("");
+    }
+    mCabBIR = nullptr;
+    mCabBIRChannel2 = nullptr;
+    if (preserveStagedIR && mStagedCabBIRPath.GetLength() > 0)
+      mCabBIRPath = mStagedCabBIRPath;
+    triggerOutputDeClick = true;
+  }
+  if (mShouldRemoveCabBIRSecondary.exchange(false, std::memory_order_acq_rel))
+  {
+    const bool preserveStagedIR = (mStagedCabBIRSecondary != nullptr) || (mStagedCabBIRSecondaryChannel2 != nullptr);
+    if (!preserveStagedIR)
+    {
+      mStagedCabBIRSecondary = nullptr;
+      mStagedCabBIRSecondaryChannel2 = nullptr;
+      mStagedCabBIRSecondaryPath.Set("");
+      mCabBIRSecondaryPath.Set("");
+    }
+    mCabBIRSecondary = nullptr;
+    mCabBIRSecondaryChannel2 = nullptr;
+    if (preserveStagedIR && mStagedCabBIRSecondaryPath.GetLength() > 0)
+      mCabBIRSecondaryPath = mStagedCabBIRSecondaryPath;
+    triggerOutputDeClick = true;
+  }
   // Move things from staged to live
   if (mStagedModel != nullptr && (!inputStereoMode || mStagedModelRight != nullptr))
   {
@@ -5817,6 +6423,26 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStagedIRRightChannel2 = nullptr;
     mIRPathRight = mStagedIRPathRight;
     mStagedIRPathRight.Set("");
+    triggerOutputDeClick = true;
+  }
+  if (mStagedCabBIR != nullptr && (!inputStereoMode || mStagedCabBIRChannel2 != nullptr))
+  {
+    mCabBIR = std::move(mStagedCabBIR);
+    mStagedCabBIR = nullptr;
+    mCabBIRChannel2 = std::move(mStagedCabBIRChannel2);
+    mStagedCabBIRChannel2 = nullptr;
+    mCabBIRPath = mStagedCabBIRPath;
+    mStagedCabBIRPath.Set("");
+    triggerOutputDeClick = true;
+  }
+  if (mStagedCabBIRSecondary != nullptr && (!inputStereoMode || mStagedCabBIRSecondaryChannel2 != nullptr))
+  {
+    mCabBIRSecondary = std::move(mStagedCabBIRSecondary);
+    mStagedCabBIRSecondary = nullptr;
+    mCabBIRSecondaryChannel2 = std::move(mStagedCabBIRSecondaryChannel2);
+    mStagedCabBIRSecondaryChannel2 = nullptr;
+    mCabBIRSecondaryPath = mStagedCabBIRSecondaryPath;
+    mStagedCabBIRSecondaryPath.Set("");
     triggerOutputDeClick = true;
   }
 
@@ -5979,6 +6605,80 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
       mStagedIRRightChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
     }
   }
+  if (mStagedCabBIR != nullptr)
+  {
+    const double irSampleRate = mStagedCabBIR->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mStagedCabBIR->GetData();
+      mStagedCabBIR = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  else if (mCabBIR != nullptr)
+  {
+    const double irSampleRate = mCabBIR->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mCabBIR->GetData();
+      mStagedCabBIR = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      mStagedCabBIRPath = mCabBIRPath;
+    }
+  }
+  if (mStagedCabBIRChannel2 != nullptr)
+  {
+    const double irSampleRate = mStagedCabBIRChannel2->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mStagedCabBIRChannel2->GetData();
+      mStagedCabBIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  else if (mCabBIRChannel2 != nullptr)
+  {
+    const double irSampleRate = mCabBIRChannel2->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mCabBIRChannel2->GetData();
+      mStagedCabBIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  if (mStagedCabBIRSecondary != nullptr)
+  {
+    const double irSampleRate = mStagedCabBIRSecondary->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mStagedCabBIRSecondary->GetData();
+      mStagedCabBIRSecondary = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  else if (mCabBIRSecondary != nullptr)
+  {
+    const double irSampleRate = mCabBIRSecondary->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mCabBIRSecondary->GetData();
+      mStagedCabBIRSecondary = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      mStagedCabBIRSecondaryPath = mCabBIRSecondaryPath;
+    }
+  }
+  if (mStagedCabBIRSecondaryChannel2 != nullptr)
+  {
+    const double irSampleRate = mStagedCabBIRSecondaryChannel2->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mStagedCabBIRSecondaryChannel2->GetData();
+      mStagedCabBIRSecondaryChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
+  else if (mCabBIRSecondaryChannel2 != nullptr)
+  {
+    const double irSampleRate = mCabBIRSecondaryChannel2->GetSampleRate();
+    if (irSampleRate != sampleRate)
+    {
+      const auto irData = mCabBIRSecondaryChannel2->GetData();
+      mStagedCabBIRSecondaryChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+    }
+  }
 }
 
 void NeuralAmpModeler::_SetInputGain()
@@ -6135,7 +6835,7 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
   return "";
 }
 
-dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath)
+dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath, const bool notifyUI)
 {
   WDL_String previousIRPath = mIRPath;
   const double sampleRate = GetSampleRate();
@@ -6163,11 +6863,11 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
     std::cerr << e.what() << std::endl;
   }
 
-  if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+  if (notifyUI && wavState == dsp::wav::LoadReturnCode::SUCCESS)
   {
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, irPath.GetLength(), irPath.Get());
   }
-  else
+  else if (wavState != dsp::wav::LoadReturnCode::SUCCESS)
   {
     if (mStagedIR != nullptr)
     {
@@ -6179,13 +6879,14 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
     }
     mStagedIRPath.Set("");
     mIRPath = previousIRPath;
-    SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadFailed);
+    if (notifyUI)
+      SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadFailed);
   }
 
   return wavState;
 }
 
-dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPath)
+dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPath, const bool notifyUI)
 {
   WDL_String previousIRPath = mIRPathRight;
   const double sampleRate = GetSampleRate();
@@ -6213,12 +6914,12 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
     std::cerr << e.what() << std::endl;
   }
 
-  if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+  if (notifyUI && wavState == dsp::wav::LoadReturnCode::SUCCESS)
   {
     SendControlMsgFromDelegate(
       kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, irPath.GetLength(), irPath.Get());
   }
-  else
+  else if (wavState != dsp::wav::LoadReturnCode::SUCCESS)
   {
     if (mStagedIRRight != nullptr)
       mStagedIRRight = nullptr;
@@ -6226,7 +6927,80 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
       mStagedIRRightChannel2 = nullptr;
     mStagedIRPathRight.Set("");
     mIRPathRight = previousIRPath;
-    SendControlMsgFromDelegate(kCtrlTagIRFileBrowserRight, kMsgTagLoadFailed);
+    if (notifyUI)
+      SendControlMsgFromDelegate(kCtrlTagIRFileBrowserRight, kMsgTagLoadFailed);
+  }
+
+  return wavState;
+}
+
+dsp::wav::LoadReturnCode NeuralAmpModeler::_StageCabBIRPrimary(const WDL_String& irPath)
+{
+  WDL_String previousIRPath = mCabBIRPath;
+  const double sampleRate = GetSampleRate();
+  dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
+  try
+  {
+    auto irPathU8 = std::filesystem::u8path(irPath.Get());
+    auto stagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+    wavState = stagedIR->GetWavState();
+    if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+    {
+      const auto irData = stagedIR->GetData();
+      auto stagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      mStagedCabBIRChannel2 = std::move(stagedIRChannel2);
+      mStagedCabBIR = std::move(stagedIR);
+      mStagedCabBIRPath = irPath;
+      mCabBIRPath = irPath;
+    }
+  }
+  catch (std::runtime_error&)
+  {
+    wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
+  }
+
+  if (wavState != dsp::wav::LoadReturnCode::SUCCESS)
+  {
+    mStagedCabBIR = nullptr;
+    mStagedCabBIRChannel2 = nullptr;
+    mStagedCabBIRPath.Set("");
+    mCabBIRPath = previousIRPath;
+  }
+
+  return wavState;
+}
+
+dsp::wav::LoadReturnCode NeuralAmpModeler::_StageCabBIRSecondary(const WDL_String& irPath)
+{
+  WDL_String previousIRPath = mCabBIRSecondaryPath;
+  const double sampleRate = GetSampleRate();
+  dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
+  try
+  {
+    auto irPathU8 = std::filesystem::u8path(irPath.Get());
+    auto stagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+    wavState = stagedIR->GetWavState();
+    if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+    {
+      const auto irData = stagedIR->GetData();
+      auto stagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+      mStagedCabBIRSecondaryChannel2 = std::move(stagedIRChannel2);
+      mStagedCabBIRSecondary = std::move(stagedIR);
+      mStagedCabBIRSecondaryPath = irPath;
+      mCabBIRSecondaryPath = irPath;
+    }
+  }
+  catch (std::runtime_error&)
+  {
+    wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
+  }
+
+  if (wavState != dsp::wav::LoadReturnCode::SUCCESS)
+  {
+    mStagedCabBIRSecondary = nullptr;
+    mStagedCabBIRSecondaryChannel2 = nullptr;
+    mStagedCabBIRSecondaryPath.Set("");
+    mCabBIRSecondaryPath = previousIRPath;
   }
 
   return wavState;
