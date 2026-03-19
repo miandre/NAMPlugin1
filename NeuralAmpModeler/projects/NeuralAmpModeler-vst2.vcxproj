@@ -308,6 +308,7 @@
     <ClInclude Include="..\dsp\util.h" />
     <ClInclude Include="..\dsp\wav.h" />
     <ClInclude Include="..\dsp\wavenet.h" />
+    <ClInclude Include="..\EmbeddedCabIRAssets.h" />
     <ClInclude Include="..\NeuralAmpModeler.h" />
     <ClInclude Include="..\NeuralAmpModelerPostEQ.h" />
     <ClInclude Include="..\NeuralAmpModelerFX.h" />
@@ -356,6 +357,7 @@
     <ClCompile Include="..\dsp\util.cpp" />
     <ClCompile Include="..\dsp\wav.cpp" />
     <ClCompile Include="..\dsp\wavenet.cpp" />
+    <ClCompile Include="..\EmbeddedCabIRAssets.cpp" />
     <ClCompile Include="..\NeuralAmpModeler.cpp" />
     <ClCompile Include="..\NeuralAmpModelerPostEQ.cpp" />
     <ClCompile Include="..\NeuralAmpModelerFX.cpp" />

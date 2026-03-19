@@ -22,6 +22,7 @@
 // clang-format on
 #include "architecture.hpp"
 
+#include "EmbeddedCabIRAssets.h"
 #include "NeuralAmpModelerControls.h"
 #include "IPopupMenuControl.h"
 
@@ -87,6 +88,7 @@ constexpr std::array<const char*, 1> kReleaseIRAssetFileNames = {"Cab1.wav"};
 constexpr std::array<const char*, 2> kCuratedCabMicFolderNames = {"57", "121"};
 constexpr std::array<const char*, 3> kCabSourceLabels = {"Custom IR", "S-57", "R-121"};
 constexpr std::array<int, 5> kCuratedCabPositionAnchors = {0, 24, 49, 74, 99};
+constexpr const char* kEmbeddedCuratedCabIRPathPrefix = "embedded://curated/";
 constexpr float kAmpFaceKnobAreaWidth = 80.0f;
 constexpr float kAmpFaceSwitchScale = 0.20f;
 constexpr int kCabSlotCount = 2;
@@ -155,6 +157,76 @@ CuratedCabSegment GetCuratedCabSegment(const double position)
   }
 
   return {};
+}
+
+WDL_String MakeEmbeddedCuratedCabIRPath(const int sourceChoice, const int captureIndex)
+{
+  WDL_String path;
+  if (sourceChoice <= 0 || sourceChoice > static_cast<int>(kCuratedCabMicFolderNames.size()))
+    return path;
+
+  path.SetFormatted(256, "%s%s/%d", kEmbeddedCuratedCabIRPathPrefix,
+                    kCuratedCabMicFolderNames[static_cast<size_t>(sourceChoice - 1)], captureIndex);
+  return path;
+}
+
+const embedded_cab_ir::EmbeddedCabIRAsset* GetEmbeddedCuratedCabIRAssetForPath(const WDL_String& irPath)
+{
+  const char* path = irPath.Get();
+  constexpr size_t prefixLength = 19; // strlen("embedded://curated/")
+  if (std::strncmp(path, kEmbeddedCuratedCabIRPathPrefix, prefixLength) != 0)
+    return nullptr;
+
+  const char* micFolder = path + prefixLength;
+  const char* separator = std::strchr(micFolder, '/');
+  if (separator == nullptr || separator == micFolder)
+    return nullptr;
+
+  const size_t micFolderLength = static_cast<size_t>(separator - micFolder);
+  int sourceChoice = 0;
+  for (size_t i = 0; i < kCuratedCabMicFolderNames.size(); ++i)
+  {
+    const char* candidate = kCuratedCabMicFolderNames[i];
+    if (std::strlen(candidate) == micFolderLength && std::strncmp(micFolder, candidate, micFolderLength) == 0)
+    {
+      sourceChoice = static_cast<int>(i) + 1;
+      break;
+    }
+  }
+
+  if (sourceChoice <= 0)
+    return nullptr;
+
+  char* parseEnd = nullptr;
+  const long captureIndex = std::strtol(separator + 1, &parseEnd, 10);
+  if (parseEnd == nullptr || *parseEnd != '\0' || captureIndex < 0)
+    return nullptr;
+
+  return embedded_cab_ir::GetCuratedCabIRAsset(sourceChoice, static_cast<int>(captureIndex));
+}
+
+bool StageEmbeddedCuratedCabIR(const WDL_String& irPath, const double sampleRate,
+                               std::unique_ptr<dsp::ImpulseResponse>& stagedIR,
+                               std::unique_ptr<dsp::ImpulseResponse>& stagedIRChannel2,
+                               dsp::wav::LoadReturnCode& wavState)
+{
+  const auto* asset = GetEmbeddedCuratedCabIRAssetForPath(irPath);
+  if (asset == nullptr)
+    return false;
+
+  dsp::ImpulseResponse::IRData irData;
+  irData.mRawAudio.assign(asset->samples, asset->samples + asset->numSamples);
+  irData.mRawAudioSampleRate = asset->sampleRate;
+
+  auto primaryIR = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
+  wavState = primaryIR->GetWavState();
+  if (wavState != dsp::wav::LoadReturnCode::SUCCESS)
+    return true;
+
+  auto channel2IR = std::make_unique<dsp::ImpulseResponse>(primaryIR->GetData(), sampleRate);
+  stagedIRChannel2 = std::move(channel2IR);
+  stagedIR = std::move(primaryIR);
+  return true;
 }
 
 double GetCabSlotCuratedPosition(const int slotIndex, const double position)
@@ -917,13 +989,18 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kOutputMode)->InitEnum("OutputMode", 1, {"Raw", "Normalized", "Calibrated"}); // TODO DRY w/ control
   GetParam(kIRToggle)->InitBool("IRToggle", true);
   GetParam(kModelToggle)->InitBool("ModelToggle", false);
+#if NAM_RELEASE_MODE
+  constexpr int kDefaultCabSourceChoice = 1;
+#else
+  constexpr int kDefaultCabSourceChoice = 0;
+#endif
   GetParam(kCabAEnabled)->InitBool("Cab A Enable", true);
-  GetParam(kCabASource)->InitEnum("Cab A Source", 0, {"Custom IR", "57", "121"});
+  GetParam(kCabASource)->InitEnum("Cab A Source", kDefaultCabSourceChoice, {"Custom IR", "57", "121"});
   GetParam(kCabAPosition)->InitDouble("Cab A Position", 0.0, 0.0, 99.0, 1.0, "");
   GetParam(kCabALevel)->InitGain("Cab A Level", 0.0, -24.0, 12.0, 0.1);
   GetParam(kCabAPan)->InitDouble("Cab A Pan", 0.0, -100.0, 100.0, 1.0, "");
   GetParam(kCabBEnabled)->InitBool("Cab B Enable", false);
-  GetParam(kCabBSource)->InitEnum("Cab B Source", 0, {"Custom IR", "57", "121"});
+  GetParam(kCabBSource)->InitEnum("Cab B Source", kDefaultCabSourceChoice, {"Custom IR", "57", "121"});
   GetParam(kCabBPosition)->InitDouble("Cab B Position", 0.0, 0.0, 99.0, 1.0, "");
   GetParam(kCabBLevel)->InitGain("Cab B Level", 0.0, -24.0, 12.0, 0.1);
   GetParam(kCabBPan)->InitDouble("Cab B Pan", 0.0, -100.0, 100.0, 1.0, "");
@@ -1602,8 +1679,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 
     // IR loader button
     auto loadIRLeftCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
-      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
-        return;
       if (fileName.GetLength())
       {
         mCabCustomIRPaths[0].Set(fileName.Get());
@@ -1627,8 +1702,6 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     };
 
     auto loadIRRightCompletionHandler = [&](const WDL_String& fileName, const WDL_String& path) {
-      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
-        return;
       if (fileName.GetLength())
       {
         mCabCustomIRPaths[1].Set(fileName.Get());
@@ -4388,16 +4461,12 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
       _MarkStandalonePresetDirty();
       return true;
     case kMsgTagClearIRLeft:
-      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
-        return true;
       mCabCustomIRPaths[0].Set("");
       if (GetParam(kCabASource)->Int() == 0)
         mShouldRemoveIRLeft = true;
       _MarkStandalonePresetDirty();
       return true;
     case kMsgTagClearIRRight:
-      if (mAmpWorkflowMode == AmpWorkflowMode::Release)
-        return true;
       mCabCustomIRPaths[1].Set("");
       if (GetParam(kCabBSource)->Int() == 0)
         mShouldRemoveCabBIRPrimary = true;
@@ -5564,8 +5633,12 @@ void NeuralAmpModeler::_ApplyCabSlotSource(const int slotIndex, const bool force
 
   const CuratedCabSegment segment =
     GetCuratedCabSegment(GetCabSlotCuratedPosition(slotIndex, GetParam(positionParamIdx)->Value()));
-  const WDL_String primaryPath = _ResolveCuratedCabIRPath(sourceChoice, segment.leftIndex);
-  const WDL_String secondaryPath = _ResolveCuratedCabIRPath(sourceChoice, segment.rightIndex);
+  const bool useEmbeddedCuratedAssets = (mAmpWorkflowMode == AmpWorkflowMode::Release);
+  const WDL_String primaryPath = useEmbeddedCuratedAssets ? MakeEmbeddedCuratedCabIRPath(sourceChoice, segment.leftIndex)
+                                                          : _ResolveCuratedCabIRPath(sourceChoice, segment.leftIndex);
+  const WDL_String secondaryPath =
+    useEmbeddedCuratedAssets ? MakeEmbeddedCuratedCabIRPath(sourceChoice, segment.rightIndex)
+                             : _ResolveCuratedCabIRPath(sourceChoice, segment.rightIndex);
 
   if (primaryPath.GetLength() > 0)
   {
@@ -5610,7 +5683,6 @@ void NeuralAmpModeler::_RefreshCabSlotControls(const int slotIndex)
   if (slotIndex < 0 || slotIndex >= kCabSlotCount)
     return;
 
-  const bool canEditCabAssets = (mAmpWorkflowMode != AmpWorkflowMode::Release);
   const bool showCabSection = (mTopNavActiveSection == TopNavSection::Cab);
   const int sourceParamIdx = GetCabSlotSourceParamIdx(slotIndex);
   const int positionParamIdx = GetCabSlotPositionParamIdx(slotIndex);
@@ -5619,7 +5691,8 @@ void NeuralAmpModeler::_RefreshCabSlotControls(const int slotIndex)
   const bool slotEnabled = GetParam(GetCabSlotEnabledParamIdx(slotIndex))->Bool();
   const int sourceChoice = std::clamp(GetParam(sourceParamIdx)->Int(), 0, static_cast<int>(kCabSourceLabels.size()) - 1);
   const bool customSource = (sourceChoice == 0);
-  const bool controlsEnabled = canEditCabAssets && slotEnabled;
+  const bool controlsEnabled = slotEnabled;
+  const bool canEditCustomIR = slotEnabled;
 
   if (auto* pSourceSelector = dynamic_cast<IVButtonControl*>(pGraphics->GetControlWithTag(GetCabSlotSourceSelectorCtrlTag(slotIndex))))
   {
@@ -5642,7 +5715,7 @@ void NeuralAmpModeler::_RefreshCabSlotControls(const int slotIndex)
     pEnable->Hide(!showCabSection);
   if (auto* pBrowser = pGraphics->GetControlWithTag(GetCabSlotFileBrowserCtrlTag(slotIndex)))
   {
-    pBrowser->SetDisabled(!controlsEnabled || !customSource);
+    pBrowser->SetDisabled(!canEditCustomIR || !customSource);
     pBrowser->Hide(!showCabSection);
   }
   if (auto* pPosition = pGraphics->GetControlWithParamIdx(positionParamIdx))
@@ -5692,10 +5765,8 @@ void NeuralAmpModeler::_ShowCabSourceMenu(const int slotIndex, const IRECT& anch
     menu.AddItem(new IPopupMenu::Item(kCabSourceLabels[static_cast<size_t>(i)], flags, i));
   }
   menu.AddSeparator();
-  {
-    const int flags = (currentChoice == 0) ? IPopupMenu::Item::kChecked : IPopupMenu::Item::kNoFlags;
-    menu.AddItem(new IPopupMenu::Item(kCabSourceLabels[0], flags, 0));
-  }
+  const int flags = (currentChoice == 0) ? IPopupMenu::Item::kChecked : IPopupMenu::Item::kNoFlags;
+  menu.AddItem(new IPopupMenu::Item(kCabSourceLabels[0], flags, 0));
 
   if (auto* pSourceControl = pGraphics->GetControlWithTag(GetCabSlotSourceSelectorCtrlTag(slotIndex)))
   {
@@ -6842,13 +6913,20 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
   dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
   try
   {
-    auto irPathU8 = std::filesystem::u8path(irPath.Get());
-    auto stagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
-    wavState = stagedIR->GetWavState();
+    auto stagedIR = std::unique_ptr<dsp::ImpulseResponse>();
+    auto stagedIRChannel2 = std::unique_ptr<dsp::ImpulseResponse>();
+    const bool stagedEmbedded =
+      StageEmbeddedCuratedCabIR(irPath, sampleRate, stagedIR, stagedIRChannel2, wavState);
+    if (!stagedEmbedded)
+    {
+      auto irPathU8 = std::filesystem::u8path(irPath.Get());
+      stagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+      wavState = stagedIR->GetWavState();
+      if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+        stagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(stagedIR->GetData(), sampleRate);
+    }
     if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
     {
-      const auto irData = stagedIR->GetData();
-      auto stagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
       // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
       mStagedIRChannel2 = std::move(stagedIRChannel2);
       mStagedIR = std::move(stagedIR);
@@ -6863,7 +6941,8 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRLeft(const WDL_String& irPath
     std::cerr << e.what() << std::endl;
   }
 
-  if (notifyUI && wavState == dsp::wav::LoadReturnCode::SUCCESS)
+  if (notifyUI && wavState == dsp::wav::LoadReturnCode::SUCCESS
+      && GetEmbeddedCuratedCabIRAssetForPath(irPath) == nullptr)
   {
     SendControlMsgFromDelegate(kCtrlTagIRFileBrowserLeft, kMsgTagLoadedIRLeft, irPath.GetLength(), irPath.Get());
   }
@@ -6893,13 +6972,20 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
   dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
   try
   {
-    auto irPathU8 = std::filesystem::u8path(irPath.Get());
-    auto stagedIRRight = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
-    wavState = stagedIRRight->GetWavState();
+    auto stagedIRRight = std::unique_ptr<dsp::ImpulseResponse>();
+    auto stagedIRRightChannel2 = std::unique_ptr<dsp::ImpulseResponse>();
+    const bool stagedEmbedded =
+      StageEmbeddedCuratedCabIR(irPath, sampleRate, stagedIRRight, stagedIRRightChannel2, wavState);
+    if (!stagedEmbedded)
+    {
+      auto irPathU8 = std::filesystem::u8path(irPath.Get());
+      stagedIRRight = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+      wavState = stagedIRRight->GetWavState();
+      if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+        stagedIRRightChannel2 = std::make_unique<dsp::ImpulseResponse>(stagedIRRight->GetData(), sampleRate);
+    }
     if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
     {
-      const auto irData = stagedIRRight->GetData();
-      auto stagedIRRightChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
       // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
       mStagedIRRightChannel2 = std::move(stagedIRRightChannel2);
       mStagedIRRight = std::move(stagedIRRight);
@@ -6914,7 +7000,8 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageIRRight(const WDL_String& irPat
     std::cerr << e.what() << std::endl;
   }
 
-  if (notifyUI && wavState == dsp::wav::LoadReturnCode::SUCCESS)
+  if (notifyUI && wavState == dsp::wav::LoadReturnCode::SUCCESS
+      && GetEmbeddedCuratedCabIRAssetForPath(irPath) == nullptr)
   {
     SendControlMsgFromDelegate(
       kCtrlTagIRFileBrowserRight, kMsgTagLoadedIRRight, irPath.GetLength(), irPath.Get());
@@ -6941,13 +7028,20 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageCabBIRPrimary(const WDL_String&
   dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
   try
   {
-    auto irPathU8 = std::filesystem::u8path(irPath.Get());
-    auto stagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
-    wavState = stagedIR->GetWavState();
+    auto stagedIR = std::unique_ptr<dsp::ImpulseResponse>();
+    auto stagedIRChannel2 = std::unique_ptr<dsp::ImpulseResponse>();
+    const bool stagedEmbedded =
+      StageEmbeddedCuratedCabIR(irPath, sampleRate, stagedIR, stagedIRChannel2, wavState);
+    if (!stagedEmbedded)
+    {
+      auto irPathU8 = std::filesystem::u8path(irPath.Get());
+      stagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+      wavState = stagedIR->GetWavState();
+      if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+        stagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(stagedIR->GetData(), sampleRate);
+    }
     if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
     {
-      const auto irData = stagedIR->GetData();
-      auto stagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
       mStagedCabBIRChannel2 = std::move(stagedIRChannel2);
       mStagedCabBIR = std::move(stagedIR);
       mStagedCabBIRPath = irPath;
@@ -6977,13 +7071,20 @@ dsp::wav::LoadReturnCode NeuralAmpModeler::_StageCabBIRSecondary(const WDL_Strin
   dsp::wav::LoadReturnCode wavState = dsp::wav::LoadReturnCode::ERROR_OTHER;
   try
   {
-    auto irPathU8 = std::filesystem::u8path(irPath.Get());
-    auto stagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
-    wavState = stagedIR->GetWavState();
+    auto stagedIR = std::unique_ptr<dsp::ImpulseResponse>();
+    auto stagedIRChannel2 = std::unique_ptr<dsp::ImpulseResponse>();
+    const bool stagedEmbedded =
+      StageEmbeddedCuratedCabIR(irPath, sampleRate, stagedIR, stagedIRChannel2, wavState);
+    if (!stagedEmbedded)
+    {
+      auto irPathU8 = std::filesystem::u8path(irPath.Get());
+      stagedIR = std::make_unique<dsp::ImpulseResponse>(irPathU8.string().c_str(), sampleRate);
+      wavState = stagedIR->GetWavState();
+      if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
+        stagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(stagedIR->GetData(), sampleRate);
+    }
     if (wavState == dsp::wav::LoadReturnCode::SUCCESS)
     {
-      const auto irData = stagedIR->GetData();
-      auto stagedIRChannel2 = std::make_unique<dsp::ImpulseResponse>(irData, sampleRate);
       mStagedCabBIRSecondaryChannel2 = std::move(stagedIRChannel2);
       mStagedCabBIRSecondary = std::move(stagedIR);
       mStagedCabBIRSecondaryPath = irPath;
