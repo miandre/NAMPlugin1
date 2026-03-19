@@ -1,4 +1,4 @@
-Last updated: 2026-03-16
+Last updated: 2026-03-19
 
 Purpose: concise handoff so a new agent can continue without replaying the full chat history.
 
@@ -10,95 +10,126 @@ Purpose: concise handoff so a new agent can continue without replaying the full 
 
 ## Current repository state
 - Active branch: `main`
-- Branch HEAD: `10ce311`
+- Branch HEAD: `869fa37`
 - Working tree at handoff: clean
 - Recent relevant history:
-  - `10ce311` `Minor UI improvements`
-  - `6f885eb` `Add visual on/off effect for amps`
-  - `b206a4b` `Add graphics for on/off amp visuals`
-  - `8f076e4` `Add Amp 1 switch and allow independent switch scale for amps.`
-  - `35d9035` `Dim deactivated sections`
-  - `ce91d9f` `fix(preset): restore plugin stomp and cab assets`
-  - `f256cf7` `Minor fixes of doubler`
-  - `34a4838` `tune(ui): refine tempo field hover states`
-  - `7cec790` `fix(preset): restore preset context and ignore input mode`
-  - `0b1a893` `Do not inactivate gate when inactivating stomp section.`
-  - `5d4d8cb` `tune(meter): tighten decay timing`
-  - `611f0f5` `feat(meter): latch and clear clip warnings`
-  - `6caf212` `feat(meter): add stereo-aware metering and UI cleanup`
+  - `869fa37` `Merge feature/interactive-cab-v1`
+  - `cb678d0` `Wire embedded curated cab IRs into release mode`
+  - `59abf22` `Add embedded curated cab IR assets`
+  - `5a1e4a2` `Implement interactive cab v1`
+  - `3412e9a` `Add interactive cab graphics`
+  - `a25d4e8` `Improved graphics for Amp2 and Cab`
+  - `816fbc6` `Transpose should not affect CPU when disabled.`
 
 ## What is completed now
 
-### 1) Metering overhaul is landed
-- Input/output metering is now mono/stereo-aware
-- Meter UI was restyled away from the old bitmap/striped look
-- Stereo meters render as two clean lanes with a small gap
+### 1) Metering overhaul is landed and stable
+- Input/output metering is mono/stereo-aware
+- Meter UI is now vector-based and cleaner than the old striped/bitmap look
 - Clip warning latch exists and clears by clicking either meter
-- Meter decay/peak timing was tightened to feel faster and more readable
+- Meter decay/peak timing was tightened and accepted
 
 ### 2) Gate/stomp coupling bug is fixed
-- Gate was moved to the top row earlier
-- Remaining stomp-bypass coupling was removed
+- Gate is decoupled from stomp bypass
 - Right/Ctrl-click bypass on the Stomp section no longer disables the current gate path
 
-### 3) Preset/session context restore is much better
-- Standalone restart now restores:
-  - last preset name
-  - dirty `*` state
-  - fallback to `Unsaved` only if the preset file is missing
-- Plugin/session restore now also restores preset context instead of always showing `Unsaved`
-- `Input Stereo` is no longer treated like preset-owned state:
-  - preset loads do not change it
-  - changing it does not mark the preset dirty
-- Session/last-state restore still keeps `Input Stereo`
+### 3) Preset/session context restore is fixed
+- Standalone restart restores preset context, name, and dirty `*` state
+- Plugin/session restore also restores preset context instead of always showing `Unsaved`
+- `Input Stereo` remains session/setup state, not preset-owned state
 
 ### 4) Plugin preset asset restore is fixed
-- Plugin preset/session reopen now restores:
-  - stomp NAM / boost NAM
-  - cab IR
-- The final fix was removing the IR pre-clear during preset recall
-- Relative preset-path handling was also tightened during this work
+- Plugin preset/session reopen restores stomp NAM / boost NAM and cab IR state
+- Relative preset-path handling was tightened during this work
 
-### 5) Doubler is stable enough for now
-- Doubler bypass no longer jumps through a brief centered processed-left state when switched off
-- Current doubler tuning was adjusted by the user and is accepted as the current baseline
+### 5) Interactive Cab V1 is landed
+Outcome:
+- The Cab page is now a dual-slot interactive cab mixer instead of the old single-cab blend workflow
 
-### 6) Top-level and amp-face UI polish moved forward a lot
-- Deactivated section dimming exists
-- Tuner now renders above the dimmed section background
-- Utility knobs got a slightly clearer hover highlight
-- Mono/stereo switch now uses the same subtle hover-pop language as the other top-row SVG icons
-- Tempo/BPM readout hover states were refined
-- AMP slot 1 knob labels can use a separate label color path
-- AMP slot 1 has its own switch bitmaps
-- Amp model switch scale is independently adjustable per slot
-- Amp backgrounds now have `_OFF` variants and the amp page background follows the same on/off state as the amp switch
+Landed work:
+- Two always-visible mono cab slots: `Cab A` and `Cab B`
+- Per-slot controls:
+  - enable
+  - source dropdown
+  - position slider
+  - level
+  - pan
+  - custom IR loader
+- Curated mic mode with 1D interpolation between five aligned captures per mic
+- Current curated mic set:
+  - `57`
+  - `121`
+- Slider direction is mirrored correctly for the left slot
+- Cab UI was significantly redesigned:
+  - per-slot header rows
+  - `MIC` labeling
+  - dedicated cab picker styling
+  - mic bitmap slider handles
+- Old single `Cab Blend` concept was removed
 
-## Important tweak points added recently
-- AMP model switch per-slot scale:
-  - `NeuralAmpModeler.cpp`
-  - `kAmpModelSwitchScales`
-- AMP on/off background swap:
-  - `config.h` for `_OFF` asset defines
-  - `resources/main.rc` for bitmap registration
-  - `NeuralAmpModeler.cpp`
-  - `GetAmpBackgroundResourceName(...)`
-- AMP1-specific switch art:
-  - `config.h`
-  - `NeuralAmpModelerControls.h`
-  - `NeuralAmpModeler.cpp`
+### 6) Curated cab assets are embedded for release mode
+Outcome:
+- Release mode no longer depends on runtime disk reads for the curated cab mic set
+
+Landed work:
+- Generated embedded curated IR asset files:
+  - `NeuralAmpModeler/EmbeddedCabIRAssets.h`
+  - `NeuralAmpModeler/EmbeddedCabIRAssets.cpp`
+- Generator script:
+  - `tools/generate_embedded_cab_ir_assets.py`
+- Release-mode curated cab staging now loads from embedded PCM data instead of WAV files on disk
+- Visual Studio project files were updated to compile the generated asset source
+
+Important nuance:
+- `Custom IR` loading is still allowed in release mode
+- Only the curated mic set is embedded; user-loaded IRs still use the normal file path flow
+
+### 7) Transpose is still hidden and undecided
+- Hidden transpose feature still exists
+- A small RT-safe idle-path fix already landed:
+  - transpose should not keep doing steady-state off-path work when disabled
+- Recent app-side “transpose seems on” behavior was inspected
+- Most likely cause was standalone saved state restoring a nonzero transpose value, not a changed default
+- Current transpose default is still `0`
+
+## Important tweak points and files
+
+### Cab system
+- Main cab DSP/state/UI path:
+  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
+  - `NeuralAmpModeler/NeuralAmpModeler.h`
+- Cab-specific controls:
+  - `NeuralAmpModeler/NeuralAmpModelerControls.h`
+- Embedded curated cab assets:
+  - `NeuralAmpModeler/EmbeddedCabIRAssets.h`
+  - `NeuralAmpModeler/EmbeddedCabIRAssets.cpp`
+- Embedded asset generator:
+  - `tools/generate_embedded_cab_ir_assets.py`
+
+### Cab UI assets
+- New mic images:
+  - `NeuralAmpModeler/resources/img/Mic/57.png`
+  - `NeuralAmpModeler/resources/img/Mic/121.png`
+- Resource registration:
+  - `NeuralAmpModeler/config.h`
+  - `NeuralAmpModeler/resources/main.rc`
 
 ## Important behavioral conclusions
-- Do not reopen the old preset-transition optimization work unless there is a very clear reason
-- Metering is in a good state now; do not churn it unless the user asks
+- Interactive Cab V1 is considered a good baseline and should not be reworked casually
+- Keep the dual-slot “mono source, then pan” architecture
+- Curated mic alignment is expected to come from the IR assets themselves, not from app-side phase correction
+- `Custom IR` support in release mode is intentional and should remain
 - `Input Stereo` should remain session/setup state, not preset-owned state
 - Plugin preset asset restore is sensitive; keep future changes there minimal and reviewable
-- Doubler is good enough to keep stable unless the user explicitly wants more tuning
+- Transpose is still not a settled product feature; avoid expanding it unless the user explicitly wants that
 
 ## Current plugin/app state
-- Release-mode scaffold still exists from earlier work, but final embedded asset packaging is not done
-- Metering, gate, doubler, preset-context restore, and plugin asset restore are all in a much safer place than before
-- Recent work has shifted into small targeted UX/UI polish on top of that baseline
+- `main` contains Interactive Cab V1 and the embedded curated IR path
+- Working tree is clean at handoff
+- Release mode now supports:
+  - embedded curated cab IRs
+  - user-loaded custom IRs
+- No new build/test results were produced during the final merge pass
 
 ## Build/config baseline to preserve
 - Audio/performance validation: `Release | x64` only
@@ -118,9 +149,13 @@ Purpose: concise handoff so a new agent can continue without replaying the full 
   - breaking changes are acceptable if they improve architecture or iteration speed
 
 ## Suggested next coding step
-1. Unless the user redirects, move to the transpose decision path next
-2. If the user stays in polish mode, prefer small UI-only fixes over deeper DSP changes
-3. Keep Release asset packaging paused until the final model/variant set is clearer
+1. Unless the user redirects, inspect a built-in compressor stomp pedal v1
+2. Keep scope small:
+  - amount
+  - level / makeup gain
+  - soft / hard switch
+3. Prefer a simple built-in DSP compressor over a large stomp-architecture rewrite
+4. Keep transpose as a lower-priority decision path unless the user explicitly returns to it
 
 ## Starter prompt for the next agent
 You are continuing work in `D:\Dev\NAMPlugin` on branch `main`.
@@ -139,16 +174,26 @@ Then confirm current repo/submodule state:
 - `git -C iPlug2 remote -v`
 
 Current baseline:
-1. Metering overhaul is landed and considered stable
+1. Metering overhaul is landed and stable
 2. Gate is decoupled from stomp bypass
 3. Standalone/plugin preset context restore is fixed
 4. Plugin preset stomp NAM and cab IR restore is fixed
-5. Recent work is mostly small UI/UX polish on the amp section and top controls
+5. Interactive Cab V1 is merged to `main`
+6. Release mode embeds curated cab IRs but still allows custom IR loading
 
 Suggested next task unless the user redirects:
-1. Inspect the transpose feature path and current tradeoffs
-2. Propose whether it should stay, be simplified, or be removed
-3. Implement only the smallest reviewable change if the user wants code
+1. Inspect whether a built-in compressor stomp pedal v1 can be added with minimal architecture churn
+2. Propose the smallest RT-safe signal-chain insertion point and control set
+3. If the user wants code, implement only the smallest reviewable first slice
+
+Compressor idea currently under consideration:
+- controls:
+  - `Amount`
+  - `Level`
+  - `Soft/Hard` switch
+- likely behavior:
+  - built-in compressor DSP, not a NAM model
+  - soft/hard maps to different compression character, likely ratio/knee and possibly timing presets
 
 Constraints:
 - Keep diffs minimal
