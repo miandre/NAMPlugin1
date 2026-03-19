@@ -58,6 +58,7 @@
     <ClCompile Include="..\..\iPlug2\IGraphics\Drawing\IGraphicsSkia.cpp">
       <Filter>IGraphics\Drawing</Filter>
     </ClCompile>
+    <ClCompile Include="..\EmbeddedCabIRAssets.cpp" />
     <ClCompile Include="..\NeuralAmpModeler.cpp" />
     <ClCompile Include="..\NeuralAmpModelerCore\NAM\convnet.cpp">
       <Filter>NAM</Filter>
@@ -247,6 +248,7 @@
     </ClInclude>
     <ClInclude Include="..\Colors.h" />
     <ClInclude Include="..\config.h" />
+    <ClInclude Include="..\EmbeddedCabIRAssets.h" />
     <ClInclude Include="..\NeuralAmpModeler.h" />
     <ClInclude Include="..\NeuralAmpModelerCore\NAM\activations.h">
       <Filter>NAM</Filter>
