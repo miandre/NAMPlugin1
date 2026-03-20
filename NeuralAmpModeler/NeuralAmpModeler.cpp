@@ -349,6 +349,27 @@ NoiseGateMacroParams GetNoiseGateMacroParams(const double gateAmountPercent)
   return params;
 }
 
+double ComputeCompressorGainReductionDb(const double detectorDb, const double thresholdDb, const double ratio,
+                                        const double kneeDb)
+{
+  if (ratio <= 1.0)
+    return 0.0;
+
+  const double overDb = detectorDb - thresholdDb;
+  const double slope = 1.0 - 1.0 / ratio;
+  if (kneeDb <= 0.0)
+    return (overDb > 0.0) ? (slope * overDb) : 0.0;
+
+  const double halfKneeDb = 0.5 * kneeDb;
+  if (overDb <= -halfKneeDb)
+    return 0.0;
+  if (overDb >= halfKneeDb)
+    return slope * overDb;
+
+  const double kneePositionDb = overDb + halfKneeDb;
+  return slope * kneePositionDb * kneePositionDb / (2.0 * kneeDb);
+}
+
 std::vector<std::filesystem::path> GetReleaseAssetCandidateDirs(const char* bundleId)
 {
   std::vector<std::filesystem::path> candidateDirs = {
@@ -2618,6 +2639,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool cabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
   const bool haveStereoStomp = (mStompModel != nullptr) && (mStompModelRight != nullptr);
+  const bool compressorEnabled = GetParam(kStompCompressorActive)->Bool() && !stompBypassed;
   const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed
                             && ((numChannelsMonoCore == 1) ? (mStompModel != nullptr) : haveStereoStomp);
   const bool toneStackActive = GetParam(kEQActive)->Value() && !ampBypassed;
@@ -2740,6 +2762,13 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       mStereoSideActiveCandidateSamples[c] = 0;
       mStereoSideResumeDeClickSamplesRemaining[c] = 0;
     }
+  }
+
+  if (compressorEnabled)
+  {
+    sample** compressorOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
+    _ProcessBuiltInCompressor(modelInputPointers, compressorOutPointers, numChannelsMonoCore, nFrames);
+    modelInputPointers = compressorOutPointers;
   }
 
   if (boostEnabled)
@@ -3314,6 +3343,7 @@ void NeuralAmpModeler::OnReset()
   _ResetModelAndIR(sampleRate, GetBlockSize());
   mTransposeShifter.Reset(sampleRate, maxBlockSize);
   mTransposeShifterRight.Reset(sampleRate, maxBlockSize);
+  _ResetBuiltInCompressor(sampleRate);
   for (int slotIndex = 0; slotIndex < static_cast<int>(mToneStacks.size()); ++slotIndex)
   {
     if (mToneStacks[slotIndex] != nullptr)
@@ -6876,6 +6906,70 @@ void NeuralAmpModeler::_SetMasterGain()
   const double value = GetParam(kMasterVolume)->Value();
   const double masterGainDB = (value <= 5.0) ? (-40.0 + (value / 5.0) * 40.0) : (((value - 5.0) / 5.0) * 12.0);
   mMasterGain = DBToAmp(masterGainDB);
+}
+
+void NeuralAmpModeler::_ResetBuiltInCompressor(const double sampleRate)
+{
+  mBuiltInCompressor.sampleRate = std::max(1.0, sampleRate);
+  const double smoothTimeSeconds = 0.02;
+  mBuiltInCompressor.controlSmoothCoeff = std::exp(-1.0 / (mBuiltInCompressor.sampleRate * smoothTimeSeconds));
+  mBuiltInCompressor.smoothedAmount = std::clamp(GetParam(kStompCompressorAmount)->Value() * 0.01, 0.0, 1.0);
+  mBuiltInCompressor.smoothedLevelGain = DBToAmp(GetParam(kStompCompressorLevel)->Value());
+  mBuiltInCompressor.smoothedHardness = GetParam(kStompCompressorHard)->Bool() ? 1.0 : 0.0;
+  mBuiltInCompressor.detectorEnvelope.fill(0.0);
+}
+
+void NeuralAmpModeler::_ProcessBuiltInCompressor(iplug::sample** inputs, iplug::sample** outputs, const size_t numChannels,
+                                                 const size_t numFrames)
+{
+  if (inputs == nullptr || outputs == nullptr)
+    return;
+
+  const double amountTarget = std::clamp(GetParam(kStompCompressorAmount)->Value() * 0.01, 0.0, 1.0);
+  const double levelTargetGain = DBToAmp(GetParam(kStompCompressorLevel)->Value());
+  const double hardTarget = GetParam(kStompCompressorHard)->Bool() ? 1.0 : 0.0;
+  const double controlCoeff = mBuiltInCompressor.controlSmoothCoeff;
+  const double sampleRate = std::max(1.0, mBuiltInCompressor.sampleRate);
+
+  for (size_t s = 0; s < numFrames; ++s)
+  {
+    mBuiltInCompressor.smoothedAmount =
+      amountTarget + controlCoeff * (mBuiltInCompressor.smoothedAmount - amountTarget);
+    mBuiltInCompressor.smoothedLevelGain =
+      levelTargetGain + controlCoeff * (mBuiltInCompressor.smoothedLevelGain - levelTargetGain);
+    mBuiltInCompressor.smoothedHardness =
+      hardTarget + controlCoeff * (mBuiltInCompressor.smoothedHardness - hardTarget);
+
+    const double amount = std::clamp(mBuiltInCompressor.smoothedAmount, 0.0, 1.0);
+    const double hardMix = std::clamp(mBuiltInCompressor.smoothedHardness, 0.0, 1.0);
+    const double ratio = (1.0 + 4.0 * amount) + hardMix * (6.0 * amount);
+    const double thresholdDb = (-24.0 - 14.0 * amount) + hardMix * (-8.0 * amount);
+    const double kneeDb = 12.0 + (1.5 - 12.0) * hardMix;
+    const double attackSeconds = 0.020 + (0.0025 - 0.020) * hardMix;
+    const double releaseSeconds = 0.200 + (0.065 - 0.200) * hardMix;
+    const double autoMakeupGain = DBToAmp(amount * (3.0 + 4.0 * hardMix));
+    const double attackCoeff = std::exp(-1.0 / (std::max(1.0e-4, attackSeconds) * sampleRate));
+    const double releaseCoeff = std::exp(-1.0 / (std::max(1.0e-4, releaseSeconds) * sampleRate));
+
+    for (size_t c = 0; c < numChannels; ++c)
+    {
+      if (inputs[c] == nullptr || outputs[c] == nullptr)
+        continue;
+
+      const double inputSample = static_cast<double>(inputs[c][s]);
+      const double rectified = std::abs(inputSample);
+      const double envelopeCoeff = (rectified > mBuiltInCompressor.detectorEnvelope[c]) ? attackCoeff : releaseCoeff;
+      mBuiltInCompressor.detectorEnvelope[c] =
+        rectified + envelopeCoeff * (mBuiltInCompressor.detectorEnvelope[c] - rectified);
+
+      const double detectorDb = AmpToDB(std::max(mBuiltInCompressor.detectorEnvelope[c], 1.0e-9));
+      const double gainReductionDb = ComputeCompressorGainReductionDb(detectorDb, thresholdDb, ratio, kneeDb);
+      const double compressed =
+        inputSample * DBToAmp(-gainReductionDb) * autoMakeupGain * mBuiltInCompressor.smoothedLevelGain;
+
+      outputs[c][s] = std::isfinite(compressed) ? static_cast<sample>(compressed) : 0.0f;
+    }
+  }
 }
 
 std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotIndex, const int slotCtrlTag)
