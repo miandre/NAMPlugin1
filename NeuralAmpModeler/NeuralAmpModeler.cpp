@@ -81,8 +81,8 @@ constexpr size_t kMinInternalPreparedFrames = 16384;
 constexpr std::array<const char*, 3> kAmpSlotDefaultModelFileNames = {"Amp1.nam", "Amp2.nam", "Amp3.nam"};
 constexpr std::array<const char*, 3> kReleaseAmpAssetTokens = {"Amp1Main", "Amp2Main", "Amp3Main"};
 constexpr std::array<const char*, 3> kReleaseAmpAssetFileNames = {"Amp1.nam", "Amp2.nam", "Amp3.nam"};
-constexpr std::array<const char*, 1> kReleaseStompAssetTokens = {"Boost1"};
-constexpr std::array<const char*, 1> kReleaseStompAssetFileNames = {"Boost1.nam"};
+constexpr std::array<const char*, 2> kReleaseStompAssetTokens = {"BoostA", "BoostB"};
+constexpr std::array<const char*, 2> kReleaseStompAssetFileNames = {"BoostA.nam", "BoostB.nam"};
 constexpr std::array<const char*, 1> kReleaseIRAssetTokens = {"Cab1"};
 constexpr std::array<const char*, 1> kReleaseIRAssetFileNames = {"Cab1.wav"};
 constexpr std::array<const char*, 2> kCuratedCabMicFolderNames = {"57", "121"};
@@ -961,6 +961,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
   GetParam(kStompBoostActive)->InitBool("BoostActive", false);
   GetParam(kStompBoostDrive)->InitGain("Boost Drive", 0.0, -10.0, 10.0, 0.1);
+  GetParam(kStompBoostType)->InitBool("Boost Type", false);
+  GetParam(kStompBoostType)->SetDisplayText(0.0, "A");
+  GetParam(kStompBoostType)->SetDisplayText(1.0, "B");
   GetParam(kStompCompressorAmount)->InitDouble("Comp", 0.0, 0.0, 100.0, 0.1, "%");
   GetParam(kStompCompressorLevel)->InitGain("Comp Level", 0.0, -18.0, 24.0, 0.1);
   GetParam(kStompCompressorHard)->InitBool("Comp Hard", false);
@@ -1310,6 +1313,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float stompCompressorSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
     const float stompBoostDriveX = designToUIX(1875.0f);
     const float stompBoostLevelX = designToUIX(2225.0f);
+    const float stompBoostTypeX = designToUIX(2052.0f);
+    const float stompBoostTypeY = designToUIY(1111.0f) + kStompButtonAnchorOffsetY;
     const float stompKnobY = designToUIY(890.0f) + kStompKnobAnchorOffsetY;
     const float stompBoostSwitchX = designToUIX(2049.0f);
     const float stompSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
@@ -1334,6 +1339,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
             stompCompressorSwitchArea.T - 40.0f,
             stompCompressorSwitchArea.MW() + 10.0f,
             stompCompressorSwitchArea.T - 20.0f);
+    const auto stompBoostTypeArea =
+      IRECT(stompBoostTypeX - 30.0f, stompBoostTypeY - 40.0f, stompBoostTypeX + 30.0f, stompBoostTypeY + 10.0f);
     const auto stompBoostSwitchArea =
       IRECT(stompBoostSwitchX - 0.5f * stompButtonW, stompSwitchY - 0.5f * stompButtonH, stompBoostSwitchX + 0.5f * stompButtonW,
             stompSwitchY + 0.5f * stompButtonH);
@@ -1486,6 +1493,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto settingsAmpModelArea2 = settingsAmpModelArea1.GetTranslated(0.0f, 56.0f);
     const auto settingsAmpModelArea3 = settingsAmpModelArea2.GetTranslated(0.0f, 56.0f);
     const auto settingsStompModelArea = settingsAmpModelArea3.GetTranslated(0.0f, 56.0f);
+    const auto settingsStompModelAreaB = settingsStompModelArea.GetTranslated(0.0f, 56.0f);
     constexpr float kModelCapabilityTopPad = 2.0f;
     constexpr float kModelCapabilityRowHeight = 11.0f;
     constexpr float kModelCapabilityRowGap = 1.0f;
@@ -1710,16 +1718,16 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     };
 
     // IR loader button
-    auto loadStompModelCompletionHandler = [&](const WDL_String& fileName, const WDL_String&) {
+    auto loadStompModelForSlot = [this](const int boostSlot, const WDL_String& fileName) {
       if (mAmpWorkflowMode == AmpWorkflowMode::Release)
         return;
       if (fileName.GetLength())
       {
-        const std::string msg = _StageStompModel(fileName);
+        const std::string msg = _StageStompModel(fileName, boostSlot);
         if (msg.size())
         {
           std::stringstream ss;
-          ss << "Failed to load boost model. Message:\n\n" << msg;
+          ss << "Failed to load boost " << ((boostSlot == 0) ? "A" : "B") << " model. Message:\n\n" << msg;
           _ShowMessageBox(GetUI(), ss.str().c_str(), "Failed to load boost model!", kMB_OK);
           GetParam(kStompBoostActive)->Set(0.0);
         }
@@ -1730,6 +1738,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         }
         SendParameterValueFromDelegate(kStompBoostActive, GetParam(kStompBoostActive)->GetNormalized(), true);
       }
+    };
+    auto loadStompModelCompletionHandlerA = [loadStompModelForSlot](const WDL_String& fileName, const WDL_String&) {
+      loadStompModelForSlot(0, fileName);
+    };
+    auto loadStompModelCompletionHandlerB = [loadStompModelForSlot](const WDL_String& fileName, const WDL_String&) {
+      loadStompModelForSlot(1, fileName);
     };
 
     // IR loader button
@@ -2048,6 +2062,11 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       new NAMMomentaryBitmapButtonControl(stompBoostSwitchArea, kStompBoostActive, stompButtonUpBitmap, stompButtonDownBitmap),
       -1,
       "STOMP_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMBitmapToggleControl(stompBoostTypeArea, kStompBoostType, horizonalSwitchLeftBitmap, horizonalSwitchRightBitmap),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Boost voice: A / B.");
     pGraphics->AttachControl(new NAMBitmapLEDControl(stompBoostOnLedArea, redLedOnBitmap, redLedOffBitmap),
                              kCtrlTagBoostOnLED,
                              "STOMP_CONTROLS");
@@ -2406,10 +2425,15 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                 fileBackgroundBitmap),
       kCtrlTagModelFileBrowser3);
     pSettingsBox->AddChildControl(
-      new NAMFileBrowserControl(settingsStompModelArea, kMsgTagClearStompModel, "Select stomp NAM...", "nam",
-                                loadStompModelCompletionHandler, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+      new NAMFileBrowserControl(settingsStompModelArea, kMsgTagClearStompModel, "Select stomp A NAM...", "nam",
+                                loadStompModelCompletionHandlerA, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
                                 fileBackgroundBitmap),
       kCtrlTagStompModelFileBrowser);
+    pSettingsBox->AddChildControl(
+      new NAMFileBrowserControl(settingsStompModelAreaB, kMsgTagClearStompModel, "Select stomp B NAM...", "nam",
+                                loadStompModelCompletionHandlerB, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap),
+      kCtrlTagStompModelFileBrowserB);
     const IVStyle capabilityStyle = utilityStyle.WithLabelText(
       IText(12.0f, PluginColors::HELP_TEXT, "ArialNarrow-Bold", EAlign::Near, EVAlign::Middle));
     pSettingsBox->AddChildControl(
@@ -2647,10 +2671,13 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool stompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
   const bool cabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
-  const bool haveStereoStomp = (mStompModel != nullptr) && (mStompModelRight != nullptr);
+  const bool useBoostB = GetParam(kStompBoostType)->Bool();
+  ResamplingNAM* const activeStompModel = useBoostB ? mStompModelB.get() : mStompModel.get();
+  ResamplingNAM* const activeStompModelRight = useBoostB ? mStompModelRightB.get() : mStompModelRight.get();
+  const bool haveStereoStomp = (activeStompModel != nullptr) && (activeStompModelRight != nullptr);
   const bool compressorEnabled = GetParam(kStompCompressorActive)->Bool() && !stompBypassed;
   const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed
-                            && ((numChannelsMonoCore == 1) ? (mStompModel != nullptr) : haveStereoStomp);
+                            && ((numChannelsMonoCore == 1) ? (activeStompModel != nullptr) : haveStereoStomp);
   const double boostDriveTargetGain = DBToAmp(GetParam(kStompBoostDrive)->Value());
   const bool toneStackActive = GetParam(kEQActive)->Value() && !ampBypassed;
   const bool modelActive = GetParam(kModelToggle)->Bool() && !ampBypassed;
@@ -2804,7 +2831,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     sample** boostOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
     if (numChannelsMonoCore == 1)
     {
-      mStompModel->process(modelInputPointers, boostOutPointers, nFrames);
+      activeStompModel->process(modelInputPointers, boostOutPointers, nFrames);
     }
     else
     {
@@ -2812,7 +2839,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       {
         sample* leftIn[1] = {modelInputPointers[0]};
         sample* leftOut[1] = {boostOutPointers[0]};
-        mStompModel->process(leftIn, leftOut, nFrames);
+        activeStompModel->process(leftIn, leftOut, nFrames);
       }
       else
       {
@@ -2823,7 +2850,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       {
         sample* rightIn[1] = {modelInputPointers[1]};
         sample* rightOut[1] = {boostOutPointers[1]};
-        mStompModelRight->process(rightIn, rightOut, nFrames);
+        activeStompModelRight->process(rightIn, rightOut, nFrames);
       }
       else
       {
@@ -3239,7 +3266,9 @@ void NeuralAmpModeler::OnReset()
     }
     _ApplyAmpSlotState(mAmpSelectorIndex);
     if (mStompModel == nullptr && mStagedStompModel == nullptr && mStompNAMPath.GetLength())
-      _StageStompModel(mStompNAMPath);
+      _StageStompModel(mStompNAMPath, 0);
+    if (mStompModelB == nullptr && mStagedStompModelB == nullptr && mStompNAMPathB.GetLength())
+      _StageStompModel(mStompNAMPathB, 1);
   }
 
 #if defined(APP_API) && (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
@@ -3256,7 +3285,8 @@ void NeuralAmpModeler::OnReset()
       const bool anyAmpSlotPath = std::any_of(
         mAmpNAMPaths.begin(), mAmpNAMPaths.end(), [](const WDL_String& path) { return path.GetLength() > 0; });
       const bool hasExistingPaths =
-        anyAmpSlotPath || (mNAMPath.GetLength() > 0) || (mStompNAMPath.GetLength() > 0) || (mIRPath.GetLength() > 0) ||
+        anyAmpSlotPath || (mNAMPath.GetLength() > 0) || (mStompNAMPath.GetLength() > 0) || (mStompNAMPathB.GetLength() > 0) ||
+        (mIRPath.GetLength() > 0) ||
         (mIRPathRight.GetLength() > 0) || (mCabCustomIRPaths[0].GetLength() > 0) || (mCabCustomIRPaths[1].GetLength() > 0);
 
       if (!hasExistingPaths)
@@ -3274,7 +3304,8 @@ void NeuralAmpModeler::OnReset()
         auto setWdlPath = [](WDL_String& target, const std::filesystem::path& path) { target.Set(path.string().c_str()); };
         auto hasAllDefaultFiles = [&](const std::filesystem::path& baseDir) {
           return existsNoThrow(baseDir / "Amp1.nam") && existsNoThrow(baseDir / "Amp2.nam") &&
-                 existsNoThrow(baseDir / "Amp3.nam") && existsNoThrow(baseDir / "Boost1.nam") &&
+                 existsNoThrow(baseDir / "Amp3.nam") && existsNoThrow(baseDir / "BoostA.nam") &&
+                 existsNoThrow(baseDir / "BoostB.nam") &&
                  existsNoThrow(baseDir / "Cab1.wav");
         };
 
@@ -3298,7 +3329,8 @@ void NeuralAmpModeler::OnReset()
             _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
             _SetAmpSlotModelPath(slotIndex, slotModelPath);
           }
-          setWdlPath(mStompNAMPath, defaultsDir / "Boost1.nam");
+          setWdlPath(mStompNAMPath, defaultsDir / "BoostA.nam");
+          setWdlPath(mStompNAMPathB, defaultsDir / "BoostB.nam");
           setWdlPath(mIRPath, defaultsDir / "Cab1.wav");
         }
       }
@@ -3315,7 +3347,9 @@ void NeuralAmpModeler::OnReset()
     }
     _ApplyAmpSlotState(mAmpSelectorIndex);
     if (mStompModel == nullptr && mStagedStompModel == nullptr && mStompNAMPath.GetLength())
-      _StageStompModel(mStompNAMPath);
+      _StageStompModel(mStompNAMPath, 0);
+    if (mStompModelB == nullptr && mStagedStompModelB == nullptr && mStompNAMPathB.GetLength())
+      _StageStompModel(mStompNAMPathB, 1);
   }
 #endif
 
@@ -3324,7 +3358,12 @@ void NeuralAmpModeler::OnReset()
     if (mStompNAMPath.GetLength() > 0 && mStompModel == nullptr && mStagedStompModel == nullptr)
     {
       mShouldRemoveStompModel = false;
-      _StageStompModel(mStompNAMPath);
+      _StageStompModel(mStompNAMPath, 0);
+    }
+    if (mStompNAMPathB.GetLength() > 0 && mStompModelB == nullptr && mStagedStompModelB == nullptr)
+    {
+      mShouldRemoveStompModelB = false;
+      _StageStompModel(mStompNAMPathB, 1);
     }
   }
 
@@ -3608,8 +3647,16 @@ void NeuralAmpModeler::OnIdle()
     {
       mShouldRemoveStompModel = false;
       if (mStompModel == nullptr && mStagedStompModel == nullptr)
-        _StageStompModel(mStompNAMPath);
+        _StageStompModel(mStompNAMPath, 0);
       if (mStompModel == nullptr && mStagedStompModel != nullptr)
+        keepSyncPending = true;
+    }
+    if (mStompNAMPathB.GetLength() > 0)
+    {
+      mShouldRemoveStompModelB = false;
+      if (mStompModelB == nullptr && mStagedStompModelB == nullptr)
+        _StageStompModel(mStompNAMPathB, 1);
+      if (mStompModelB == nullptr && mStagedStompModelB != nullptr)
         keepSyncPending = true;
     }
 
@@ -3790,7 +3837,7 @@ void NeuralAmpModeler::_ApplyInputStereoAutoDefaultIfNeeded()
 
 bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 {
-  constexpr int32_t kStateSchemaVersion = 5;
+  constexpr int32_t kStateSchemaVersion = 6;
 
   // If this isn't here when unserializing, then we know we're dealing with something before v0.8.0.
   WDL_String header("###NeuralAmpModeler###"); // Don't change this!
@@ -3808,6 +3855,7 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
     chunk.PutStr(slotPath.Get());
 
   chunk.PutStr(mStompNAMPath.Get());
+  chunk.PutStr(mStompNAMPathB.Get());
   chunk.PutStr(mIRPath.Get());
   chunk.PutStr(mIRPathRight.Get());
   chunk.PutStr(mCabCustomIRPaths[0].Get());
@@ -3852,9 +3900,10 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
 int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 {
-  constexpr int32_t kStateSchemaVersion = 5;
-  constexpr int32_t kPreviousStateSchemaVersion = 4;
-  constexpr int32_t kLegacyStateSchemaVersion = 3;
+  constexpr int32_t kStateSchemaVersion = 6;
+  constexpr int32_t kPreviousStateSchemaVersion = 5;
+  constexpr int32_t kLegacyStateSchemaVersion = 4;
+  constexpr int32_t kOlderLegacyStateSchemaVersion = 3;
   auto markStateRestored = [this]() {
     mStateRestoredFromChunk = true;
     mInputStereoAutoDefaultApplied = true;
@@ -3934,12 +3983,12 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
   if (versionPos < 0)
     return startPos;
 
-  // Current chunk schema (v3): explicit slot paths/states + full parameter payload.
+  // Current chunk schema: explicit slot paths/states + full parameter payload.
   int32_t schemaVersion = 0;
   const int schemaPos = chunk.Get(&schemaVersion, versionPos);
   if (schemaPos >= 0
       && (schemaVersion == kStateSchemaVersion || schemaVersion == kPreviousStateSchemaVersion
-          || schemaVersion == kLegacyStateSchemaVersion))
+          || schemaVersion == kLegacyStateSchemaVersion || schemaVersion == kOlderLegacyStateSchemaVersion))
   {
     int statePos = schemaPos;
 
@@ -3957,6 +4006,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     }
 
     WDL_String stompPath;
+    WDL_String stompPathB;
     WDL_String irLeftPath;
     WDL_String irRightPath;
     WDL_String customIRPathA;
@@ -3964,13 +4014,19 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     statePos = chunk.GetStr(stompPath, statePos);
     if (statePos < 0)
       return startPos;
+    if (schemaVersion >= kStateSchemaVersion)
+    {
+      statePos = chunk.GetStr(stompPathB, statePos);
+      if (statePos < 0)
+        return startPos;
+    }
     statePos = chunk.GetStr(irLeftPath, statePos);
     if (statePos < 0)
       return startPos;
     statePos = chunk.GetStr(irRightPath, statePos);
     if (statePos < 0)
       return startPos;
-    if (schemaVersion == kStateSchemaVersion)
+    if (schemaVersion >= kPreviousStateSchemaVersion)
     {
       statePos = chunk.GetStr(customIRPathA, statePos);
       if (statePos < 0)
@@ -3987,7 +4043,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 
     std::array<bool, static_cast<size_t>(TopNavSection::Count)> bypassed = {};
     const size_t storedBypassCount =
-      (schemaVersion == kLegacyStateSchemaVersion) ? (static_cast<size_t>(TopNavSection::Tuner) + 1) : bypassed.size();
+      (schemaVersion == kOlderLegacyStateSchemaVersion) ? (static_cast<size_t>(TopNavSection::Tuner) + 1) : bypassed.size();
     for (size_t i = 0; i < storedBypassCount; ++i)
     {
       int32_t bypassInt = 0;
@@ -3996,7 +4052,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
         return startPos;
       bypassed[i] = (bypassInt != 0);
     }
-    if (schemaVersion == kLegacyStateSchemaVersion)
+    if (schemaVersion == kOlderLegacyStateSchemaVersion)
       bypassed[static_cast<size_t>(TopNavSection::Eq)] = bypassed[static_cast<size_t>(TopNavSection::Fx)];
 
     std::array<AmpSlotState, 3> slotStates = {};
@@ -4050,7 +4106,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 
     RestoredPresetContext presetContext;
     int restoredPos = paramsPos;
-    if (schemaVersion == kStateSchemaVersion)
+    if (schemaVersion >= kPreviousStateSchemaVersion)
     {
       int32_t presetDirty = 0;
       int32_t defaultPresetActive = 0;
@@ -4078,6 +4134,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
         presetFilePath = EnsureStandalonePresetExtension(std::filesystem::path(presetContext.presetFilePath.Get()));
 
       ResolvePresetRelativeAssetPath(presetFilePath, stompPath);
+      ResolvePresetRelativeAssetPath(presetFilePath, stompPathB);
       ResolvePresetRelativeAssetPath(presetFilePath, irLeftPath);
       ResolvePresetRelativeAssetPath(presetFilePath, irRightPath);
       ResolvePresetRelativeAssetPath(presetFilePath, customIRPathA);
@@ -4090,6 +4147,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     mAmpNAMPaths = ampPaths;
     mNAMPath = mAmpNAMPaths[mAmpSelectorIndex];
     mStompNAMPath = stompPath;
+    mStompNAMPathB = stompPathB;
     mIRPath = irLeftPath;
     mIRPathRight = irRightPath;
     mCabCustomIRPaths[0] = customIRPathA;
@@ -4124,10 +4182,17 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     if (mStompNAMPath.GetLength())
     {
       mShouldRemoveStompModel = false;
-      _StageStompModel(mStompNAMPath);
+      _StageStompModel(mStompNAMPath, 0);
     }
     else
       mShouldRemoveStompModel = true;
+    if (mStompNAMPathB.GetLength())
+    {
+      mShouldRemoveStompModelB = false;
+      _StageStompModel(mStompNAMPathB, 1);
+    }
+    else
+      mShouldRemoveStompModelB = true;
 
     _ApplyCabSlotSource(0, true);
     _ApplyCabSlotSource(1, true);
@@ -4233,6 +4298,14 @@ void NeuralAmpModeler::OnUIOpen()
     if (mStompModel == nullptr && mStagedStompModel == nullptr)
       SendControlMsgFromDelegate(kCtrlTagStompModelFileBrowser, kMsgTagLoadFailed);
   }
+  if (mStompNAMPathB.GetLength())
+  {
+    SendControlMsgFromDelegate(
+      kCtrlTagStompModelFileBrowserB, kMsgTagLoadedStompModel, mStompNAMPathB.GetLength(), mStompNAMPathB.Get());
+    if (mStompModelB == nullptr && mStagedStompModelB == nullptr)
+      SendControlMsgFromDelegate(kCtrlTagStompModelFileBrowserB, kMsgTagLoadFailed);
+  }
+  _RefreshSelectedBoostCapabilityState();
 
   if (GetParam(kCabASource)->Int() == 0 && mCabCustomIRPaths[0].GetLength() == 0 && mIRPath.GetLength() > 0)
     mCabCustomIRPaths[0].Set(mIRPath.Get());
@@ -4311,6 +4384,8 @@ void NeuralAmpModeler::OnUIOpen()
     }
     if (auto* pStompPicker = pGraphics->GetControlWithTag(kCtrlTagStompModelFileBrowser))
       pStompPicker->SetDisabled(!canEditExternalAssets);
+    if (auto* pStompPickerB = pGraphics->GetControlWithTag(kCtrlTagStompModelFileBrowserB))
+      pStompPickerB->SetDisabled(!canEditExternalAssets);
     _RefreshCabControls();
   }
 }
@@ -4359,21 +4434,28 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       case kStompBoostActive:
         if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
           pBoostOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        if (source == kUI && active && (mAmpWorkflowMode != AmpWorkflowMode::Release) && (mStompModel == nullptr)
-            && (mStagedStompModel == nullptr))
+        if (source == kUI && active && (mAmpWorkflowMode != AmpWorkflowMode::Release))
         {
+          const bool useBoostB = GetParam(kStompBoostType)->Bool();
+          const bool selectedBoostLoaded =
+            useBoostB ? ((mStompModelB != nullptr) || (mStagedStompModelB != nullptr))
+                      : ((mStompModel != nullptr) || (mStagedStompModel != nullptr));
+          if (selectedBoostLoaded)
+            break;
+
           WDL_String fileName;
           WDL_String path;
-          if (mStompNAMPath.GetLength())
+          const WDL_String& selectedBoostPath = useBoostB ? mStompNAMPathB : mStompNAMPath;
+          if (selectedBoostPath.GetLength())
           {
-            path.Set(mStompNAMPath.Get());
+            path.Set(selectedBoostPath.Get());
             path.remove_filepart();
           }
           pGraphics->PromptForFile(
-            fileName, path, EFileAction::Open, "nam", [this](const WDL_String& chosenFileName, const WDL_String&) {
+            fileName, path, EFileAction::Open, "nam", [this, useBoostB](const WDL_String& chosenFileName, const WDL_String&) {
               if (chosenFileName.GetLength())
               {
-                const std::string msg = _StageStompModel(chosenFileName);
+                const std::string msg = _StageStompModel(chosenFileName, useBoostB ? 1 : 0);
                 if (msg.size())
                 {
                   std::stringstream ss;
@@ -4393,6 +4475,9 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
               SendParameterValueFromDelegate(kStompBoostActive, GetParam(kStompBoostActive)->GetNormalized(), true);
             });
         }
+        break;
+      case kStompBoostType:
+        _RefreshSelectedBoostCapabilityState();
         break;
       case kFXEQActive:
       {
@@ -4493,7 +4578,9 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
           if (mModelRight == nullptr && activeSlotPath.GetLength())
             _RequestModelLoadForSlot(activeSlotPath, activeSlot, _GetAmpModelCtrlTagForSlot(activeSlot));
           if (mStompModelRight == nullptr && mStompNAMPath.GetLength())
-            _StageStompModel(mStompNAMPath);
+            _StageStompModel(mStompNAMPath, 0);
+          if (mStompModelRightB == nullptr && mStompNAMPathB.GetLength())
+            _StageStompModel(mStompNAMPathB, 1);
           if (mIRChannel2 == nullptr && mIRPath.GetLength())
             _StageIRLeft(mIRPath, false);
           if (mIRRightChannel2 == nullptr && mIRPathRight.GetLength())
@@ -4592,13 +4679,24 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
       return true;
     }
     case kMsgTagClearStompModel:
+    {
       if (mAmpWorkflowMode == AmpWorkflowMode::Release)
         return true;
-      mShouldRemoveStompModel = true;
-      _ClearStompCapabilityState();
-      _RefreshModelCapabilityIndicators();
+      const bool clearingBoostB = (ctrlTag == kCtrlTagStompModelFileBrowserB);
+      if (clearingBoostB)
+        mShouldRemoveStompModelB = true;
+      else
+        mShouldRemoveStompModel = true;
+      if (GetParam(kStompBoostType)->Bool() == clearingBoostB)
+      {
+        _ClearStompCapabilityState();
+        _RefreshModelCapabilityIndicators();
+      }
+      else
+        _RefreshSelectedBoostCapabilityState();
       _MarkStandalonePresetDirty();
       return true;
+    }
     case kMsgTagClearIRLeft:
       mCabCustomIRPaths[0].Set("");
       if (GetParam(kCabASource)->Int() == 0)
@@ -4819,6 +4917,7 @@ bool NeuralAmpModeler::_LoadStandalonePresetFromFile(const WDL_String& filePath)
   }
 
   ResolvePresetRelativeAssetPath(path, mStompNAMPath);
+  ResolvePresetRelativeAssetPath(path, mStompNAMPathB);
   ResolvePresetRelativeAssetPath(path, mIRPath);
   ResolvePresetRelativeAssetPath(path, mIRPathRight);
   ResolvePresetRelativeAssetPath(path, mCabCustomIRPaths[0]);
@@ -4827,7 +4926,12 @@ bool NeuralAmpModeler::_LoadStandalonePresetFromFile(const WDL_String& filePath)
   if (mStompNAMPath.GetLength() > 0 && mStompModel == nullptr && mStagedStompModel == nullptr)
   {
     mShouldRemoveStompModel = false;
-    _StageStompModel(mStompNAMPath);
+    _StageStompModel(mStompNAMPath, 0);
+  }
+  if (mStompNAMPathB.GetLength() > 0 && mStompModelB == nullptr && mStagedStompModelB == nullptr)
+  {
+    mShouldRemoveStompModelB = false;
+    _StageStompModel(mStompNAMPathB, 1);
   }
   _ApplyCabSlotSource(0, true);
   _ApplyCabSlotSource(1, true);
@@ -4878,7 +4982,8 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
     auto setWdlPath = [](WDL_String& target, const std::filesystem::path& path) { target.Set(path.string().c_str()); };
     auto hasAllDefaultFiles = [&](const std::filesystem::path& baseDir) {
       return existsNoThrow(baseDir / "Amp1.nam") && existsNoThrow(baseDir / "Amp2.nam")
-             && existsNoThrow(baseDir / "Amp3.nam") && existsNoThrow(baseDir / "Boost1.nam")
+             && existsNoThrow(baseDir / "Amp3.nam") && existsNoThrow(baseDir / "BoostA.nam")
+             && existsNoThrow(baseDir / "BoostB.nam")
              && existsNoThrow(baseDir / "Cab1.wav");
     };
 
@@ -4902,7 +5007,8 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
         _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
         _SetAmpSlotModelPath(slotIndex, slotModelPath);
       }
-      setWdlPath(mStompNAMPath, defaultsDir / "Boost1.nam");
+      setWdlPath(mStompNAMPath, defaultsDir / "BoostA.nam");
+      setWdlPath(mStompNAMPathB, defaultsDir / "BoostB.nam");
       setWdlPath(mIRPath, defaultsDir / "Cab1.wav");
       mIRPathRight.Set("");
     }
@@ -4963,10 +5069,17 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
   if (mStompNAMPath.GetLength())
   {
     mShouldRemoveStompModel = false;
-    _StageStompModel(mStompNAMPath);
+    _StageStompModel(mStompNAMPath, 0);
   }
   else
     mShouldRemoveStompModel = true;
+  if (mStompNAMPathB.GetLength())
+  {
+    mShouldRemoveStompModelB = false;
+    _StageStompModel(mStompNAMPathB, 1);
+  }
+  else
+    mShouldRemoveStompModelB = true;
   if (GetParam(kCabASource)->Int() == 0 && mCabCustomIRPaths[0].GetLength() == 0 && mIRPath.GetLength() > 0)
     mCabCustomIRPaths[0].Set(mIRPath.Get());
   _ApplyCabSlotSource(0, true);
@@ -5582,7 +5695,7 @@ bool NeuralAmpModeler::_EnsureReleaseAssetManifest()
     ReleaseAmpAssetId::Amp2Main,
     ReleaseAmpAssetId::Amp3Main
   };
-  mReleaseAssetManifest.stomp = ReleaseStompAssetId::Boost1;
+  mReleaseAssetManifest.stomp = ReleaseStompAssetId::BoostA;
   mReleaseAssetManifest.irLeft = ReleaseIRAssetId::Cab1;
   mReleaseAssetManifest.irRight = ReleaseIRAssetId::None;
   mReleaseAssetManifest.rootPath.Set("");
@@ -5613,6 +5726,7 @@ void NeuralAmpModeler::_ApplyReleaseAssetManifestToState()
     _SetAmpSlotReleaseAsset(slotIndex, mReleaseAssetManifest.ampSlots[slotIndex]);
 
   mStompNAMPath = _ResolveReleaseStompAssetPath(mReleaseAssetManifest.stomp);
+  mStompNAMPathB = _ResolveReleaseStompAssetPath(ReleaseStompAssetId::BoostB);
   mIRPath = _ResolveReleaseIRAssetPath(mReleaseAssetManifest.irLeft);
   mIRPathRight = _ResolveReleaseIRAssetPath(mReleaseAssetManifest.irRight);
 }
@@ -6522,11 +6636,22 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   }
   if (mShouldRemoveStompModel.exchange(false, std::memory_order_acq_rel))
   {
-    _ClearStompCapabilityState();
     mStompModel = nullptr;
     mStompModelRight = nullptr;
     if (mStagedStompModel == nullptr && mStagedStompModelRight == nullptr)
       mStompNAMPath.Set("");
+    if (!GetParam(kStompBoostType)->Bool())
+      _ClearStompCapabilityState();
+    _UpdateLatency();
+  }
+  if (mShouldRemoveStompModelB.exchange(false, std::memory_order_acq_rel))
+  {
+    mStompModelB = nullptr;
+    mStompModelRightB = nullptr;
+    if (mStagedStompModelB == nullptr && mStagedStompModelRightB == nullptr)
+      mStompNAMPathB.Set("");
+    if (GetParam(kStompBoostType)->Bool())
+      _ClearStompCapabilityState();
     _UpdateLatency();
   }
   if (mShouldRemoveIRLeft.exchange(false, std::memory_order_acq_rel))
@@ -6612,7 +6737,18 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStagedStompModel = nullptr;
     mStompModelRight = std::move(mStagedStompModelRight);
     mStagedStompModelRight = nullptr;
-    _SetStompCapabilityState(mStompModel->HasLoudness(), mStompModel->HasOutputLevel());
+    if (!GetParam(kStompBoostType)->Bool())
+      _SetStompCapabilityState(mStompModel->HasLoudness(), mStompModel->HasOutputLevel());
+    _UpdateLatency();
+  }
+  if (mStagedStompModelB != nullptr && (!inputStereoMode || mStagedStompModelRightB != nullptr))
+  {
+    mStompModelB = std::move(mStagedStompModelB);
+    mStagedStompModelB = nullptr;
+    mStompModelRightB = std::move(mStagedStompModelRightB);
+    mStagedStompModelRightB = nullptr;
+    if (GetParam(kStompBoostType)->Bool())
+      _SetStompCapabilityState(mStompModelB->HasLoudness(), mStompModelB->HasOutputLevel());
     _UpdateLatency();
   }
   if (mStagedIR != nullptr && (!inputStereoMode || mStagedIRChannel2 != nullptr))
@@ -6738,6 +6874,22 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
   else if (mStompModelRight != nullptr)
   {
     mStompModelRight->Reset(sampleRate, maxBlockSize);
+  }
+  if (mStagedStompModelB != nullptr)
+  {
+    mStagedStompModelB->Reset(sampleRate, maxBlockSize);
+  }
+  else if (mStompModelB != nullptr)
+  {
+    mStompModelB->Reset(sampleRate, maxBlockSize);
+  }
+  if (mStagedStompModelRightB != nullptr)
+  {
+    mStagedStompModelRightB->Reset(sampleRate, maxBlockSize);
+  }
+  else if (mStompModelRightB != nullptr)
+  {
+    mStompModelRightB->Reset(sampleRate, maxBlockSize);
   }
 
   // IR
@@ -7061,9 +7213,14 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
   return "";
 }
 
-std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
+std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath, int boostSlot)
 {
-  WDL_String previousNAMPath = mStompNAMPath;
+  boostSlot = std::clamp(boostSlot, 0, 1);
+  WDL_String& targetNAMPath = (boostSlot == 0) ? mStompNAMPath : mStompNAMPathB;
+  auto& targetStagedModel = (boostSlot == 0) ? mStagedStompModel : mStagedStompModelB;
+  auto& targetStagedModelRight = (boostSlot == 0) ? mStagedStompModelRight : mStagedStompModelRightB;
+  const int targetCtrlTag = (boostSlot == 0) ? kCtrlTagStompModelFileBrowser : kCtrlTagStompModelFileBrowserB;
+  WDL_String previousNAMPath = targetNAMPath;
   try
   {
     auto dspPath = std::filesystem::u8path(modelPath.Get());
@@ -7076,32 +7233,24 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath)
 
     auto stagedStompModel = loadResampledStompModel();
     auto stagedStompModelRight = loadResampledStompModel();
-    const bool hasLoudness = (stagedStompModel != nullptr) && stagedStompModel->HasLoudness();
-    const bool hasCalibration = (stagedStompModel != nullptr) && stagedStompModel->HasOutputLevel();
     // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
-    mStagedStompModelRight = std::move(stagedStompModelRight);
-    mStagedStompModel = std::move(stagedStompModel);
-    _SetStompCapabilityState(hasLoudness, hasCalibration);
-    _RefreshModelCapabilityIndicators();
-    mStompNAMPath = modelPath;
-    SendControlMsgFromDelegate(
-      kCtrlTagStompModelFileBrowser, kMsgTagLoadedStompModel, mStompNAMPath.GetLength(), mStompNAMPath.Get());
+    targetStagedModelRight = std::move(stagedStompModelRight);
+    targetStagedModel = std::move(stagedStompModel);
+    targetNAMPath = modelPath;
+    _RefreshSelectedBoostCapabilityState();
+    SendControlMsgFromDelegate(targetCtrlTag, kMsgTagLoadedStompModel, targetNAMPath.GetLength(), targetNAMPath.Get());
   }
   catch (std::runtime_error& e)
   {
-    SendControlMsgFromDelegate(kCtrlTagStompModelFileBrowser, kMsgTagLoadFailed);
+    SendControlMsgFromDelegate(targetCtrlTag, kMsgTagLoadFailed);
 
-    if (mStagedStompModel != nullptr)
-      mStagedStompModel = nullptr;
-    if (mStagedStompModelRight != nullptr)
-      mStagedStompModelRight = nullptr;
+    if (targetStagedModel != nullptr)
+      targetStagedModel = nullptr;
+    if (targetStagedModelRight != nullptr)
+      targetStagedModelRight = nullptr;
 
-    if (mStompModel != nullptr)
-      _SetStompCapabilityState(mStompModel->HasLoudness(), mStompModel->HasOutputLevel());
-    else
-      _ClearStompCapabilityState();
-    _RefreshModelCapabilityIndicators();
-    mStompNAMPath = previousNAMPath;
+    _RefreshSelectedBoostCapabilityState();
+    targetNAMPath = previousNAMPath;
     std::cerr << "Failed to read stomp DSP module" << std::endl;
     std::cerr << e.what() << std::endl;
     return e.what();
@@ -7580,6 +7729,19 @@ void NeuralAmpModeler::_ClearStompCapabilityState()
   _SetStompCapabilityState(false, false);
 }
 
+void NeuralAmpModeler::_RefreshSelectedBoostCapabilityState()
+{
+  const bool useBoostB = GetParam(kStompBoostType)->Bool();
+  ResamplingNAM* const selectedLiveModel = useBoostB ? mStompModelB.get() : mStompModel.get();
+  ResamplingNAM* const selectedStagedModel = useBoostB ? mStagedStompModelB.get() : mStagedStompModel.get();
+  ResamplingNAM* const selectedModel = (selectedStagedModel != nullptr) ? selectedStagedModel : selectedLiveModel;
+  if (selectedModel != nullptr)
+    _SetStompCapabilityState(selectedModel->HasLoudness(), selectedModel->HasOutputLevel());
+  else
+    _ClearStompCapabilityState();
+  _RefreshModelCapabilityIndicators();
+}
+
 void NeuralAmpModeler::_RefreshModelCapabilityIndicators()
 {
   if (auto* pGraphics = GetUI())
@@ -7608,10 +7770,9 @@ void NeuralAmpModeler::_UpdateLatency()
   {
     latency += mModel->GetLatency();
   }
-  if (mStompModel)
-  {
-    latency += mStompModel->GetLatency();
-  }
+  const int stompLatencyA = (mStompModel != nullptr) ? mStompModel->GetLatency() : 0;
+  const int stompLatencyB = (mStompModelB != nullptr) ? mStompModelB->GetLatency() : 0;
+  latency += std::max(stompLatencyA, stompLatencyB);
   // Other things that add latency here...
 
   // Feels weird to have to do this.

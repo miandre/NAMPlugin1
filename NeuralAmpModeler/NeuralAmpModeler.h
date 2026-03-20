@@ -131,6 +131,7 @@ enum EParams
   kStompCompressorHard,
   kStompCompressorActive,
   kStompBoostDrive,
+  kStompBoostType,
   kNumParams
 };
 
@@ -166,6 +167,7 @@ enum ECtrlTags
   kCtrlTagPresetLabel,
   kCtrlTagMainBackground,
   kCtrlTagStompModelFileBrowser,
+  kCtrlTagStompModelFileBrowserB,
   kCtrlTagGateOnLED,
   kCtrlTagBoostOnLED,
   kCtrlTagCompressorOnLED,
@@ -398,7 +400,8 @@ private:
   enum class ReleaseStompAssetId : int
   {
     None = 0,
-    Boost1,
+    BoostA,
+    BoostB,
     Count
   };
 
@@ -417,7 +420,7 @@ private:
       ReleaseAmpAssetId::Amp2Main,
       ReleaseAmpAssetId::Amp3Main
     };
-    ReleaseStompAssetId stomp = ReleaseStompAssetId::Boost1;
+    ReleaseStompAssetId stomp = ReleaseStompAssetId::BoostA;
     ReleaseIRAssetId irLeft = ReleaseIRAssetId::Cab1;
     ReleaseIRAssetId irRight = ReleaseIRAssetId::None;
     WDL_String rootPath;
@@ -447,7 +450,7 @@ private:
   // Loads left cab IR and stores it to mStagedIR.
   // Return status code so that error messages can be relayed if
   // it wasn't successful.
-  std::string _StageStompModel(const WDL_String& dspFile);
+  std::string _StageStompModel(const WDL_String& dspFile, int boostSlot = 0);
   // Loads left cab IR and stores it to mStagedIR.
   // Return status code so that error messages can be relayed if
   // it wasn't successful.
@@ -495,6 +498,7 @@ private:
   void _ClearAmpSlotCapabilityState(int slotIndex);
   void _SetStompCapabilityState(bool hasLoudness, bool hasCalibration);
   void _ClearStompCapabilityState();
+  void _RefreshSelectedBoostCapabilityState();
   // Top icon-strip state handling
   void _SetTopNavActiveSection(TopNavSection section);
   void _ToggleTopNavSectionBypass(TopNavSection section);
@@ -590,6 +594,8 @@ private:
   std::unique_ptr<ResamplingNAM> mStompModel;
   // Plugin stereo core: right-channel stomp model instance (independent state).
   std::unique_ptr<ResamplingNAM> mStompModelRight;
+  std::unique_ptr<ResamplingNAM> mStompModelB;
+  std::unique_ptr<ResamplingNAM> mStompModelRightB;
   // And the IR
   std::unique_ptr<dsp::ImpulseResponse> mIR;
   // Stereo core: right-channel state for left IR.
@@ -606,6 +612,8 @@ private:
   std::unique_ptr<ResamplingNAM> mStagedModelRight;
   std::unique_ptr<ResamplingNAM> mStagedStompModel;
   std::unique_ptr<ResamplingNAM> mStagedStompModelRight;
+  std::unique_ptr<ResamplingNAM> mStagedStompModelB;
+  std::unique_ptr<ResamplingNAM> mStagedStompModelRightB;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIR;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRChannel2;
   std::unique_ptr<dsp::ImpulseResponse> mStagedIRRight;
@@ -622,6 +630,7 @@ private:
   std::atomic<bool> mShouldRemoveModel = false;
   std::array<std::atomic<bool>, 3> mShouldRemoveModelSlot;
   std::atomic<bool> mShouldRemoveStompModel = false;
+  std::atomic<bool> mShouldRemoveStompModelB = false;
   std::atomic<bool> mShouldRemoveIRLeft = false;
   std::atomic<bool> mShouldRemoveIRRight = false;
   std::atomic<bool> mShouldRemoveCabBIRPrimary = false;
@@ -799,6 +808,7 @@ private:
   WDL_String mNAMPath;
   std::array<WDL_String, 3> mAmpNAMPaths;
   WDL_String mStompNAMPath;
+  WDL_String mStompNAMPathB;
   // Path to IR (.wav file)
   WDL_String mIRPath;
   WDL_String mIRPathRight;
