@@ -939,6 +939,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
   GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
   GetParam(kStompBoostActive)->InitBool("BoostActive", false);
+  GetParam(kStompCompressorAmount)->InitDouble("Comp", 0.0, 0.0, 100.0, 0.1, "%");
+  GetParam(kStompCompressorLevel)->InitGain("Comp Level", 0.0, -18.0, 24.0, 0.1);
+  GetParam(kStompCompressorHard)->InitBool("Comp Hard", false);
+  GetParam(kStompCompressorHard)->SetDisplayText(0.0, "Soft");
+  GetParam(kStompCompressorHard)->SetDisplayText(1.0, "Hard");
+  GetParam(kStompCompressorActive)->InitBool("Comp Active", false);
   GetParam(kFXEQActive)->InitBool("FX EQ", false);
   GetParam(kFXEQBand31Hz)->InitDouble("FX EQ 31Hz", 0.0, -12.0, 12.0, 0.1, "dB");
   GetParam(kFXEQBand62Hz)->InitDouble("FX EQ 62Hz", 0.0, -12.0, 12.0, 0.1, "dB");
@@ -1124,10 +1130,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto eqFaderKnobBitmap = pGraphics->LoadBitmap(EQFADERKNOB_FN);
     const auto stompButtonUpBitmap = pGraphics->LoadBitmap(STOMPBUTTONUP_FN);
     const auto stompButtonDownBitmap = pGraphics->LoadBitmap(STOMPBUTTONDOWN_FN);
+    const auto greenLedOnBitmap = pGraphics->LoadBitmap(GREENLEDON_FN);
+    const auto greenLedOffBitmap = pGraphics->LoadBitmap(GREENLEDOFF_FN);
     const auto redLedOnBitmap = pGraphics->LoadBitmap(REDLEDON_FN);
     const auto redLedOffBitmap = pGraphics->LoadBitmap(REDLEDOFF_FN);
     const auto smallOnOffOffBitmap = pGraphics->LoadBitmap(SMALLONOFF_OFF_FN);
     const auto smallOnOffOnBitmap = pGraphics->LoadBitmap(SMALLONOFF_ON_FN);
+    const auto horizonalSwitchLeftBitmap = pGraphics->LoadBitmap(HORIZONALSWITCH_L_FN);
+    const auto horizonalSwitchRightBitmap = pGraphics->LoadBitmap(HORIZONALSWITCH_R_FN);
 
     // Top/section icons are SVG-only now.
 
@@ -1173,6 +1183,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       return IRECT(centerX - knobWidth * 0.5f, topY, centerX + knobWidth * 0.5f, topY + NAM_KNOB_HEIGHT);
     };
     constexpr float kPedalKnobScale = 0.15f;
+    constexpr float kCompressorPedalKnobScale = kPedalKnobScale * 1.2f;
     auto makePedalKnobArea = [&](const float centerX, const float centerY) {
       const float w = pedalKnobBitmap.IsValid() ? static_cast<float>(pedalKnobBitmap.W()) * kPedalKnobScale : knobWidth;
       const float h = pedalKnobBitmap.IsValid() ? static_cast<float>(pedalKnobBitmap.H()) * kPedalKnobScale : knobWidth;
@@ -1269,21 +1280,41 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     constexpr float kStompButtonAnchorOffsetY = 0.0f;
     const auto designToUIX = [&](const float x) { return b.L + (x / kDesignW) * b.W(); };
     const auto designToUIY = [&](const float y) { return b.T + kBackgroundOffsetY + (y / kDesignH) * b.H(); };
-    const float stompBoostLevelX = designToUIX(1975.0f);
-    const float stompKnobY = designToUIY(975.0f) + kStompKnobAnchorOffsetY;
-    const float stompBoostSwitchX = designToUIX(1976.0f);
-    const float stompSwitchY = designToUIY(1476.0f) + kStompButtonAnchorOffsetY;
+    const float stompCompressorAmountX = designToUIX(895.0f);
+    const float stompCompressorLevelX = designToUIX(1225.0f);
+    const float stompCompressorToggleX = designToUIX(1049.0f);
+    const float stompCompressorToggleY = designToUIY(1111.0f) + kStompButtonAnchorOffsetY;
+    const float stompCompressorSwitchX = designToUIX(1052.0f);
+    const float stompCompressorSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
+    const float stompBoostLevelX = designToUIX(2225.0f);
+    const float stompKnobY = designToUIY(890.0f) + kStompKnobAnchorOffsetY;
+    const float stompBoostSwitchX = designToUIX(2049.0f);
+    const float stompSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
+    const auto stompCompressorAmountArea = makePedalKnobArea(stompCompressorAmountX, stompKnobY);
+    const auto stompCompressorLevelArea = makePedalKnobArea(stompCompressorLevelX, stompKnobY);
     const auto stompBoostLevelArea = makePedalKnobArea(stompBoostLevelX, stompKnobY);
-    const float stompButtonScale = 0.15f;
+    const float stompButtonScale = 0.6f;
     const float stompButtonW =
       stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.W()) * stompButtonScale : 46.0f;
     const float stompButtonH =
       stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.H()) * stompButtonScale : 30.0f;
+    const auto stompCompressorToggleArea =
+      IRECT(stompCompressorToggleX - 30.0f, stompCompressorToggleY - 40.0f, stompCompressorToggleX + 30.0f, stompCompressorToggleY + 10.0f);
+    const auto stompCompressorSwitchArea =
+      IRECT(stompCompressorSwitchX - 0.5f * stompButtonW,
+            stompCompressorSwitchY - 0.5f * stompButtonH,
+            stompCompressorSwitchX + 0.5f * stompButtonW,
+            stompCompressorSwitchY + 0.5f * stompButtonH);
+    const auto stompCompressorOnLedArea =
+      IRECT(stompCompressorSwitchArea.MW() - 10.0f,
+            stompCompressorSwitchArea.T - 40.0f,
+            stompCompressorSwitchArea.MW() + 10.0f,
+            stompCompressorSwitchArea.T - 20.0f);
     const auto stompBoostSwitchArea =
       IRECT(stompBoostSwitchX - 0.5f * stompButtonW, stompSwitchY - 0.5f * stompButtonH, stompBoostSwitchX + 0.5f * stompButtonW,
             stompSwitchY + 0.5f * stompButtonH);
-    const auto stompBoostOnLedArea = IRECT(stompBoostSwitchArea.MW() - 7.0f, stompBoostSwitchArea.B + 11.0f,
-                                           stompBoostSwitchArea.MW() + 7.0f, stompBoostSwitchArea.B + 25.0f);
+    const auto stompBoostOnLedArea = IRECT(stompBoostSwitchArea.MW() - 10.0f, stompBoostSwitchArea.T - 280.0f,
+                                           stompBoostSwitchArea.MW() + 10.0f, stompBoostSwitchArea.T - 260.0f);
     // FX section coordinates come from the same 3x design canvas used by the stomp section.
     constexpr float kFXEqSliderW = 14.0f;
     constexpr float kFXEqSliderH = 150.0f;
@@ -1976,6 +2007,20 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new NAMOutlinedLEDControl(topGateAttenuationLedArea),
                              kCtrlTagNoiseGateLED);
     pGraphics->AttachControl(
+      new NAMMomentaryBitmapButtonControl(stompCompressorSwitchArea, kStompCompressorActive, stompButtonUpBitmap, stompButtonDownBitmap),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Compressor on/off.");
+    pGraphics->AttachControl(
+      new NAMBitmapLEDControl(stompCompressorOnLedArea, greenLedOnBitmap, greenLedOffBitmap),
+      kCtrlTagCompressorOnLED,
+      "STOMP_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMBitmapToggleControl(stompCompressorToggleArea, kStompCompressorHard, horizonalSwitchLeftBitmap, horizonalSwitchRightBitmap),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Compressor voice: Soft / Hard.");
+    pGraphics->AttachControl(
       new NAMMomentaryBitmapButtonControl(stompBoostSwitchArea, kStompBoostActive, stompButtonUpBitmap, stompButtonDownBitmap),
       -1,
       "STOMP_CONTROLS");
@@ -2066,6 +2111,32 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(
       new NAMMiniSliderToggleControl(topDoubleSwitchArea, kVirtualDoubleActive, kTopDoubleSwitchVisualWidth, kTopDoubleSwitchVisualHeight))
       ->SetTooltip("Virtual double on/off");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(stompCompressorAmountArea,
+                              kStompCompressorAmount,
+                              "",
+                              fxKnobNoLabelStyle,
+                              pedalKnobBitmap,
+                              pedalKnobShadowBitmap,
+                              kCompressorPedalKnobScale,
+                              8.0f,
+                              -5.0f),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Compressor amount.");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(stompCompressorLevelArea,
+                              kStompCompressorLevel,
+                              "",
+                              fxKnobNoLabelStyle,
+                              pedalKnobBitmap,
+                              pedalKnobShadowBitmap,
+                              kCompressorPedalKnobScale,
+                              8.0f,
+                              -5.0f),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Compressor output level.");
     pGraphics->AttachControl(
       new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "LEVEL", utilityStyle, pedalKnobBitmap,
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
@@ -3597,6 +3668,8 @@ void NeuralAmpModeler::OnIdle()
 
   if (auto* pGraphics = GetUI())
   {
+    if (auto* pCompressorOnLED = pGraphics->GetControlWithTag(kCtrlTagCompressorOnLED))
+      pCompressorOnLED->SetValueFromDelegate(GetParam(kStompCompressorActive)->Bool() ? 1.0 : 0.0, 0);
     if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
       pBoostOnLED->SetValueFromDelegate(GetParam(kStompBoostActive)->Bool() ? 1.0 : 0.0, 0);
   }
@@ -4344,6 +4417,10 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       case kNoiseGateActive:
         if (auto* pGateControl = pGraphics->GetControlWithParamIdx(kNoiseGateThreshold))
           pGateControl->SetDisabled(!active);
+        break;
+      case kStompCompressorActive:
+        if (auto* pCompressorOnLED = pGraphics->GetControlWithTag(kCtrlTagCompressorOnLED))
+          pCompressorOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
         break;
       case kInputStereoMode:
         if (active)

@@ -126,6 +126,10 @@ enum EParams
   kCabBPosition,
   kCabBLevel,
   kCabBPan,
+  kStompCompressorAmount,
+  kStompCompressorLevel,
+  kStompCompressorHard,
+  kStompCompressorActive,
   kNumParams
 };
 
@@ -163,6 +167,7 @@ enum ECtrlTags
   kCtrlTagStompModelFileBrowser,
   kCtrlTagGateOnLED,
   kCtrlTagBoostOnLED,
+  kCtrlTagCompressorOnLED,
   kCtrlTagFXEQOnLED,
   kCtrlTagFXDelayOnLED,
   kCtrlTagFXReverbOnLED,
@@ -461,7 +466,6 @@ private:
   void _SetInputGain();
   void _SetOutputGain();
   void _SetMasterGain();
-
   // See: Unserialization.cpp
   void _UnserializeApplyConfig(nlohmann::json& config);
   // 0.7.9 and later
@@ -551,7 +555,6 @@ private:
   double mInputGain = 1.0;
   double mOutputGain = 1.0;
   double mMasterGain = 1.0;
-
   // Noise gates
   dsp::noise_gate::Trigger mNoiseGateTrigger;
   dsp::noise_gate::Gain mNoiseGateGain;
