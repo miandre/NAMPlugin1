@@ -135,6 +135,8 @@
 #define REDLEDOFF_FN "Hardware/RedLedOff.png"
 #define SMALLONOFF_OFF_FN "Hardware/SmallOnOff_OFF.png"
 #define SMALLONOFF_ON_FN "Hardware/SmallOnOff_ON.png"
+#define HORIZONALSWITCH_L_FN "Hardware/HorizonalSwitch_L.png"
+#define HORIZONALSWITCH_R_FN "Hardware/HorizonalSwitch_R.png"
 #define AP_KNOP_OFFSET 23.0f
 #define AMP1SWITCH_OFF_FN "Hardware/Amp1Switch_OFF.png"
 #define AMP1SWITCH_ON_FN "Hardware/Amp1Switch_ON.png"

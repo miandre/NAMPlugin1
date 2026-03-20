@@ -126,6 +126,10 @@ enum EParams
   kCabBPosition,
   kCabBLevel,
   kCabBPan,
+  kStompCompressorAmount,
+  kStompCompressorLevel,
+  kStompCompressorHard,
+  kStompCompressorActive,
   kNumParams
 };
 
@@ -163,6 +167,7 @@ enum ECtrlTags
   kCtrlTagStompModelFileBrowser,
   kCtrlTagGateOnLED,
   kCtrlTagBoostOnLED,
+  kCtrlTagCompressorOnLED,
   kCtrlTagFXEQOnLED,
   kCtrlTagFXDelayOnLED,
   kCtrlTagFXReverbOnLED,
@@ -341,6 +346,16 @@ private:
     double master = 5.0;
   };
 
+  struct BuiltInCompressorState
+  {
+    double sampleRate = 48000.0; //Default
+    double controlSmoothCoeff = 0.0;
+    double smoothedAmount = 0.0;
+    double smoothedLevelGain = 1.0;
+    double smoothedHardness = 0.0;
+    std::array<double, kNumChannelsInternal> detectorEnvelope = {0.0, 0.0};
+  };
+
   enum class TopNavSection : int
   {
     Amp = 0,
@@ -461,6 +476,8 @@ private:
   void _SetInputGain();
   void _SetOutputGain();
   void _SetMasterGain();
+  void _ResetBuiltInCompressor(double sampleRate);
+  void _ProcessBuiltInCompressor(iplug::sample** inputs, iplug::sample** outputs, size_t numChannels, size_t numFrames);
 
   // See: Unserialization.cpp
   void _UnserializeApplyConfig(nlohmann::json& config);
@@ -551,6 +568,7 @@ private:
   double mInputGain = 1.0;
   double mOutputGain = 1.0;
   double mMasterGain = 1.0;
+  BuiltInCompressorState mBuiltInCompressor;
 
   // Noise gates
   dsp::noise_gate::Trigger mNoiseGateTrigger;

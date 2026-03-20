@@ -349,6 +349,27 @@ NoiseGateMacroParams GetNoiseGateMacroParams(const double gateAmountPercent)
   return params;
 }
 
+double ComputeCompressorGainReductionDb(const double detectorDb, const double thresholdDb, const double ratio,
+                                        const double kneeDb)
+{
+  if (ratio <= 1.0)
+    return 0.0;
+
+  const double overDb = detectorDb - thresholdDb;
+  const double slope = 1.0 - 1.0 / ratio;
+  if (kneeDb <= 0.0)
+    return (overDb > 0.0) ? (slope * overDb) : 0.0;
+
+  const double halfKneeDb = 0.5 * kneeDb;
+  if (overDb <= -halfKneeDb)
+    return 0.0;
+  if (overDb >= halfKneeDb)
+    return slope * overDb;
+
+  const double kneePositionDb = overDb + halfKneeDb;
+  return slope * kneePositionDb * kneePositionDb / (2.0 * kneeDb);
+}
+
 std::vector<std::filesystem::path> GetReleaseAssetCandidateDirs(const char* bundleId)
 {
   std::vector<std::filesystem::path> candidateDirs = {
@@ -939,6 +960,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
   GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
   GetParam(kStompBoostActive)->InitBool("BoostActive", false);
+  GetParam(kStompCompressorAmount)->InitDouble("Comp", 0.0, 0.0, 100.0, 0.1, "%");
+  GetParam(kStompCompressorLevel)->InitGain("Comp Level", 0.0, -18.0, 24.0, 0.1);
+  GetParam(kStompCompressorHard)->InitBool("Comp Hard", false);
+  GetParam(kStompCompressorHard)->SetDisplayText(0.0, "Soft");
+  GetParam(kStompCompressorHard)->SetDisplayText(1.0, "Hard");
+  GetParam(kStompCompressorActive)->InitBool("Comp Active", false);
   GetParam(kFXEQActive)->InitBool("FX EQ", false);
   GetParam(kFXEQBand31Hz)->InitDouble("FX EQ 31Hz", 0.0, -12.0, 12.0, 0.1, "dB");
   GetParam(kFXEQBand62Hz)->InitDouble("FX EQ 62Hz", 0.0, -12.0, 12.0, 0.1, "dB");
@@ -1124,10 +1151,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto eqFaderKnobBitmap = pGraphics->LoadBitmap(EQFADERKNOB_FN);
     const auto stompButtonUpBitmap = pGraphics->LoadBitmap(STOMPBUTTONUP_FN);
     const auto stompButtonDownBitmap = pGraphics->LoadBitmap(STOMPBUTTONDOWN_FN);
+    const auto greenLedOnBitmap = pGraphics->LoadBitmap(GREENLEDON_FN);
+    const auto greenLedOffBitmap = pGraphics->LoadBitmap(GREENLEDOFF_FN);
     const auto redLedOnBitmap = pGraphics->LoadBitmap(REDLEDON_FN);
     const auto redLedOffBitmap = pGraphics->LoadBitmap(REDLEDOFF_FN);
     const auto smallOnOffOffBitmap = pGraphics->LoadBitmap(SMALLONOFF_OFF_FN);
     const auto smallOnOffOnBitmap = pGraphics->LoadBitmap(SMALLONOFF_ON_FN);
+    const auto horizonalSwitchLeftBitmap = pGraphics->LoadBitmap(HORIZONALSWITCH_L_FN);
+    const auto horizonalSwitchRightBitmap = pGraphics->LoadBitmap(HORIZONALSWITCH_R_FN);
 
     // Top/section icons are SVG-only now.
 
@@ -1173,6 +1204,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       return IRECT(centerX - knobWidth * 0.5f, topY, centerX + knobWidth * 0.5f, topY + NAM_KNOB_HEIGHT);
     };
     constexpr float kPedalKnobScale = 0.15f;
+    constexpr float kCompressorPedalKnobScale = kPedalKnobScale * 1.2f;
     auto makePedalKnobArea = [&](const float centerX, const float centerY) {
       const float w = pedalKnobBitmap.IsValid() ? static_cast<float>(pedalKnobBitmap.W()) * kPedalKnobScale : knobWidth;
       const float h = pedalKnobBitmap.IsValid() ? static_cast<float>(pedalKnobBitmap.H()) * kPedalKnobScale : knobWidth;
@@ -1269,21 +1301,41 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     constexpr float kStompButtonAnchorOffsetY = 0.0f;
     const auto designToUIX = [&](const float x) { return b.L + (x / kDesignW) * b.W(); };
     const auto designToUIY = [&](const float y) { return b.T + kBackgroundOffsetY + (y / kDesignH) * b.H(); };
-    const float stompBoostLevelX = designToUIX(1975.0f);
-    const float stompKnobY = designToUIY(975.0f) + kStompKnobAnchorOffsetY;
-    const float stompBoostSwitchX = designToUIX(1976.0f);
-    const float stompSwitchY = designToUIY(1476.0f) + kStompButtonAnchorOffsetY;
+    const float stompCompressorAmountX = designToUIX(895.0f);
+    const float stompCompressorLevelX = designToUIX(1225.0f);
+    const float stompCompressorToggleX = designToUIX(1049.0f);
+    const float stompCompressorToggleY = designToUIY(1111.0f) + kStompButtonAnchorOffsetY;
+    const float stompCompressorSwitchX = designToUIX(1052.0f);
+    const float stompCompressorSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
+    const float stompBoostLevelX = designToUIX(2225.0f);
+    const float stompKnobY = designToUIY(890.0f) + kStompKnobAnchorOffsetY;
+    const float stompBoostSwitchX = designToUIX(2049.0f);
+    const float stompSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
+    const auto stompCompressorAmountArea = makePedalKnobArea(stompCompressorAmountX, stompKnobY);
+    const auto stompCompressorLevelArea = makePedalKnobArea(stompCompressorLevelX, stompKnobY);
     const auto stompBoostLevelArea = makePedalKnobArea(stompBoostLevelX, stompKnobY);
-    const float stompButtonScale = 0.15f;
+    const float stompButtonScale = 0.6f;
     const float stompButtonW =
       stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.W()) * stompButtonScale : 46.0f;
     const float stompButtonH =
       stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.H()) * stompButtonScale : 30.0f;
+    const auto stompCompressorToggleArea =
+      IRECT(stompCompressorToggleX - 30.0f, stompCompressorToggleY - 40.0f, stompCompressorToggleX + 30.0f, stompCompressorToggleY + 10.0f);
+    const auto stompCompressorSwitchArea =
+      IRECT(stompCompressorSwitchX - 0.5f * stompButtonW,
+            stompCompressorSwitchY - 0.5f * stompButtonH,
+            stompCompressorSwitchX + 0.5f * stompButtonW,
+            stompCompressorSwitchY + 0.5f * stompButtonH);
+    const auto stompCompressorOnLedArea =
+      IRECT(stompCompressorSwitchArea.MW() - 10.0f,
+            stompCompressorSwitchArea.T - 40.0f,
+            stompCompressorSwitchArea.MW() + 10.0f,
+            stompCompressorSwitchArea.T - 20.0f);
     const auto stompBoostSwitchArea =
       IRECT(stompBoostSwitchX - 0.5f * stompButtonW, stompSwitchY - 0.5f * stompButtonH, stompBoostSwitchX + 0.5f * stompButtonW,
             stompSwitchY + 0.5f * stompButtonH);
-    const auto stompBoostOnLedArea = IRECT(stompBoostSwitchArea.MW() - 7.0f, stompBoostSwitchArea.B + 11.0f,
-                                           stompBoostSwitchArea.MW() + 7.0f, stompBoostSwitchArea.B + 25.0f);
+    const auto stompBoostOnLedArea = IRECT(stompBoostSwitchArea.MW() - 10.0f, stompBoostSwitchArea.T - 280.0f,
+                                           stompBoostSwitchArea.MW() + 10.0f, stompBoostSwitchArea.T - 260.0f);
     // FX section coordinates come from the same 3x design canvas used by the stomp section.
     constexpr float kFXEqSliderW = 14.0f;
     constexpr float kFXEqSliderH = 150.0f;
@@ -1976,6 +2028,20 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(new NAMOutlinedLEDControl(topGateAttenuationLedArea),
                              kCtrlTagNoiseGateLED);
     pGraphics->AttachControl(
+      new NAMMomentaryBitmapButtonControl(stompCompressorSwitchArea, kStompCompressorActive, stompButtonUpBitmap, stompButtonDownBitmap),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Compressor on/off.");
+    pGraphics->AttachControl(
+      new NAMBitmapLEDControl(stompCompressorOnLedArea, greenLedOnBitmap, greenLedOffBitmap),
+      kCtrlTagCompressorOnLED,
+      "STOMP_CONTROLS");
+    pGraphics->AttachControl(
+      new NAMBitmapToggleControl(stompCompressorToggleArea, kStompCompressorHard, horizonalSwitchLeftBitmap, horizonalSwitchRightBitmap),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Compressor voice: Soft / Hard.");
+    pGraphics->AttachControl(
       new NAMMomentaryBitmapButtonControl(stompBoostSwitchArea, kStompBoostActive, stompButtonUpBitmap, stompButtonDownBitmap),
       -1,
       "STOMP_CONTROLS");
@@ -2066,6 +2132,32 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(
       new NAMMiniSliderToggleControl(topDoubleSwitchArea, kVirtualDoubleActive, kTopDoubleSwitchVisualWidth, kTopDoubleSwitchVisualHeight))
       ->SetTooltip("Virtual double on/off");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(stompCompressorAmountArea,
+                              kStompCompressorAmount,
+                              "",
+                              fxKnobNoLabelStyle,
+                              pedalKnobBitmap,
+                              pedalKnobShadowBitmap,
+                              kCompressorPedalKnobScale,
+                              8.0f,
+                              -5.0f),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Compressor amount.");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(stompCompressorLevelArea,
+                              kStompCompressorLevel,
+                              "",
+                              fxKnobNoLabelStyle,
+                              pedalKnobBitmap,
+                              pedalKnobShadowBitmap,
+                              kCompressorPedalKnobScale,
+                              8.0f,
+                              -5.0f),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Compressor output level.");
     pGraphics->AttachControl(
       new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "LEVEL", utilityStyle, pedalKnobBitmap,
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
@@ -2547,6 +2639,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool cabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
   const bool haveStereoStomp = (mStompModel != nullptr) && (mStompModelRight != nullptr);
+  const bool compressorEnabled = GetParam(kStompCompressorActive)->Bool() && !stompBypassed;
   const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed
                             && ((numChannelsMonoCore == 1) ? (mStompModel != nullptr) : haveStereoStomp);
   const bool toneStackActive = GetParam(kEQActive)->Value() && !ampBypassed;
@@ -2669,6 +2762,13 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       mStereoSideActiveCandidateSamples[c] = 0;
       mStereoSideResumeDeClickSamplesRemaining[c] = 0;
     }
+  }
+
+  if (compressorEnabled)
+  {
+    sample** compressorOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
+    _ProcessBuiltInCompressor(modelInputPointers, compressorOutPointers, numChannelsMonoCore, nFrames);
+    modelInputPointers = compressorOutPointers;
   }
 
   if (boostEnabled)
@@ -3243,6 +3343,7 @@ void NeuralAmpModeler::OnReset()
   _ResetModelAndIR(sampleRate, GetBlockSize());
   mTransposeShifter.Reset(sampleRate, maxBlockSize);
   mTransposeShifterRight.Reset(sampleRate, maxBlockSize);
+  _ResetBuiltInCompressor(sampleRate);
   for (int slotIndex = 0; slotIndex < static_cast<int>(mToneStacks.size()); ++slotIndex)
   {
     if (mToneStacks[slotIndex] != nullptr)
@@ -3597,6 +3698,8 @@ void NeuralAmpModeler::OnIdle()
 
   if (auto* pGraphics = GetUI())
   {
+    if (auto* pCompressorOnLED = pGraphics->GetControlWithTag(kCtrlTagCompressorOnLED))
+      pCompressorOnLED->SetValueFromDelegate(GetParam(kStompCompressorActive)->Bool() ? 1.0 : 0.0, 0);
     if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
       pBoostOnLED->SetValueFromDelegate(GetParam(kStompBoostActive)->Bool() ? 1.0 : 0.0, 0);
   }
@@ -4344,6 +4447,10 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       case kNoiseGateActive:
         if (auto* pGateControl = pGraphics->GetControlWithParamIdx(kNoiseGateThreshold))
           pGateControl->SetDisabled(!active);
+        break;
+      case kStompCompressorActive:
+        if (auto* pCompressorOnLED = pGraphics->GetControlWithTag(kCtrlTagCompressorOnLED))
+          pCompressorOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
         break;
       case kInputStereoMode:
         if (active)
@@ -6799,6 +6906,70 @@ void NeuralAmpModeler::_SetMasterGain()
   const double value = GetParam(kMasterVolume)->Value();
   const double masterGainDB = (value <= 5.0) ? (-40.0 + (value / 5.0) * 40.0) : (((value - 5.0) / 5.0) * 12.0);
   mMasterGain = DBToAmp(masterGainDB);
+}
+
+void NeuralAmpModeler::_ResetBuiltInCompressor(const double sampleRate)
+{
+  mBuiltInCompressor.sampleRate = std::max(1.0, sampleRate);
+  const double smoothTimeSeconds = 0.02;
+  mBuiltInCompressor.controlSmoothCoeff = std::exp(-1.0 / (mBuiltInCompressor.sampleRate * smoothTimeSeconds));
+  mBuiltInCompressor.smoothedAmount = std::clamp(GetParam(kStompCompressorAmount)->Value() * 0.01, 0.0, 1.0);
+  mBuiltInCompressor.smoothedLevelGain = DBToAmp(GetParam(kStompCompressorLevel)->Value());
+  mBuiltInCompressor.smoothedHardness = GetParam(kStompCompressorHard)->Bool() ? 1.0 : 0.0;
+  mBuiltInCompressor.detectorEnvelope.fill(0.0);
+}
+
+void NeuralAmpModeler::_ProcessBuiltInCompressor(iplug::sample** inputs, iplug::sample** outputs, const size_t numChannels,
+                                                 const size_t numFrames)
+{
+  if (inputs == nullptr || outputs == nullptr)
+    return;
+
+  const double amountTarget = std::clamp(GetParam(kStompCompressorAmount)->Value() * 0.01, 0.0, 1.0);
+  const double levelTargetGain = DBToAmp(GetParam(kStompCompressorLevel)->Value());
+  const double hardTarget = GetParam(kStompCompressorHard)->Bool() ? 1.0 : 0.0;
+  const double controlCoeff = mBuiltInCompressor.controlSmoothCoeff;
+  const double sampleRate = std::max(1.0, mBuiltInCompressor.sampleRate);
+
+  for (size_t s = 0; s < numFrames; ++s)
+  {
+    mBuiltInCompressor.smoothedAmount =
+      amountTarget + controlCoeff * (mBuiltInCompressor.smoothedAmount - amountTarget);
+    mBuiltInCompressor.smoothedLevelGain =
+      levelTargetGain + controlCoeff * (mBuiltInCompressor.smoothedLevelGain - levelTargetGain);
+    mBuiltInCompressor.smoothedHardness =
+      hardTarget + controlCoeff * (mBuiltInCompressor.smoothedHardness - hardTarget);
+
+    const double amount = std::clamp(mBuiltInCompressor.smoothedAmount, 0.0, 1.0);
+    const double hardMix = std::clamp(mBuiltInCompressor.smoothedHardness, 0.0, 1.0);
+    const double ratio = (1.0 + 4.0 * amount) + hardMix * (6.0 * amount);
+    const double thresholdDb = (-24.0 - 14.0 * amount) + hardMix * (-8.0 * amount);
+    const double kneeDb = 12.0 + (1.5 - 12.0) * hardMix;
+    const double attackSeconds = 0.020 + (0.0025 - 0.020) * hardMix;
+    const double releaseSeconds = 0.200 + (0.065 - 0.200) * hardMix;
+    const double autoMakeupGain = DBToAmp(amount * (3.0 + 4.0 * hardMix));
+    const double attackCoeff = std::exp(-1.0 / (std::max(1.0e-4, attackSeconds) * sampleRate));
+    const double releaseCoeff = std::exp(-1.0 / (std::max(1.0e-4, releaseSeconds) * sampleRate));
+
+    for (size_t c = 0; c < numChannels; ++c)
+    {
+      if (inputs[c] == nullptr || outputs[c] == nullptr)
+        continue;
+
+      const double inputSample = static_cast<double>(inputs[c][s]);
+      const double rectified = std::abs(inputSample);
+      const double envelopeCoeff = (rectified > mBuiltInCompressor.detectorEnvelope[c]) ? attackCoeff : releaseCoeff;
+      mBuiltInCompressor.detectorEnvelope[c] =
+        rectified + envelopeCoeff * (mBuiltInCompressor.detectorEnvelope[c] - rectified);
+
+      const double detectorDb = AmpToDB(std::max(mBuiltInCompressor.detectorEnvelope[c], 1.0e-9));
+      const double gainReductionDb = ComputeCompressorGainReductionDb(detectorDb, thresholdDb, ratio, kneeDb);
+      const double compressed =
+        inputSample * DBToAmp(-gainReductionDb) * autoMakeupGain * mBuiltInCompressor.smoothedLevelGain;
+
+      outputs[c][s] = std::isfinite(compressed) ? static_cast<sample>(compressed) : 0.0f;
+    }
+  }
 }
 
 std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotIndex, const int slotCtrlTag)
