@@ -960,6 +960,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
   GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
   GetParam(kStompBoostActive)->InitBool("BoostActive", false);
+  GetParam(kStompBoostDrive)->InitGain("Boost Drive", 0.0, -10.0, 10.0, 0.1);
   GetParam(kStompCompressorAmount)->InitDouble("Comp", 0.0, 0.0, 100.0, 0.1, "%");
   GetParam(kStompCompressorLevel)->InitGain("Comp Level", 0.0, -18.0, 24.0, 0.1);
   GetParam(kStompCompressorHard)->InitBool("Comp Hard", false);
@@ -1307,12 +1308,14 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float stompCompressorToggleY = designToUIY(1111.0f) + kStompButtonAnchorOffsetY;
     const float stompCompressorSwitchX = designToUIX(1052.0f);
     const float stompCompressorSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
+    const float stompBoostDriveX = designToUIX(1875.0f);
     const float stompBoostLevelX = designToUIX(2225.0f);
     const float stompKnobY = designToUIY(890.0f) + kStompKnobAnchorOffsetY;
     const float stompBoostSwitchX = designToUIX(2049.0f);
     const float stompSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
     const auto stompCompressorAmountArea = makePedalKnobArea(stompCompressorAmountX, stompKnobY);
     const auto stompCompressorLevelArea = makePedalKnobArea(stompCompressorLevelX, stompKnobY);
+    const auto stompBoostDriveArea = makePedalKnobArea(stompBoostDriveX, stompKnobY);
     const auto stompBoostLevelArea = makePedalKnobArea(stompBoostLevelX, stompKnobY);
     const float stompButtonScale = 0.6f;
     const float stompButtonW =
@@ -2159,7 +2162,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       "STOMP_CONTROLS")
       ->SetTooltip("Compressor output level.");
     pGraphics->AttachControl(
-      new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "LEVEL", utilityStyle, pedalKnobBitmap,
+      new NAMPedalKnobControl(stompBoostDriveArea, kStompBoostDrive, "", fxKnobNoLabelStyle, pedalKnobBitmap,
+                              pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Boost model input drive.");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "", fxKnobNoLabelStyle, pedalKnobBitmap,
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "STOMP_CONTROLS");
@@ -2642,6 +2651,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool compressorEnabled = GetParam(kStompCompressorActive)->Bool() && !stompBypassed;
   const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed
                             && ((numChannelsMonoCore == 1) ? (mStompModel != nullptr) : haveStereoStomp);
+  const double boostDriveTargetGain = DBToAmp(GetParam(kStompBoostDrive)->Value());
   const bool toneStackActive = GetParam(kEQActive)->Value() && !ampBypassed;
   const bool modelActive = GetParam(kModelToggle)->Bool() && !ampBypassed;
   const bool haveStereoModel = (mModel != nullptr) && (mModelRight != nullptr);
@@ -2773,6 +2783,24 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
   if (boostEnabled)
   {
+    const bool shouldApplyBoostDrive =
+      (boostDriveTargetGain != 1.0) || (std::abs(mStompBoostSmoothedDriveGain - boostDriveTargetGain) > 1.0e-6);
+    if (shouldApplyBoostDrive)
+    {
+      const double boostDriveCoeff = mStompBoostDriveSmoothCoeff;
+      for (size_t s = 0; s < nFrames; ++s)
+      {
+        mStompBoostSmoothedDriveGain =
+          boostDriveTargetGain + boostDriveCoeff * (mStompBoostSmoothedDriveGain - boostDriveTargetGain);
+        for (size_t c = 0; c < numChannelsMonoCore; ++c)
+        {
+          if (modelInputPointers[c] == nullptr)
+            continue;
+          modelInputPointers[c][s] *= static_cast<sample>(mStompBoostSmoothedDriveGain);
+        }
+      }
+    }
+
     sample** boostOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
     if (numChannelsMonoCore == 1)
     {
@@ -3343,6 +3371,10 @@ void NeuralAmpModeler::OnReset()
   _ResetModelAndIR(sampleRate, GetBlockSize());
   mTransposeShifter.Reset(sampleRate, maxBlockSize);
   mTransposeShifterRight.Reset(sampleRate, maxBlockSize);
+  const double boostDriveSmoothSampleRate = std::max(1.0, sampleRate);
+  constexpr double kBoostDriveSmoothTimeSeconds = 0.02;
+  mStompBoostDriveSmoothCoeff = std::exp(-1.0 / (boostDriveSmoothSampleRate * kBoostDriveSmoothTimeSeconds));
+  mStompBoostSmoothedDriveGain = DBToAmp(GetParam(kStompBoostDrive)->Value());
   _ResetBuiltInCompressor(sampleRate);
   for (int slotIndex = 0; slotIndex < static_cast<int>(mToneStacks.size()); ++slotIndex)
   {

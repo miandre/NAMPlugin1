@@ -130,6 +130,7 @@ enum EParams
   kStompCompressorLevel,
   kStompCompressorHard,
   kStompCompressorActive,
+  kStompBoostDrive,
   kNumParams
 };
 
@@ -568,6 +569,8 @@ private:
   double mInputGain = 1.0;
   double mOutputGain = 1.0;
   double mMasterGain = 1.0;
+  double mStompBoostDriveSmoothCoeff = 0.0;
+  double mStompBoostSmoothedDriveGain = 1.0;
   BuiltInCompressorState mBuiltInCompressor;
 
   // Noise gates
