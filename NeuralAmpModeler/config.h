@@ -13,7 +13,7 @@
 #define BUNDLE_DOMAIN "com"
 #define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
 // Amp workflow profile: 0 = Rig Mode (editable slot model pickers), 1 = Release Mode (slot model edits locked).
-#define NAM_RELEASE_MODE 1
+#define NAM_RELEASE_MODE 0
 
 #define SHARED_RESOURCES_SUBPATH "MND-AMPS"
 
