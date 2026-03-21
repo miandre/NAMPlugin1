@@ -267,6 +267,79 @@ private:
   IBitmap mOnBitmap;
 };
 
+class NAMRotatedBitmapToggleControl : public IControl
+{
+public:
+  using ToggleAction = std::function<void(bool)>;
+
+  NAMRotatedBitmapToggleControl(const IRECT& bounds,
+                                bool initialState,
+                                const IBitmap& offBitmap,
+                                const IBitmap& onBitmap,
+                                float rotationDegrees,
+                                ToggleAction onToggle = {})
+  : IControl(bounds)
+  , mOffBitmap(offBitmap)
+  , mOnBitmap(onBitmap)
+  , mRotationDegrees(rotationDegrees)
+  , mState(initialState)
+  , mOnToggle(std::move(onToggle))
+  {
+  }
+
+  void SetState(const bool state)
+  {
+    if (mState == state)
+      return;
+
+    mState = state;
+    SetDirty(false);
+  }
+
+  void Draw(IGraphics& g) override
+  {
+    const IBitmap& bitmap = mState ? mOnBitmap : mOffBitmap;
+    if (std::fmod(std::fabs(mRotationDegrees), 180.0f) < 1.0e-3f)
+    {
+      g.DrawFittedBitmap(bitmap, mRECT);
+      return;
+    }
+
+    const IRECT layerBounds(mRECT.MW() - 0.5f * mRECT.H(),
+                            mRECT.MH() - 0.5f * mRECT.W(),
+                            mRECT.MW() + 0.5f * mRECT.H(),
+                            mRECT.MH() + 0.5f * mRECT.W());
+    g.StartLayer(this, layerBounds);
+    g.DrawFittedBitmap(bitmap, layerBounds);
+    auto layer = g.EndLayer();
+    g.DrawRotatedLayer(layer, mRotationDegrees);
+  }
+
+  void OnMouseDown(float, float, const IMouseMod&) override
+  {
+    if (IsDisabled())
+      return;
+
+    mState = !mState;
+    if (mOnToggle)
+      mOnToggle(mState);
+    SetDirty(false);
+  }
+
+  void OnRescale() override
+  {
+    mOffBitmap = GetUI()->GetScaledBitmap(mOffBitmap);
+    mOnBitmap = GetUI()->GetScaledBitmap(mOnBitmap);
+  }
+
+private:
+  IBitmap mOffBitmap;
+  IBitmap mOnBitmap;
+  float mRotationDegrees = 90.0f;
+  bool mState = false;
+  ToggleAction mOnToggle;
+};
+
 class NAMSyncTextToggleControl : public IControl
 {
 public:
@@ -2811,12 +2884,17 @@ public:
     // Attach output mode with input calibration stacked below it (right column)
     {
       const auto settingsBody = GetRECT().GetPadded(-(pad + 10.0f));
-      const auto controlsArea = settingsBody.GetFromTop(310.0f).GetTranslated(0.0f, 70.0f);
-      const auto rightArea = controlsArea.GetFromRight(0.5f * controlsArea.W());
-      const float knobWidth = 87.0f; // HACK based on looking at the main page knobs.
+      const float utilityPanelWidth = 250.0f;
+      const float utilityPanelRightPad = 18.0f;
+      const float utilityPanelTop = settingsBody.T + 332.0f;
+      const auto rightArea = IRECT(settingsBody.R - utilityPanelRightPad - utilityPanelWidth,
+                                   utilityPanelTop,
+                                   settingsBody.R - utilityPanelRightPad,
+                                   utilityPanelTop + 176.0f);
+      const float knobWidth = 78.0f;
 
-      const auto outputRadioArea = rightArea.GetFromTop(138.0f).GetHPadded(-8.0f);
-      const float buttonSize = 10.0f;
+      const auto outputRadioArea = rightArea.GetFromTop(108.0f).GetHPadded(-4.0f);
+      const float buttonSize = 8.0f;
       auto* outputModeControl =
         AddNamedChildControl(new OutputModeControl(outputRadioArea, kOutputMode, mRadioButtonStyle, buttonSize),
                              mControlNames.outputMode, kCtrlTagOutputMode);
@@ -2824,11 +2902,11 @@ public:
         "How to adjust the level of the output.\nRaw=No adjustment.\nNormalized=Adjust the level so that all models "
         "are about the same loudness.\nCalibrated=Match the input's digital-analog calibration.");
 
-      const float inputLevelTop = outputRadioArea.B + 16.0f;
+      const float inputLevelTop = outputRadioArea.B + 10.0f;
       const auto inputLevelArea =
         IRECT(rightArea.L, inputLevelTop, rightArea.R, inputLevelTop + 30.0f).GetMidHPadded(0.5f * knobWidth);
       const auto inputSwitchArea =
-        IRECT(rightArea.L, inputLevelArea.B + 10.0f, rightArea.R, inputLevelArea.B + 10.0f + NAM_SWTICH_HEIGHT)
+        IRECT(rightArea.L, inputLevelArea.B + 8.0f, rightArea.R, inputLevelArea.B + 8.0f + NAM_SWTICH_HEIGHT)
           .GetMidHPadded(0.5f * knobWidth);
 
       auto* inputLevelControl = AddNamedChildControl(

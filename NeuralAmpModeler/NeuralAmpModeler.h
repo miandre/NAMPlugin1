@@ -142,6 +142,9 @@ enum ECtrlTags
   kCtrlTagModelFileBrowser = 0,
   kCtrlTagModelFileBrowser2,
   kCtrlTagModelFileBrowser3,
+  kCtrlTagModelFileBrowser1B,
+  kCtrlTagModelFileBrowser2B,
+  kCtrlTagModelFileBrowser3B,
   kCtrlTagIRFileBrowserLeft,
   kCtrlTagIRFileBrowserRight,
   kCtrlTagIRToggle,
@@ -171,6 +174,9 @@ enum ECtrlTags
   kCtrlTagGateOnLED,
   kCtrlTagBoostOnLED,
   kCtrlTagCompressorOnLED,
+  kCtrlTagAmpModelVariantSwitch,
+  kCtrlTagAmpModelVariantLabelTop,
+  kCtrlTagAmpModelVariantLabelBottom,
   kCtrlTagFXEQOnLED,
   kCtrlTagFXDelayOnLED,
   kCtrlTagFXReverbOnLED,
@@ -382,6 +388,8 @@ private:
     EmbeddedModelId
   };
 
+  static constexpr int kAmpModelVariantCount = 2;
+
   struct AmpSlotModelSource
   {
     AmpSlotModelSourceKind kind = AmpSlotModelSourceKind::ExternalPath;
@@ -391,9 +399,12 @@ private:
   enum class ReleaseAmpAssetId : int
   {
     None = 0,
-    Amp1Main,
-    Amp2Main,
-    Amp3Main,
+    Amp1A,
+    Amp1B,
+    Amp2A,
+    Amp2B,
+    Amp3A,
+    Amp3B,
     Count
   };
 
@@ -415,10 +426,13 @@ private:
   struct ReleaseAssetManifest
   {
     bool valid = false;
-    std::array<ReleaseAmpAssetId, 3> ampSlots = {
-      ReleaseAmpAssetId::Amp1Main,
-      ReleaseAmpAssetId::Amp2Main,
-      ReleaseAmpAssetId::Amp3Main
+    std::array<ReleaseAmpAssetId, 3 * kAmpModelVariantCount> ampSlots = {
+      ReleaseAmpAssetId::Amp1A,
+      ReleaseAmpAssetId::Amp1B,
+      ReleaseAmpAssetId::Amp2A,
+      ReleaseAmpAssetId::Amp2B,
+      ReleaseAmpAssetId::Amp3A,
+      ReleaseAmpAssetId::Amp3B
     };
     ReleaseStompAssetId stomp = ReleaseStompAssetId::BoostA;
     ReleaseIRAssetId irLeft = ReleaseIRAssetId::Cab1;
@@ -444,9 +458,16 @@ private:
   // Loads a NAM model and stores it to mStagedNAM
   // Returns an empty string on success, or an error message on failure.
   std::string _StageModel(const WDL_String& dspFile, int slotIndex, int slotCtrlTag);
-  int _GetAmpModelCtrlTagForSlot(int slotIndex) const;
+  int _GetAmpModelCtrlTagForSlot(int slotIndex, int variantIndex = -1) const;
   int _GetAmpSlotForModelCtrlTag(int ctrlTag) const;
+  int _GetAmpModelVariantForCtrlTag(int ctrlTag) const;
+  int _ClampAmpModelVariantIndex(int variantIndex) const;
+  int _ResolveAmpSlotModelVariant(int slotIndex, int variantIndex) const;
+  int _GetAmpSlotModelStorageIndex(int slotIndex, int variantIndex) const;
+  int _GetSelectedAmpSlotModelStorageIndex(int slotIndex) const;
+  void _SetAmpSlotSelectedVariant(int slotIndex, int variantIndex);
   void _SelectAmpSlot(int slotIndex);
+  void _SelectAmpSlotModelVariant(int slotIndex, int variantIndex);
   // Loads left cab IR and stores it to mStagedIR.
   // Return status code so that error messages can be relayed if
   // it wasn't successful.
@@ -521,15 +542,17 @@ private:
   void _RefreshCabControls();
   void _RefreshCabSlotControls(int slotIndex);
   void _ShowCabSourceMenu(int slotIndex, const iplug::igraphics::IRECT& anchorArea);
-  void _SetAmpSlotReleaseAsset(int slotIndex, ReleaseAmpAssetId assetId);
-  WDL_String _ResolveAmpSlotModelSourceToPathForMode(int slotIndex, const AmpSlotModelSource& requestedSource) const;
-  WDL_String _ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath) const;
-  void _SetAmpSlotModelSource(int slotIndex, const AmpSlotModelSource& source);
-  void _SetAmpSlotFixedModelPath(int slotIndex, const WDL_String& modelPath);
-  void _SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath);
+  void _SetAmpSlotReleaseAsset(int slotIndex, ReleaseAmpAssetId assetId, int variantIndex = 0);
+  WDL_String _ResolveAmpSlotModelSourceToPathForMode(int slotIndex,
+                                                     const AmpSlotModelSource& requestedSource,
+                                                     int variantIndex = -1) const;
+  WDL_String _ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath, int variantIndex = -1) const;
+  void _SetAmpSlotModelSource(int slotIndex, const AmpSlotModelSource& source, int variantIndex = -1);
+  void _SetAmpSlotFixedModelPath(int slotIndex, const WDL_String& modelPath, int variantIndex = -1);
+  void _SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath, int variantIndex = -1);
   bool _IsAmpSlotManagedParam(int paramIdx) const;
   void _RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag,
-                                bool userInitiated = false);
+                                bool userInitiated = false, int variantIndex = -1);
   void _ModelLoadWorkerLoop();
   void _StartModelLoadWorker();
   void _StopModelLoadWorker();
@@ -585,12 +608,12 @@ private:
   // Plugin stereo core: right-channel model instance (independent state).
   std::unique_ptr<ResamplingNAM> mModelRight;
   // Per-slot ready model bank (inactive slots + pending active swap source).
-  std::array<std::unique_ptr<ResamplingNAM>, 3> mAmpSlotModelCache;
-  std::array<std::unique_ptr<ResamplingNAM>, 3> mAmpSlotModelCacheRight;
+  std::array<std::unique_ptr<ResamplingNAM>, 3 * kAmpModelVariantCount> mAmpSlotModelCache;
+  std::array<std::unique_ptr<ResamplingNAM>, 3 * kAmpModelVariantCount> mAmpSlotModelCacheRight;
   // Worker->audio lock-free handoff (raw pointers exchanged atomically).
-  std::array<std::atomic<ResamplingNAM*>, 3> mPendingLoadedSlotModel;
-  std::array<std::atomic<ResamplingNAM*>, 3> mPendingLoadedSlotModelRight;
-  std::array<std::atomic<uint64_t>, 3> mPendingLoadedSlotRequestId;
+  std::array<std::atomic<ResamplingNAM*>, 3 * kAmpModelVariantCount> mPendingLoadedSlotModel;
+  std::array<std::atomic<ResamplingNAM*>, 3 * kAmpModelVariantCount> mPendingLoadedSlotModelRight;
+  std::array<std::atomic<uint64_t>, 3 * kAmpModelVariantCount> mPendingLoadedSlotRequestId;
   std::unique_ptr<ResamplingNAM> mStompModel;
   // Plugin stereo core: right-channel stomp model instance (independent state).
   std::unique_ptr<ResamplingNAM> mStompModelRight;
@@ -628,7 +651,7 @@ private:
   WDL_String mStagedCabBIRSecondaryPath;
   // Flags to take away the modules at a safe time.
   std::atomic<bool> mShouldRemoveModel = false;
-  std::array<std::atomic<bool>, 3> mShouldRemoveModelSlot;
+  std::array<std::atomic<bool>, 3 * kAmpModelVariantCount> mShouldRemoveModelSlot;
   std::atomic<bool> mShouldRemoveStompModel = false;
   std::atomic<bool> mShouldRemoveStompModelB = false;
   std::atomic<bool> mShouldRemoveIRLeft = false;
@@ -642,11 +665,12 @@ private:
   bool mNoiseGateLEDState = false;
   // Active model ownership slot is updated on audio thread in _ApplyDSPStaging().
   int mCurrentModelSlot = 1;
-  std::atomic<int> mPendingAmpSlotSwitch{-1};
+  int mCurrentModelVariant = 0;
+  std::atomic<int> mPendingAmpModelSelection{-1};
   AmpWorkflowMode mAmpWorkflowMode = AmpWorkflowMode::Rig;
   std::array<bool, 3> mAmpSlotModelEditLocked = {false, false, false};
-  std::array<WDL_String, 3> mAmpSlotFixedModelPaths;
-  std::array<AmpSlotModelSource, 3> mAmpSlotModelSources;
+  std::array<WDL_String, 3 * kAmpModelVariantCount> mAmpSlotFixedModelPaths;
+  std::array<AmpSlotModelSource, 3 * kAmpModelVariantCount> mAmpSlotModelSources;
   ReleaseAssetManifest mReleaseAssetManifest;
   std::array<WDL_String, static_cast<size_t>(ReleaseAmpAssetId::Count)> mReleaseAmpAssetPaths;
   std::array<WDL_String, static_cast<size_t>(ReleaseStompAssetId::Count)> mReleaseStompAssetPaths;
@@ -654,6 +678,7 @@ private:
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false, false};
   int mAmpSelectorIndex = 1;
+  std::array<int, 3> mAmpSlotSelectedVariant = {0, 0, 0};
   bool mApplyingAmpSlotState = false;
   bool mStartupDefaultLoadAttempted = false;
   bool mStandaloneStateLoadAttempted = false;
@@ -698,14 +723,15 @@ private:
   std::atomic<bool> mStompHasLoudness{false};
   std::atomic<bool> mStompHasCalibration{false};
   // 0=Empty, 1=Loading, 2=Ready, 3=Failed.
-  std::array<std::atomic<int>, 3> mAmpSlotModelState;
-  std::array<std::atomic<int>, 3> mSlotLoadUIEvent;
-  std::array<std::atomic<uint64_t>, 3> mSlotLoadRequestId;
+  std::array<std::atomic<int>, 3 * kAmpModelVariantCount> mAmpSlotModelState;
+  std::array<std::atomic<int>, 3 * kAmpModelVariantCount> mSlotLoadUIEvent;
+  std::array<std::atomic<uint64_t>, 3 * kAmpModelVariantCount> mSlotLoadRequestId;
   WDL_String mLastSentIRPath;
   WDL_String mLastSentIRPathRight;
   struct ModelLoadJob
   {
     int slotIndex = 0;
+    int variantIndex = 0;
     uint64_t requestId = 0;
     WDL_String modelPath;
     double sampleRate = 48000.0;
@@ -807,6 +833,7 @@ private:
   // Path to model's config.json or model.nam
   WDL_String mNAMPath;
   std::array<WDL_String, 3> mAmpNAMPaths;
+  std::array<WDL_String, 3 * kAmpModelVariantCount> mAmpNAMPathsByVariant;
   WDL_String mStompNAMPath;
   WDL_String mStompNAMPathB;
   // Path to IR (.wav file)

@@ -13,7 +13,7 @@
 #define BUNDLE_DOMAIN "com"
 #define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
 // Amp workflow profile: 0 = Rig Mode (editable slot model pickers), 1 = Release Mode (slot model edits locked).
-#define NAM_RELEASE_MODE 0
+#define NAM_RELEASE_MODE 1
 
 #define SHARED_RESOURCES_SUBPATH "MND-AMPS"
 
@@ -137,6 +137,8 @@
 #define SMALLONOFF_ON_FN "Hardware/SmallOnOff_ON.png"
 #define HORIZONALSWITCH_L_FN "Hardware/HorizonalSwitch_L.png"
 #define HORIZONALSWITCH_R_FN "Hardware/HorizonalSwitch_R.png"
+#define VERTICALSWITCH_UP_FN "Hardware/VerticalSwitch_UP.png"
+#define VERTICALSWITCH_DOWN_FN "Hardware/VerticalSwitch_DOWN.png"
 #define AP_KNOP_OFFSET 23.0f
 #define AMP1SWITCH_OFF_FN "Hardware/Amp1Switch_OFF.png"
 #define AMP1SWITCH_ON_FN "Hardware/Amp1Switch_ON.png"

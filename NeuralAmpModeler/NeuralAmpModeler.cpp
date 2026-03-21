@@ -79,8 +79,15 @@ constexpr int kStereoSideBypassResumeDeClickSamples = 64;
 constexpr int kMeterChannelCount = 2;
 constexpr size_t kMinInternalPreparedFrames = 16384;
 constexpr std::array<const char*, 3> kAmpSlotDefaultModelFileNames = {"Amp1.nam", "Amp2.nam", "Amp3.nam"};
-constexpr std::array<const char*, 3> kReleaseAmpAssetTokens = {"Amp1Main", "Amp2Main", "Amp3Main"};
-constexpr std::array<const char*, 3> kReleaseAmpAssetFileNames = {"Amp1.nam", "Amp2.nam", "Amp3.nam"};
+constexpr std::array<const char*, 6> kReleaseAmpAssetTokens = {"Amp1A", "Amp1B", "Amp2A", "Amp2B", "Amp3A", "Amp3B"};
+constexpr std::array<const char*, 6> kReleaseAmpAssetFileNames = {
+  "Amp1A.nam",
+  "Amp1B.nam",
+  "Amp2A.nam",
+  "Amp2B.nam",
+  "Amp3A.nam",
+  "Amp3B.nam"
+};
 constexpr std::array<const char*, 2> kReleaseStompAssetTokens = {"BoostA", "BoostB"};
 constexpr std::array<const char*, 2> kReleaseStompAssetFileNames = {"BoostA.nam", "BoostB.nam"};
 constexpr std::array<const char*, 1> kReleaseIRAssetTokens = {"Cab1"};
@@ -245,14 +252,16 @@ struct AmpFaceLayout
   float knobScale;
   float labelYOffset;
   float switchCenterOffsetX;
-  float switchCenterOffsetY; 
+  float switchCenterOffsetY;
+  float variantSwitchColumnOffset;
+  float variantSwitchCenterYOffset;
 };
 
 constexpr std::array<float, 7> kAmpFaceKnobColumnOffsets = {-2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
 constexpr std::array<AmpFaceLayout, 3> kAmpFaceLayouts = {{
-  {151.0f, -75.0f, 90.0f, 0.7f, AP_KNOP_OFFSET+2, 385.0f, 205.0f},
-  {152.0f, -95.0f, 100.0f, 0.71f, AP_KNOP_OFFSET-3, 400.0f, 205.0f},
-  {158.0f, -95.0f, 100.0f, 0.70f, AP_KNOP_OFFSET, 390.0f, 213.0f},
+  {151.0f, -75.0f, 90.0f, 0.7f, AP_KNOP_OFFSET+2, 385.0f, 205.0f, -3.0f, 0.0f},
+  {152.0f, -55.0f, 88.0f, 0.71f, AP_KNOP_OFFSET-3, 400.0f, 210.0f,  - 2.9f, -2.0f},
+  {158.0f, -95.0f, 100.0f, 0.70f, AP_KNOP_OFFSET, 390.0f, 213.0f, -3.0f, 0.0f},
 }};
 
 AmpFaceLayout GetAmpFaceLayout(const int slotIndex)
@@ -275,7 +284,35 @@ IRECT MakeAmpFaceSwitchArea(const IRECT& ampFaceArea, const AmpFaceLayout& layou
                centerY + 0.5f * switchHeight);
 }
 
+IRECT MakeAmpFaceVariantSwitchArea(const IRECT& ampFaceArea,
+                                   const AmpFaceLayout& layout,
+                                   const float switchWidth,
+                                   const float switchHeight)
+{
+  const float centerX = ampFaceArea.MW() + layout.knobCenterOffsetX + layout.variantSwitchColumnOffset * layout.knobSpacing;
+  const float centerY = ampFaceArea.T + layout.knobTopOffset + 0.5f * NAM_KNOB_HEIGHT + layout.variantSwitchCenterYOffset;
+  return IRECT(centerX - 0.5f * switchWidth,
+               centerY - 0.5f * switchHeight,
+               centerX + 0.5f * switchWidth,
+               centerY + 0.5f * switchHeight);
+}
+
+IRECT MakeAmpFaceVariantSwitchLabelArea(const IRECT& switchArea, const bool upperLabel)
+{
+  constexpr float kLabelWidth = 84.0f;
+  constexpr float kLabelHeight = 10.0f;
+  constexpr float kLabelGap =0.5f;
+  const float centerX = switchArea.MW();
+  const float centerY = upperLabel ? (switchArea.T - kLabelGap - 0.5f * kLabelHeight)
+                                   : (switchArea.B + kLabelGap + 0.5f * kLabelHeight);
+  return IRECT(centerX - 0.5f * kLabelWidth,
+               centerY - 0.5f * kLabelHeight,
+               centerX + 0.5f * kLabelWidth,
+               centerY + 0.5f * kLabelHeight);
+}
+
 const std::array<float, 3> kAmpModelSwitchScales = {1.2f, 1.0f, 1.0f};
+constexpr float kAmpVariantSwitchScale = 0.5f;
 
 float GetMaxAmpModelSwitchScale()
 {
@@ -914,6 +951,8 @@ const double kDefaultInputCalibrationLevel = 12.0;
 NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
 : Plugin(info, MakeConfig(kNumParams, kNumPresets))
 {
+  for (auto& path : mAmpNAMPathsByVariant)
+    path.Set("");
   for (auto& pendingModel : mPendingLoadedSlotModel)
     pendingModel.store(nullptr, std::memory_order_relaxed);
   for (auto& pendingModelRight : mPendingLoadedSlotModelRight)
@@ -934,8 +973,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     uiEvent.store(kSlotLoadUIEventNone, std::memory_order_relaxed);
   for (auto& requestId : mSlotLoadRequestId)
     requestId.store(0, std::memory_order_relaxed);
-  mPendingAmpSlotSwitch.store(-1, std::memory_order_relaxed);
+  mPendingAmpModelSelection.store(-1, std::memory_order_relaxed);
   mCurrentModelSlot = mAmpSelectorIndex;
+  mCurrentModelVariant = mAmpSlotSelectedVariant[static_cast<size_t>(mAmpSelectorIndex)];
 
   _InitToneStack();
   nam::activations::Activation::enable_fast_tanh();
@@ -1082,6 +1122,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     source.kind = AmpSlotModelSourceKind::ExternalPath;
     source.value.Set("");
   }
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+    mAmpNAMPaths[slotIndex].Set("");
   for (auto& path : mReleaseAmpAssetPaths)
     path.Set("");
   for (auto& path : mReleaseStompAssetPaths)
@@ -1163,6 +1205,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto smallOnOffOnBitmap = pGraphics->LoadBitmap(SMALLONOFF_ON_FN);
     const auto horizonalSwitchLeftBitmap = pGraphics->LoadBitmap(HORIZONALSWITCH_L_FN);
     const auto horizonalSwitchRightBitmap = pGraphics->LoadBitmap(HORIZONALSWITCH_R_FN);
+    const auto verticalSwitchUpBitmap = pGraphics->LoadBitmap(VERTICALSWITCH_UP_FN);
+    const auto verticalSwitchDownBitmap = pGraphics->LoadBitmap(VERTICALSWITCH_DOWN_FN);
 
     // Top/section icons are SVG-only now.
 
@@ -1293,6 +1337,10 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float modelSwitchWidth = switchOffBitmap.W() * kAmpFaceSwitchScale;
     const float modelSwitchHeight = switchOffBitmap.H() * kAmpFaceSwitchScale;
     const auto modelToggleArea = MakeAmpFaceSwitchControlArea(ampFaceArea, ampFaceLayout, modelSwitchWidth, modelSwitchHeight);
+    const float ampVariantSwitchWidth = verticalSwitchUpBitmap.W() * kAmpVariantSwitchScale;
+    const float ampVariantSwitchHeight = verticalSwitchUpBitmap.H() * kAmpVariantSwitchScale;
+    const auto ampVariantSwitchArea =
+      MakeAmpFaceVariantSwitchArea(ampFaceArea, ampFaceLayout, ampVariantSwitchWidth, ampVariantSwitchHeight);
 
     // Stomp section coordinates come from the user's 3x design canvas.
     constexpr float kDesignW = 3117.0f; // 3 * 1039
@@ -1328,7 +1376,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float stompButtonH =
       stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.H()) * stompButtonScale : 30.0f;
     const auto stompCompressorToggleArea =
-      IRECT(stompCompressorToggleX - 30.0f, stompCompressorToggleY - 40.0f, stompCompressorToggleX + 30.0f, stompCompressorToggleY + 10.0f);
+      IRECT(stompCompressorToggleX - 36.0f, stompCompressorToggleY - 40.0f, stompCompressorToggleX + 36.0f, stompCompressorToggleY + 10.0f);
     const auto stompCompressorSwitchArea =
       IRECT(stompCompressorSwitchX - 0.5f * stompButtonW,
             stompCompressorSwitchY - 0.5f * stompButtonH,
@@ -1340,7 +1388,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
             stompCompressorSwitchArea.MW() + 10.0f,
             stompCompressorSwitchArea.T - 20.0f);
     const auto stompBoostTypeArea =
-      IRECT(stompBoostTypeX - 30.0f, stompBoostTypeY - 40.0f, stompBoostTypeX + 30.0f, stompBoostTypeY + 10.0f);
+      IRECT(stompBoostTypeX - 30.0f, stompBoostTypeY - 40.0f, stompBoostTypeX + 36.0f, stompBoostTypeY + 10.0f);
     const auto stompBoostSwitchArea =
       IRECT(stompBoostSwitchX - 0.5f * stompButtonW, stompSwitchY - 0.5f * stompButtonH, stompBoostSwitchX + 0.5f * stompButtonW,
             stompSwitchY + 0.5f * stompButtonH);
@@ -1482,18 +1530,25 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float topBarIconRowTop = topMainRowArea.MH() - 0.5f * topNavIconHeight + kTopNavRowYOffset;
     const float topBarControlRowTopBase = topUtilityRowArea.T;
     constexpr float kSettingsPad = 20.0f;
-    constexpr float kModelPickerWidth = 320.0f;
+    constexpr float kModelPickerWidth = 300.0f;
     constexpr float kModelPickerHeight = 30.0f;
+    constexpr float kModelPickerColumnGap = 24.0f;
     const auto settingsInnerArea = b.GetPadded(-(kSettingsPad + 10.0f));
     const float settingsLoaderLeft = settingsInnerArea.L + 22.0f;
     const float settingsLoaderRight = settingsLoaderLeft + kModelPickerWidth;
+    const float settingsLoaderLeftB = settingsLoaderRight + kModelPickerColumnGap;
+    const float settingsLoaderRightB = settingsLoaderLeftB + kModelPickerWidth;
     const float settingsLoaderTop = settingsInnerArea.T + 108.0f;
     const auto settingsAmpModelArea1 =
       IRECT(settingsLoaderLeft, settingsLoaderTop, settingsLoaderRight, settingsLoaderTop + kModelPickerHeight);
     const auto settingsAmpModelArea2 = settingsAmpModelArea1.GetTranslated(0.0f, 56.0f);
     const auto settingsAmpModelArea3 = settingsAmpModelArea2.GetTranslated(0.0f, 56.0f);
+    const auto settingsAmpModelArea1B =
+      IRECT(settingsLoaderLeftB, settingsLoaderTop, settingsLoaderRightB, settingsLoaderTop + kModelPickerHeight);
+    const auto settingsAmpModelArea2B = settingsAmpModelArea1B.GetTranslated(0.0f, 56.0f);
+    const auto settingsAmpModelArea3B = settingsAmpModelArea2B.GetTranslated(0.0f, 56.0f);
     const auto settingsStompModelArea = settingsAmpModelArea3.GetTranslated(0.0f, 56.0f);
-    const auto settingsStompModelAreaB = settingsStompModelArea.GetTranslated(0.0f, 56.0f);
+    const auto settingsStompModelAreaB = settingsAmpModelArea3B.GetTranslated(0.0f, 56.0f);
     constexpr float kModelCapabilityTopPad = 2.0f;
     constexpr float kModelCapabilityRowHeight = 11.0f;
     constexpr float kModelCapabilityRowGap = 1.0f;
@@ -1693,28 +1748,40 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       topSideMeterTop + topSideMeterHeight);
 
     // Model loader button
-    auto loadAmpModelForSlot = [this](const int slotIndex, const int ctrlTag, const WDL_String& fileName) {
+    auto loadAmpModelForSlot = [this](const int slotIndex, const int variantIndex, const int ctrlTag, const WDL_String& fileName) {
       if (fileName.GetLength())
       {
-        _RequestModelLoadForSlot(fileName, slotIndex, ctrlTag, true);
+        _RequestModelLoadForSlot(fileName, slotIndex, ctrlTag, true, variantIndex);
         _MarkStandalonePresetDirty();
-        mAmpSlotStates[slotIndex].modelToggle = 1.0;
-        mAmpSlotStates[slotIndex].modelToggleTouched = true;
-        if (mAmpSelectorIndex == slotIndex)
+        if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
         {
-          GetParam(kModelToggle)->Set(1.0);
-          SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+          mAmpSlotStates[slotIndex].modelToggle = 1.0;
+          mAmpSlotStates[slotIndex].modelToggleTouched = true;
+          if (mAmpSelectorIndex == slotIndex)
+          {
+            GetParam(kModelToggle)->Set(1.0);
+            SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+          }
         }
       }
     };
     auto loadModelCompletionHandlerSlot1 = [loadAmpModelForSlot](const WDL_String& fileName, const WDL_String&) {
-      loadAmpModelForSlot(0, kCtrlTagModelFileBrowser, fileName);
+      loadAmpModelForSlot(0, 0, kCtrlTagModelFileBrowser, fileName);
     };
     auto loadModelCompletionHandlerSlot2 = [loadAmpModelForSlot](const WDL_String& fileName, const WDL_String&) {
-      loadAmpModelForSlot(1, kCtrlTagModelFileBrowser2, fileName);
+      loadAmpModelForSlot(1, 0, kCtrlTagModelFileBrowser2, fileName);
     };
     auto loadModelCompletionHandlerSlot3 = [loadAmpModelForSlot](const WDL_String& fileName, const WDL_String&) {
-      loadAmpModelForSlot(2, kCtrlTagModelFileBrowser3, fileName);
+      loadAmpModelForSlot(2, 0, kCtrlTagModelFileBrowser3, fileName);
+    };
+    auto loadModelCompletionHandlerSlot1B = [loadAmpModelForSlot](const WDL_String& fileName, const WDL_String&) {
+      loadAmpModelForSlot(0, 1, kCtrlTagModelFileBrowser1B, fileName);
+    };
+    auto loadModelCompletionHandlerSlot2B = [loadAmpModelForSlot](const WDL_String& fileName, const WDL_String&) {
+      loadAmpModelForSlot(1, 1, kCtrlTagModelFileBrowser2B, fileName);
+    };
+    auto loadModelCompletionHandlerSlot3B = [loadAmpModelForSlot](const WDL_String& fileName, const WDL_String&) {
+      loadAmpModelForSlot(2, 1, kCtrlTagModelFileBrowser3B, fileName);
     };
 
     // IR loader button
@@ -1906,9 +1973,32 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->SetTooltip("Tuner");
     const std::array<IBitmap, 3> ampModelSwitchOffBitmaps = {amp1SwitchOffBitmap, switchOffBitmap, switchOffBitmap};
     const std::array<IBitmap, 3> ampModelSwitchOnBitmaps = {amp1SwitchOnBitmap, switchOnBitmap, switchOnBitmap};
+    const IText ampVariantLabelText(10.0f, COLOR_BLACK.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle);
     pGraphics->AttachControl(
       new NAMAmpBitmapToggleControl(modelToggleArea, kModelToggle, ampModelSwitchOffBitmaps, ampModelSwitchOnBitmaps, kAmpModelSwitchScales, mAmpSelectorIndex))
       ->SetTooltip("Model On/Off");
+    auto toggleAmp2Variant = [this](const bool useVariantB) {
+      _SelectAmpSlotModelVariant(1, useVariantB ? 1 : 0);
+      _MarkStandalonePresetDirty();
+    };
+    pGraphics->AttachControl(
+      new NAMRotatedBitmapToggleControl(
+        ampVariantSwitchArea,
+        mAmpSlotSelectedVariant[1] != 0,
+        verticalSwitchUpBitmap,
+        verticalSwitchDownBitmap,
+        0.0f,
+        toggleAmp2Variant),
+      kCtrlTagAmpModelVariantSwitch)
+      ->SetTooltip("Amp 2 voice: A / B.");
+    pGraphics->AttachControl(
+      new ITextControl(MakeAmpFaceVariantSwitchLabelArea(ampVariantSwitchArea, true), "LEAD", ampVariantLabelText, COLOR_TRANSPARENT),
+      kCtrlTagAmpModelVariantLabelTop)
+      ->SetIgnoreMouse(true);
+    pGraphics->AttachControl(
+      new ITextControl(MakeAmpFaceVariantSwitchLabelArea(ampVariantSwitchArea, false), "CRUNCH", ampVariantLabelText, COLOR_TRANSPARENT),
+      kCtrlTagAmpModelVariantLabelBottom)
+      ->SetIgnoreMouse(true);
     pGraphics->AttachControl(
       new NAMHoverPopSVGSwitchControl(inputModeSwitchArea, {inputMonoSVG, inputStereoSVG}, kInputStereoMode))
       ->SetTooltip("Input mode: Mono = input 1 only, Stereo = input 1+2");
@@ -2424,6 +2514,21 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                 loadModelCompletionHandlerSlot3, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
                                 fileBackgroundBitmap),
       kCtrlTagModelFileBrowser3);
+    pSettingsBox->AddChildControl(
+      new NAMFileBrowserControl(settingsAmpModelArea1B, kMsgTagClearModel, "Select amp 1B model...", "nam",
+                                loadModelCompletionHandlerSlot1B, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap),
+      kCtrlTagModelFileBrowser1B);
+    pSettingsBox->AddChildControl(
+      new NAMFileBrowserControl(settingsAmpModelArea2B, kMsgTagClearModel, "Select amp 2B model...", "nam",
+                                loadModelCompletionHandlerSlot2B, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap),
+      kCtrlTagModelFileBrowser2B);
+    pSettingsBox->AddChildControl(
+      new NAMFileBrowserControl(settingsAmpModelArea3B, kMsgTagClearModel, "Select amp 3B model...", "nam",
+                                loadModelCompletionHandlerSlot3B, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
+                                fileBackgroundBitmap),
+      kCtrlTagModelFileBrowser3B);
     pSettingsBox->AddChildControl(
       new NAMFileBrowserControl(settingsStompModelArea, kMsgTagClearStompModel, "Select stomp A NAM...", "nam",
                                 loadStompModelCompletionHandlerA, utilityStyle, fileSVG, crossSVG, leftArrowSVG, rightArrowSVG,
@@ -3258,11 +3363,19 @@ void NeuralAmpModeler::OnReset()
 
     for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
     {
-      if (!mAmpNAMPaths[slotIndex].GetLength())
-        continue;
-      _RequestModelLoadForSlot(mAmpNAMPaths[slotIndex], slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex));
-      mAmpSlotStates[slotIndex].modelToggle = 1.0;
-      mAmpSlotStates[slotIndex].modelToggleTouched = true;
+      for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
+      {
+        const auto& slotPath =
+          mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, variantIndex))];
+        if (!slotPath.GetLength())
+          continue;
+        _RequestModelLoadForSlot(slotPath, slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex, variantIndex), false, variantIndex);
+        if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+        {
+          mAmpSlotStates[slotIndex].modelToggle = 1.0;
+          mAmpSlotStates[slotIndex].modelToggleTouched = true;
+        }
+      }
     }
     _ApplyAmpSlotState(mAmpSelectorIndex);
     if (mStompModel == nullptr && mStagedStompModel == nullptr && mStompNAMPath.GetLength())
@@ -3283,7 +3396,7 @@ void NeuralAmpModeler::OnReset()
     else
     {
       const bool anyAmpSlotPath = std::any_of(
-        mAmpNAMPaths.begin(), mAmpNAMPaths.end(), [](const WDL_String& path) { return path.GetLength() > 0; });
+        mAmpNAMPathsByVariant.begin(), mAmpNAMPathsByVariant.end(), [](const WDL_String& path) { return path.GetLength() > 0; });
       const bool hasExistingPaths =
         anyAmpSlotPath || (mNAMPath.GetLength() > 0) || (mStompNAMPath.GetLength() > 0) || (mStompNAMPathB.GetLength() > 0) ||
         (mIRPath.GetLength() > 0) ||
@@ -3326,8 +3439,8 @@ void NeuralAmpModeler::OnReset()
           {
             WDL_String slotModelPath;
             setWdlPath(slotModelPath, defaultsDir / kAmpSlotDefaultModelFileNames[slotIndex]);
-            _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
-            _SetAmpSlotModelPath(slotIndex, slotModelPath);
+            _SetAmpSlotFixedModelPath(slotIndex, slotModelPath, 0);
+            _SetAmpSlotModelPath(slotIndex, slotModelPath, 0);
           }
           setWdlPath(mStompNAMPath, defaultsDir / "BoostA.nam");
           setWdlPath(mStompNAMPathB, defaultsDir / "BoostB.nam");
@@ -3338,11 +3451,18 @@ void NeuralAmpModeler::OnReset()
 
     for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
     {
-      if (mAmpNAMPaths[slotIndex].GetLength())
+      for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
       {
-        _RequestModelLoadForSlot(mAmpNAMPaths[slotIndex], slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex));
-        mAmpSlotStates[slotIndex].modelToggle = 1.0;
-        mAmpSlotStates[slotIndex].modelToggleTouched = true;
+        const auto& slotPath =
+          mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, variantIndex))];
+        if (!slotPath.GetLength())
+          continue;
+        _RequestModelLoadForSlot(slotPath, slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex, variantIndex), false, variantIndex);
+        if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+        {
+          mAmpSlotStates[slotIndex].modelToggle = 1.0;
+          mAmpSlotStates[slotIndex].modelToggleTouched = true;
+        }
       }
     }
     _ApplyAmpSlotState(mAmpSelectorIndex);
@@ -3622,13 +3742,14 @@ void NeuralAmpModeler::OnIdle()
         keepSyncPending = true;
       }
 
-      const int activeSlotState = mAmpSlotModelState[activeSlot].load(std::memory_order_acquire);
+      const int activeSlotSelection = _GetSelectedAmpSlotModelStorageIndex(activeSlot);
+      const int activeSlotState = mAmpSlotModelState[activeSlotSelection].load(std::memory_order_acquire);
       if (mModel == nullptr)
       {
         if (activeSlotState == kAmpSlotModelStateEmpty)
         {
           _RequestModelLoadForSlot(activeSlotPath, activeSlot, _GetAmpModelCtrlTagForSlot(activeSlot));
-          mPendingAmpSlotSwitch.store(activeSlot, std::memory_order_release);
+          mPendingAmpModelSelection.store(activeSlotSelection, std::memory_order_release);
           keepSyncPending = true;
         }
         else if (activeSlotState == kAmpSlotModelStateLoading)
@@ -3637,7 +3758,7 @@ void NeuralAmpModeler::OnIdle()
         }
         else if (activeSlotState == kAmpSlotModelStateReady)
         {
-          mPendingAmpSlotSwitch.store(activeSlot, std::memory_order_release);
+          mPendingAmpModelSelection.store(activeSlotSelection, std::memory_order_release);
           keepSyncPending = true;
         }
       }
@@ -3667,7 +3788,7 @@ void NeuralAmpModeler::OnIdle()
 
     if (GetParam(kCabASource)->Int() == 0 && mCabCustomIRPaths[0].GetLength() == 0)
     {
-      for (const auto& ampPath : mAmpNAMPaths)
+      for (const auto& ampPath : mAmpNAMPathsByVariant)
       {
         if (ampPath.GetLength() <= 0)
           continue;
@@ -3721,28 +3842,40 @@ void NeuralAmpModeler::OnIdle()
   bool refreshModelCapabilityIndicators = false;
   for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
   {
-    const int event = mSlotLoadUIEvent[slotIndex].exchange(kSlotLoadUIEventNone, std::memory_order_relaxed);
-    if (event == kSlotLoadUIEventLoaded)
+    for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
     {
-      refreshModelCapabilityIndicators = true;
-      const int ctrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
-      const auto& slotPath = mAmpNAMPaths[slotIndex];
-      if (slotPath.GetLength())
-        SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadedModel, slotPath.GetLength(), slotPath.Get());
-    }
-    else if (event == kSlotLoadUIEventFailed)
-    {
-      refreshModelCapabilityIndicators = true;
-      _ClearAmpSlotCapabilityState(slotIndex);
-      mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateFailed, std::memory_order_relaxed);
-      const int ctrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
-      SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadFailed);
-      mAmpSlotStates[slotIndex].modelToggle = 0.0;
-      mAmpSlotStates[slotIndex].modelToggleTouched = true;
-      if (slotIndex == mAmpSelectorIndex && GetParam(kModelToggle)->Bool())
+      const int storageIndex = _GetAmpSlotModelStorageIndex(slotIndex, variantIndex);
+      const int event = mSlotLoadUIEvent[storageIndex].exchange(kSlotLoadUIEventNone, std::memory_order_relaxed);
+      if (event == kSlotLoadUIEventLoaded)
       {
-        GetParam(kModelToggle)->Set(0.0);
-        SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+        if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+          refreshModelCapabilityIndicators = true;
+        const int ctrlTag = _GetAmpModelCtrlTagForSlot(slotIndex, variantIndex);
+        const auto& slotPath = mAmpNAMPathsByVariant[static_cast<size_t>(storageIndex)];
+        if (slotPath.GetLength())
+          SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadedModel, slotPath.GetLength(), slotPath.Get());
+      }
+      else if (event == kSlotLoadUIEventFailed)
+      {
+        if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+        {
+          refreshModelCapabilityIndicators = true;
+          _ClearAmpSlotCapabilityState(slotIndex);
+        }
+        mAmpSlotModelState[storageIndex].store(kAmpSlotModelStateFailed, std::memory_order_relaxed);
+        const int ctrlTag = _GetAmpModelCtrlTagForSlot(slotIndex, variantIndex);
+        SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadFailed);
+        if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+        {
+          mAmpSlotStates[slotIndex].modelToggle = 0.0;
+          mAmpSlotStates[slotIndex].modelToggleTouched = true;
+        }
+        if (slotIndex == mAmpSelectorIndex
+            && variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)] && GetParam(kModelToggle)->Bool())
+        {
+          GetParam(kModelToggle)->Set(0.0);
+          SendParameterValueFromDelegate(kModelToggle, GetParam(kModelToggle)->GetNormalized(), true);
+        }
       }
     }
   }
@@ -3798,7 +3931,8 @@ void NeuralAmpModeler::OnIdle()
       static_cast<NAMSettingsPageControl*>(pGraphics->GetControlWithTag(kCtrlTagSettingsBox))->ClearModelInfo();
       _RefreshOutputModeControlSupport();
       const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
-      const int activeSlotState = mAmpSlotModelState[activeSlot].load(std::memory_order_relaxed);
+      const int activeSlotState =
+        mAmpSlotModelState[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(activeSlot))].load(std::memory_order_relaxed);
       const bool shouldForceToggleOff =
         (activeSlotState != kAmpSlotModelStateLoading)
         && (mAmpNAMPaths[activeSlot].GetLength() == 0 || activeSlotState == kAmpSlotModelStateFailed);
@@ -3837,7 +3971,7 @@ void NeuralAmpModeler::_ApplyInputStereoAutoDefaultIfNeeded()
 
 bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 {
-  constexpr int32_t kStateSchemaVersion = 6;
+  constexpr int32_t kStateSchemaVersion = 7;
 
   // If this isn't here when unserializing, then we know we're dealing with something before v0.8.0.
   WDL_String header("###NeuralAmpModeler###"); // Don't change this!
@@ -3851,8 +3985,16 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
   const int32_t activeSlot = static_cast<int32_t>(std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1));
   chunk.Put(&activeSlot);
 
-  for (const auto& slotPath : mAmpNAMPaths)
-    chunk.PutStr(slotPath.Get());
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+  {
+    for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
+      chunk.PutStr(mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, variantIndex))].Get());
+  }
+  for (const int selectedVariant : mAmpSlotSelectedVariant)
+  {
+    const int32_t storedVariant = static_cast<int32_t>(_ClampAmpModelVariantIndex(selectedVariant));
+    chunk.Put(&storedVariant);
+  }
 
   chunk.PutStr(mStompNAMPath.Get());
   chunk.PutStr(mStompNAMPathB.Get());
@@ -3900,10 +4042,11 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
 int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 {
-  constexpr int32_t kStateSchemaVersion = 6;
-  constexpr int32_t kPreviousStateSchemaVersion = 5;
-  constexpr int32_t kLegacyStateSchemaVersion = 4;
-  constexpr int32_t kOlderLegacyStateSchemaVersion = 3;
+  constexpr int32_t kStateSchemaVersion = 7;
+  constexpr int32_t kPreviousStateSchemaVersion = 6;
+  constexpr int32_t kLegacyStateSchemaVersion = 5;
+  constexpr int32_t kOlderLegacyStateSchemaVersion = 4;
+  constexpr int32_t kOldestLegacyStateSchemaVersion = 3;
   auto markStateRestored = [this]() {
     mStateRestoredFromChunk = true;
     mInputStereoAutoDefaultApplied = true;
@@ -3988,7 +4131,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
   const int schemaPos = chunk.Get(&schemaVersion, versionPos);
   if (schemaPos >= 0
       && (schemaVersion == kStateSchemaVersion || schemaVersion == kPreviousStateSchemaVersion
-          || schemaVersion == kLegacyStateSchemaVersion || schemaVersion == kOlderLegacyStateSchemaVersion))
+          || schemaVersion == kLegacyStateSchemaVersion || schemaVersion == kOlderLegacyStateSchemaVersion
+          || schemaVersion == kOldestLegacyStateSchemaVersion))
   {
     int statePos = schemaPos;
 
@@ -3997,12 +4141,33 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     if (statePos < 0)
       return startPos;
 
-    std::array<WDL_String, 3> ampPaths;
-    for (auto& slotPath : ampPaths)
+    std::array<WDL_String, 3 * kAmpModelVariantCount> ampPathsByVariant;
+    std::array<int32_t, 3> selectedVariants = {0, 0, 0};
+    if (schemaVersion >= kStateSchemaVersion)
     {
-      statePos = chunk.GetStr(slotPath, statePos);
-      if (statePos < 0)
-        return startPos;
+      for (auto& slotPath : ampPathsByVariant)
+      {
+        statePos = chunk.GetStr(slotPath, statePos);
+        if (statePos < 0)
+          return startPos;
+      }
+      for (auto& selectedVariant : selectedVariants)
+      {
+        statePos = chunk.Get(&selectedVariant, statePos);
+        if (statePos < 0)
+          return startPos;
+      }
+    }
+    else
+    {
+      for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+      {
+        statePos = chunk.GetStr(ampPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, 0))], statePos);
+        if (statePos < 0)
+          return startPos;
+        ampPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, 1))].Set("");
+        selectedVariants[static_cast<size_t>(slotIndex)] = 0;
+      }
     }
 
     WDL_String stompPath;
@@ -4043,7 +4208,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 
     std::array<bool, static_cast<size_t>(TopNavSection::Count)> bypassed = {};
     const size_t storedBypassCount =
-      (schemaVersion == kOlderLegacyStateSchemaVersion) ? (static_cast<size_t>(TopNavSection::Tuner) + 1) : bypassed.size();
+      (schemaVersion == kOldestLegacyStateSchemaVersion) ? (static_cast<size_t>(TopNavSection::Tuner) + 1) : bypassed.size();
     for (size_t i = 0; i < storedBypassCount; ++i)
     {
       int32_t bypassInt = 0;
@@ -4052,7 +4217,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
         return startPos;
       bypassed[i] = (bypassInt != 0);
     }
-    if (schemaVersion == kOlderLegacyStateSchemaVersion)
+    if (schemaVersion == kOldestLegacyStateSchemaVersion)
       bypassed[static_cast<size_t>(TopNavSection::Eq)] = bypassed[static_cast<size_t>(TopNavSection::Fx)];
 
     std::array<AmpSlotState, 3> slotStates = {};
@@ -4133,6 +4298,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       if (ec)
         presetFilePath = EnsureStandalonePresetExtension(std::filesystem::path(presetContext.presetFilePath.Get()));
 
+      for (auto& ampPath : ampPathsByVariant)
+        ResolvePresetRelativeAssetPath(presetFilePath, ampPath);
       ResolvePresetRelativeAssetPath(presetFilePath, stompPath);
       ResolvePresetRelativeAssetPath(presetFilePath, stompPathB);
       ResolvePresetRelativeAssetPath(presetFilePath, irLeftPath);
@@ -4144,7 +4311,17 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     mAmpSelectorIndex = std::clamp(static_cast<int>(activeSlot), 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     _BeginPresetRecallTransition(previousActiveSlot, mAmpSelectorIndex);
-    mAmpNAMPaths = ampPaths;
+    for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+    {
+      for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
+      {
+        mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, variantIndex))] =
+          ampPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, variantIndex))];
+      }
+      mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)] =
+        _ClampAmpModelVariantIndex(static_cast<int>(selectedVariants[static_cast<size_t>(slotIndex)]));
+      _SetAmpSlotSelectedVariant(slotIndex, mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)]);
+    }
     mNAMPath = mAmpNAMPaths[mAmpSelectorIndex];
     mStompNAMPath = stompPath;
     mStompNAMPathB = stompPathB;
@@ -4164,20 +4341,25 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 
     for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
     {
-      const auto& slotPath = mAmpNAMPaths[slotIndex];
-      const WDL_String effectiveSlotPath = _ResolveAmpSlotModelPathForMode(slotIndex, slotPath);
-      if (effectiveSlotPath.GetLength())
+      for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
       {
-        _RequestModelLoadForSlot(slotPath, slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex));
-      }
-      else
-      {
-        mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
-        mSlotLoadRequestId[slotIndex].fetch_add(1, std::memory_order_relaxed);
-        mShouldRemoveModelSlot[slotIndex].store(true, std::memory_order_relaxed);
+        const auto& slotPath =
+          mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, variantIndex))];
+        const WDL_String effectiveSlotPath = _ResolveAmpSlotModelPathForMode(slotIndex, slotPath, variantIndex);
+        const int storageIndex = _GetAmpSlotModelStorageIndex(slotIndex, variantIndex);
+        if (effectiveSlotPath.GetLength())
+        {
+          _RequestModelLoadForSlot(slotPath, slotIndex, _GetAmpModelCtrlTagForSlot(slotIndex, variantIndex), false, variantIndex);
+        }
+        else
+        {
+          mAmpSlotModelState[storageIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+          mSlotLoadRequestId[storageIndex].fetch_add(1, std::memory_order_relaxed);
+          mShouldRemoveModelSlot[storageIndex].store(true, std::memory_order_relaxed);
+        }
       }
     }
-    mPendingAmpSlotSwitch.store(mAmpSelectorIndex, std::memory_order_release);
+    mPendingAmpModelSelection.store(_GetSelectedAmpSlotModelStorageIndex(mAmpSelectorIndex), std::memory_order_release);
 
     if (mStompNAMPath.GetLength())
     {
@@ -4234,6 +4416,9 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     _BeginPresetRecallTransition(previousActiveSlot, mAmpSelectorIndex);
     mNAMPath = legacyNAMPath;
+    mAmpSlotSelectedVariant[static_cast<size_t>(mAmpSelectorIndex)] = 0;
+    mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(mAmpSelectorIndex, 0))] = legacyNAMPath;
+    mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(mAmpSelectorIndex, 1))].Set("");
     mIRPath = legacyIRPath;
     mIRPathRight = legacyIRRightPath;
     mCabCustomIRPaths[0].Set(legacyIRPath.Get());
@@ -4241,18 +4426,19 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     if (mAmpWorkflowMode == AmpWorkflowMode::Release)
       _ApplyReleaseAssetManifestToState();
     else
-      _SetAmpSlotModelPath(mAmpSelectorIndex, mNAMPath);
+      _SetAmpSlotModelPath(mAmpSelectorIndex, mNAMPath, 0);
 
     const WDL_String effectiveLegacyPath = _ResolveAmpSlotModelPathForMode(mAmpSelectorIndex, mNAMPath);
     if (effectiveLegacyPath.GetLength())
       _RequestModelLoadForSlot(mNAMPath, mAmpSelectorIndex, _GetAmpModelCtrlTagForSlot(mAmpSelectorIndex));
     else
     {
-      mAmpSlotModelState[mAmpSelectorIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
-      mSlotLoadRequestId[mAmpSelectorIndex].fetch_add(1, std::memory_order_relaxed);
-      mShouldRemoveModelSlot[mAmpSelectorIndex].store(true, std::memory_order_relaxed);
+      const int storageIndex = _GetSelectedAmpSlotModelStorageIndex(mAmpSelectorIndex);
+      mAmpSlotModelState[storageIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+      mSlotLoadRequestId[storageIndex].fetch_add(1, std::memory_order_relaxed);
+      mShouldRemoveModelSlot[storageIndex].store(true, std::memory_order_relaxed);
     }
-    mPendingAmpSlotSwitch.store(mAmpSelectorIndex, std::memory_order_release);
+    mPendingAmpModelSelection.store(_GetSelectedAmpSlotModelStorageIndex(mAmpSelectorIndex), std::memory_order_release);
 
     _ApplyCabSlotSource(0, true);
     _ApplyCabSlotSource(1, true);
@@ -4280,16 +4466,29 @@ void NeuralAmpModeler::OnUIOpen()
 
   for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
   {
-    const int ctrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
-    const WDL_String& slotPath = mAmpNAMPaths[slotIndex];
-    if (slotPath.GetLength())
-      SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadedModel, slotPath.GetLength(), slotPath.Get());
+    for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
+    {
+      const int ctrlTag = _GetAmpModelCtrlTagForSlot(slotIndex, variantIndex);
+      const WDL_String& slotPath =
+        mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, variantIndex))];
+      if (slotPath.GetLength())
+        SendControlMsgFromDelegate(ctrlTag, kMsgTagLoadedModel, slotPath.GetLength(), slotPath.Get());
+    }
   }
-  // If it's not loaded yet, then mark active slot as failed.
-  // If it's yet to be loaded, then the completion handler will set us straight once it runs.
-  const int activeSlotModelState = mAmpSlotModelState[mAmpSelectorIndex].load(std::memory_order_relaxed);
-  if (mAmpNAMPaths[mAmpSelectorIndex].GetLength() && activeSlotModelState == kAmpSlotModelStateFailed)
-    SendControlMsgFromDelegate(_GetAmpModelCtrlTagForSlot(mAmpSelectorIndex), kMsgTagLoadFailed);
+  // If a slot/variant path exists but loading previously failed, sync that state into the browser control.
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+  {
+    for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
+    {
+      const int storageIndex = _GetAmpSlotModelStorageIndex(slotIndex, variantIndex);
+      const WDL_String& slotPath = mAmpNAMPathsByVariant[static_cast<size_t>(storageIndex)];
+      if (!slotPath.GetLength())
+        continue;
+      const int slotModelState = mAmpSlotModelState[static_cast<size_t>(storageIndex)].load(std::memory_order_relaxed);
+      if (slotModelState == kAmpSlotModelStateFailed)
+        SendControlMsgFromDelegate(_GetAmpModelCtrlTagForSlot(slotIndex, variantIndex), kMsgTagLoadFailed);
+    }
+  }
 
   if (mStompNAMPath.GetLength())
   {
@@ -4346,6 +4545,9 @@ void NeuralAmpModeler::OnUIOpen()
   _RefreshModelCapabilityIndicators();
 
   // If no model is available, force model toggle to OFF.
+  const int activeSlotModelState =
+    mAmpSlotModelState[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(mAmpSelectorIndex))]
+      .load(std::memory_order_relaxed);
   if (mModel == nullptr && activeSlotModelState != kAmpSlotModelStateLoading && GetParam(kModelToggle)->Bool())
   {
     GetParam(kModelToggle)->Set(0.0);
@@ -4379,8 +4581,11 @@ void NeuralAmpModeler::OnUIOpen()
     const bool canEditExternalAssets = (mAmpWorkflowMode != AmpWorkflowMode::Release);
     for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
     {
-      if (auto* pSlotModelPicker = pGraphics->GetControlWithTag(_GetAmpModelCtrlTagForSlot(slotIndex)))
-        pSlotModelPicker->SetDisabled(!_CanEditAmpSlotModel(slotIndex));
+      for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
+      {
+        if (auto* pSlotModelPicker = pGraphics->GetControlWithTag(_GetAmpModelCtrlTagForSlot(slotIndex, variantIndex)))
+          pSlotModelPicker->SetDisabled(!_CanEditAmpSlotModel(slotIndex));
+      }
     }
     if (auto* pStompPicker = pGraphics->GetControlWithTag(kCtrlTagStompModelFileBrowser))
       pStompPicker->SetDisabled(!canEditExternalAssets);
@@ -4595,7 +4800,8 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
         if (mApplyingAmpSlotState)
           break;
         if (source == kUI && active && (mModel == nullptr)
-            && (mAmpSlotModelState[mAmpSelectorIndex].load(std::memory_order_relaxed) != kAmpSlotModelStateLoading))
+            && (mAmpSlotModelState[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(mAmpSelectorIndex))]
+                  .load(std::memory_order_relaxed) != kAmpSlotModelStateLoading))
         {
           const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
           const WDL_String& activeSlotPath = mAmpNAMPaths[activeSlot];
@@ -4603,7 +4809,7 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
           {
             const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(activeSlot);
             _RequestModelLoadForSlot(activeSlotPath, activeSlot, slotCtrlTag);
-            mPendingAmpSlotSwitch.store(activeSlot, std::memory_order_release);
+            mPendingAmpModelSelection.store(_GetSelectedAmpSlotModelStorageIndex(activeSlot), std::memory_order_release);
             _RefreshTopNavControls();
             break;
           }
@@ -4652,29 +4858,39 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
     case kMsgTagClearModel:
     {
       const int slotIndex = _GetAmpSlotForModelCtrlTag(ctrlTag);
+      const int variantIndex = _GetAmpModelVariantForCtrlTag(ctrlTag);
       const int resolvedSlot = (slotIndex < 0 || slotIndex >= static_cast<int>(mAmpNAMPaths.size()))
                                  ? std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1)
                                  : slotIndex;
+      const int resolvedVariant = (variantIndex < 0)
+                                    ? mAmpSlotSelectedVariant[static_cast<size_t>(resolvedSlot)]
+                                    : _ClampAmpModelVariantIndex(variantIndex);
 
       if (!_CanEditAmpSlotModel(resolvedSlot))
         return true;
 
       WDL_String emptyPath;
       emptyPath.Set("");
-      _SetAmpSlotModelPath(resolvedSlot, emptyPath);
-      mAmpSlotStates[resolvedSlot].modelToggle = 0.0;
-      mAmpSlotStates[resolvedSlot].modelToggleTouched = true;
-      mAmpSlotModelState[resolvedSlot].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
-      mSlotLoadUIEvent[resolvedSlot].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
-      mSlotLoadRequestId[resolvedSlot].fetch_add(1, std::memory_order_relaxed);
-      mShouldRemoveModelSlot[resolvedSlot].store(true, std::memory_order_relaxed);
-      _ClearAmpSlotCapabilityState(resolvedSlot);
+      _SetAmpSlotModelPath(resolvedSlot, emptyPath, resolvedVariant);
+      if (resolvedVariant == mAmpSlotSelectedVariant[static_cast<size_t>(resolvedSlot)])
+      {
+        mAmpSlotStates[resolvedSlot].modelToggle = 0.0;
+        mAmpSlotStates[resolvedSlot].modelToggleTouched = true;
+      }
+      const int storageIndex = _GetAmpSlotModelStorageIndex(resolvedSlot, resolvedVariant);
+      mAmpSlotModelState[storageIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+      mSlotLoadUIEvent[storageIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
+      mSlotLoadRequestId[storageIndex].fetch_add(1, std::memory_order_relaxed);
+      mShouldRemoveModelSlot[storageIndex].store(true, std::memory_order_relaxed);
+      if (resolvedVariant == mAmpSlotSelectedVariant[static_cast<size_t>(resolvedSlot)])
+        _ClearAmpSlotCapabilityState(resolvedSlot);
       _RefreshModelCapabilityIndicators();
       _MarkStandalonePresetDirty();
 
-      if (resolvedSlot == mAmpSelectorIndex)
+      if (resolvedSlot == mAmpSelectorIndex
+          && resolvedVariant == mAmpSlotSelectedVariant[static_cast<size_t>(resolvedSlot)])
       {
-        mPendingAmpSlotSwitch.store(resolvedSlot, std::memory_order_release);
+        mPendingAmpModelSelection.store(storageIndex, std::memory_order_release);
       }
       return true;
     }
@@ -4916,6 +5132,10 @@ bool NeuralAmpModeler::_LoadStandalonePresetFromFile(const WDL_String& filePath)
     SendParameterValueFromDelegate(kInputStereoMode, GetParam(kInputStereoMode)->GetNormalized(), true);
   }
 
+  for (auto& ampPath : mAmpNAMPathsByVariant)
+    ResolvePresetRelativeAssetPath(path, ampPath);
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+    _SetAmpSlotSelectedVariant(slotIndex, mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)]);
   ResolvePresetRelativeAssetPath(path, mStompNAMPath);
   ResolvePresetRelativeAssetPath(path, mStompNAMPathB);
   ResolvePresetRelativeAssetPath(path, mIRPath);
@@ -5004,8 +5224,8 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
       {
         WDL_String slotModelPath;
         setWdlPath(slotModelPath, defaultsDir / kAmpSlotDefaultModelFileNames[slotIndex]);
-        _SetAmpSlotFixedModelPath(slotIndex, slotModelPath);
-        _SetAmpSlotModelPath(slotIndex, slotModelPath);
+        _SetAmpSlotFixedModelPath(slotIndex, slotModelPath, 0);
+        _SetAmpSlotModelPath(slotIndex, slotModelPath, 0);
       }
       setWdlPath(mStompNAMPath, defaultsDir / "BoostA.nam");
       setWdlPath(mStompNAMPathB, defaultsDir / "BoostB.nam");
@@ -5028,7 +5248,7 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
         return;
       }
 
-      for (const auto& ampPath : mAmpNAMPaths)
+      for (const auto& ampPath : mAmpNAMPathsByVariant)
       {
         if (ampPath.GetLength() <= 0)
           continue;
@@ -5084,7 +5304,7 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
     mCabCustomIRPaths[0].Set(mIRPath.Get());
   _ApplyCabSlotSource(0, true);
   _ApplyCabSlotSource(1, true);
-  mPendingAmpSlotSwitch.store(activeSlot, std::memory_order_release);
+  mPendingAmpModelSelection.store(_GetSelectedAmpSlotModelStorageIndex(activeSlot), std::memory_order_release);
 
   const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
   mTopNavBypassed[tunerIdx] = true;
@@ -5541,14 +5761,15 @@ void NeuralAmpModeler::_ToggleTopNavSectionBypass(const TopNavSection section)
   _RefreshTopNavControls();
 }
 
-int NeuralAmpModeler::_GetAmpModelCtrlTagForSlot(const int slotIndex) const
+int NeuralAmpModeler::_GetAmpModelCtrlTagForSlot(const int slotIndex, int variantIndex) const
 {
+  variantIndex = _ResolveAmpSlotModelVariant(slotIndex, variantIndex);
   switch (slotIndex)
   {
-    case 0: return kCtrlTagModelFileBrowser;
-    case 1: return kCtrlTagModelFileBrowser2;
-    case 2: return kCtrlTagModelFileBrowser3;
-    default: return kCtrlTagModelFileBrowser;
+    case 0: return (variantIndex == 0) ? kCtrlTagModelFileBrowser : kCtrlTagModelFileBrowser1B;
+    case 1: return (variantIndex == 0) ? kCtrlTagModelFileBrowser2 : kCtrlTagModelFileBrowser2B;
+    case 2: return (variantIndex == 0) ? kCtrlTagModelFileBrowser3 : kCtrlTagModelFileBrowser3B;
+    default: return (variantIndex == 0) ? kCtrlTagModelFileBrowser : kCtrlTagModelFileBrowser1B;
   }
 }
 
@@ -5556,11 +5777,63 @@ int NeuralAmpModeler::_GetAmpSlotForModelCtrlTag(const int ctrlTag) const
 {
   switch (ctrlTag)
   {
-    case kCtrlTagModelFileBrowser: return 0;
-    case kCtrlTagModelFileBrowser2: return 1;
-    case kCtrlTagModelFileBrowser3: return 2;
+    case kCtrlTagModelFileBrowser:
+    case kCtrlTagModelFileBrowser1B: return 0;
+    case kCtrlTagModelFileBrowser2:
+    case kCtrlTagModelFileBrowser2B: return 1;
+    case kCtrlTagModelFileBrowser3:
+    case kCtrlTagModelFileBrowser3B: return 2;
     default: return -1;
   }
+}
+
+int NeuralAmpModeler::_GetAmpModelVariantForCtrlTag(const int ctrlTag) const
+{
+  switch (ctrlTag)
+  {
+    case kCtrlTagModelFileBrowser:
+    case kCtrlTagModelFileBrowser2:
+    case kCtrlTagModelFileBrowser3: return 0;
+    case kCtrlTagModelFileBrowser1B:
+    case kCtrlTagModelFileBrowser2B:
+    case kCtrlTagModelFileBrowser3B: return 1;
+    default: return -1;
+  }
+}
+
+int NeuralAmpModeler::_ClampAmpModelVariantIndex(int variantIndex) const
+{
+  return std::clamp(variantIndex, 0, kAmpModelVariantCount - 1);
+}
+
+int NeuralAmpModeler::_ResolveAmpSlotModelVariant(const int slotIndex, int variantIndex) const
+{
+  const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  if (variantIndex < 0)
+    variantIndex = mAmpSlotSelectedVariant[static_cast<size_t>(clampedSlot)];
+  return _ClampAmpModelVariantIndex(variantIndex);
+}
+
+int NeuralAmpModeler::_GetAmpSlotModelStorageIndex(int slotIndex, int variantIndex) const
+{
+  const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  const int resolvedVariant = _ResolveAmpSlotModelVariant(clampedSlot, variantIndex);
+  return clampedSlot * kAmpModelVariantCount + resolvedVariant;
+}
+
+int NeuralAmpModeler::_GetSelectedAmpSlotModelStorageIndex(const int slotIndex) const
+{
+  return _GetAmpSlotModelStorageIndex(slotIndex, -1);
+}
+
+void NeuralAmpModeler::_SetAmpSlotSelectedVariant(int slotIndex, int variantIndex)
+{
+  const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  const int resolvedVariant = _ResolveAmpSlotModelVariant(clampedSlot, variantIndex);
+  mAmpSlotSelectedVariant[static_cast<size_t>(clampedSlot)] = resolvedVariant;
+  mAmpNAMPaths[clampedSlot] = mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(clampedSlot, resolvedVariant))];
+  if (clampedSlot == mAmpSelectorIndex)
+    mNAMPath = mAmpNAMPaths[clampedSlot];
 }
 
 void NeuralAmpModeler::_StartModelLoadWorker()
@@ -5591,46 +5864,51 @@ void NeuralAmpModeler::_BeginPresetRecallTransition(int previousActiveSlot, int 
   mPresetRecallMuteActive.store(true, std::memory_order_release);
 
   // Preset recall should not continue rendering the previous scene under the new parameter state.
-  mShouldRemoveModelSlot[previousActiveSlot].store(true, std::memory_order_release);
+  mShouldRemoveModelSlot[static_cast<size_t>(_GetAmpSlotModelStorageIndex(previousActiveSlot, mCurrentModelVariant))]
+    .store(true, std::memory_order_release);
   mShouldRemoveStompModel.store(true, std::memory_order_release);
 }
 
 void NeuralAmpModeler::_RequestModelLoadForSlot(const WDL_String& modelPath, int slotIndex, int slotCtrlTag,
-                                                const bool userInitiated)
+                                                const bool userInitiated, int variantIndex)
 {
   slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  variantIndex = _ResolveAmpSlotModelVariant(slotIndex, variantIndex);
+  const int storageIndex = _GetAmpSlotModelStorageIndex(slotIndex, variantIndex);
   if (userInitiated && !_CanEditAmpSlotModel(slotIndex))
     return;
 
   const bool slotLocked = !_CanEditAmpSlotModel(slotIndex);
   if (mAmpWorkflowMode == AmpWorkflowMode::Release && slotLocked && !userInitiated
-      && mAmpSlotFixedModelPaths[slotIndex].GetLength() == 0 && modelPath.GetLength() > 0)
+      && mAmpSlotFixedModelPaths[storageIndex].GetLength() == 0 && modelPath.GetLength() > 0)
   {
-    _SetAmpSlotFixedModelPath(slotIndex, modelPath);
+    _SetAmpSlotFixedModelPath(slotIndex, modelPath, variantIndex);
   }
 
-  const WDL_String effectiveModelPath = _ResolveAmpSlotModelPathForMode(slotIndex, modelPath);
+  const WDL_String effectiveModelPath = _ResolveAmpSlotModelPathForMode(slotIndex, modelPath, variantIndex);
   if (effectiveModelPath.GetLength() == 0)
     return;
 
-  _SetAmpSlotModelPath(slotIndex, effectiveModelPath);
+  _SetAmpSlotModelPath(slotIndex, effectiveModelPath, variantIndex);
 
-  mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateLoading, std::memory_order_release);
-  mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
-  const uint64_t requestId = mSlotLoadRequestId[slotIndex].fetch_add(1, std::memory_order_relaxed) + 1;
-  _ClearAmpSlotCapabilityState(slotIndex);
+  mAmpSlotModelState[storageIndex].store(kAmpSlotModelStateLoading, std::memory_order_release);
+  mSlotLoadUIEvent[storageIndex].store(kSlotLoadUIEventNone, std::memory_order_relaxed);
+  const uint64_t requestId = mSlotLoadRequestId[storageIndex].fetch_add(1, std::memory_order_relaxed) + 1;
+  if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+    _ClearAmpSlotCapabilityState(slotIndex);
 
   {
     std::lock_guard<std::mutex> lock(mModelLoadMutex);
     for (auto it = mModelLoadJobs.begin(); it != mModelLoadJobs.end();)
     {
-      if (it->slotIndex == slotIndex)
+      if (it->slotIndex == slotIndex && it->variantIndex == variantIndex)
         it = mModelLoadJobs.erase(it);
       else
         ++it;
     }
     ModelLoadJob job;
     job.slotIndex = slotIndex;
+    job.variantIndex = variantIndex;
     job.requestId = requestId;
     job.modelPath = effectiveModelPath;
     const double sampleRate = GetSampleRate();
@@ -5691,9 +5969,12 @@ bool NeuralAmpModeler::_EnsureReleaseAssetManifest()
 
   mReleaseAssetManifest.valid = false;
   mReleaseAssetManifest.ampSlots = {
-    ReleaseAmpAssetId::Amp1Main,
-    ReleaseAmpAssetId::Amp2Main,
-    ReleaseAmpAssetId::Amp3Main
+    ReleaseAmpAssetId::Amp1A,
+    ReleaseAmpAssetId::Amp1B,
+    ReleaseAmpAssetId::Amp2A,
+    ReleaseAmpAssetId::Amp2B,
+    ReleaseAmpAssetId::Amp3A,
+    ReleaseAmpAssetId::Amp3B
   };
   mReleaseAssetManifest.stomp = ReleaseStompAssetId::BoostA;
   mReleaseAssetManifest.irLeft = ReleaseIRAssetId::Cab1;
@@ -5722,8 +6003,16 @@ void NeuralAmpModeler::_ApplyReleaseAssetManifestToState()
   if (!_EnsureReleaseAssetManifest())
     return;
 
-  for (int slotIndex = 0; slotIndex < static_cast<int>(mReleaseAssetManifest.ampSlots.size()); ++slotIndex)
-    _SetAmpSlotReleaseAsset(slotIndex, mReleaseAssetManifest.ampSlots[slotIndex]);
+  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+  {
+    mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)] = 0;
+    for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
+    {
+      const int storageIndex = _GetAmpSlotModelStorageIndex(slotIndex, variantIndex);
+      _SetAmpSlotReleaseAsset(slotIndex, mReleaseAssetManifest.ampSlots[static_cast<size_t>(storageIndex)], variantIndex);
+    }
+    _SetAmpSlotSelectedVariant(slotIndex, 0);
+  }
 
   mStompNAMPath = _ResolveReleaseStompAssetPath(mReleaseAssetManifest.stomp);
   mStompNAMPathB = _ResolveReleaseStompAssetPath(ReleaseStompAssetId::BoostB);
@@ -6029,11 +6318,13 @@ void NeuralAmpModeler::_ShowCabSourceMenu(const int slotIndex, const IRECT& anch
   }
 }
 
-void NeuralAmpModeler::_SetAmpSlotReleaseAsset(const int slotIndex, const ReleaseAmpAssetId assetId)
+void NeuralAmpModeler::_SetAmpSlotReleaseAsset(const int slotIndex, const ReleaseAmpAssetId assetId, int variantIndex)
 {
   const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  variantIndex = _ClampAmpModelVariantIndex(variantIndex);
+  const int storageIndex = _GetAmpSlotModelStorageIndex(clampedSlot, variantIndex);
   const WDL_String assetPath = _ResolveReleaseAmpAssetPath(assetId);
-  _SetAmpSlotFixedModelPath(clampedSlot, assetPath);
+  _SetAmpSlotFixedModelPath(clampedSlot, assetPath, variantIndex);
 
   AmpSlotModelSource source;
   source.kind = AmpSlotModelSourceKind::EmbeddedModelId;
@@ -6042,29 +6333,33 @@ void NeuralAmpModeler::_SetAmpSlotReleaseAsset(const int slotIndex, const Releas
     source.value.Set(kReleaseAmpAssetTokens[assetIndex - 1]);
   else
     source.value.Set("");
-  _SetAmpSlotModelSource(clampedSlot, source);
-
-  mAmpNAMPaths[clampedSlot] = assetPath;
-  if (clampedSlot == mAmpSelectorIndex)
-    mNAMPath = assetPath;
+  _SetAmpSlotModelSource(clampedSlot, source, variantIndex);
+  mAmpNAMPathsByVariant[static_cast<size_t>(storageIndex)] = assetPath;
+  if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(clampedSlot)])
+    _SetAmpSlotSelectedVariant(clampedSlot, variantIndex);
 }
 
-WDL_String NeuralAmpModeler::_ResolveAmpSlotModelPathForMode(int slotIndex, const WDL_String& requestedPath) const
+WDL_String NeuralAmpModeler::_ResolveAmpSlotModelPathForMode(int slotIndex,
+                                                             const WDL_String& requestedPath,
+                                                             int variantIndex) const
 {
   AmpSlotModelSource requestedSource;
   requestedSource.kind = AmpSlotModelSourceKind::ExternalPath;
   requestedSource.value = requestedPath;
-  return _ResolveAmpSlotModelSourceToPathForMode(slotIndex, requestedSource);
+  return _ResolveAmpSlotModelSourceToPathForMode(slotIndex, requestedSource, variantIndex);
 }
 
 WDL_String NeuralAmpModeler::_ResolveAmpSlotModelSourceToPathForMode(int slotIndex,
-                                                                      const AmpSlotModelSource& requestedSource) const
+                                                                      const AmpSlotModelSource& requestedSource,
+                                                                      int variantIndex) const
 {
-  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotFixedModelPaths.size()) - 1);
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  variantIndex = _ResolveAmpSlotModelVariant(slotIndex, variantIndex);
+  const int storageIndex = _GetAmpSlotModelStorageIndex(slotIndex, variantIndex);
   AmpSlotModelSource effectiveSource = requestedSource;
   if (mAmpWorkflowMode == AmpWorkflowMode::Release && !_CanEditAmpSlotModel(slotIndex))
   {
-    const WDL_String& fixedPath = mAmpSlotFixedModelPaths[slotIndex];
+    const WDL_String& fixedPath = mAmpSlotFixedModelPaths[storageIndex];
     if (fixedPath.GetLength() > 0)
     {
       effectiveSource.kind = AmpSlotModelSourceKind::ExternalPath;
@@ -6082,29 +6377,33 @@ WDL_String NeuralAmpModeler::_ResolveAmpSlotModelSourceToPathForMode(int slotInd
   return path;
 }
 
-void NeuralAmpModeler::_SetAmpSlotModelSource(int slotIndex, const AmpSlotModelSource& source)
-{
-  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotModelSources.size()) - 1);
-  mAmpSlotModelSources[slotIndex].kind = source.kind;
-  mAmpSlotModelSources[slotIndex].value = source.value;
-}
-
-void NeuralAmpModeler::_SetAmpSlotFixedModelPath(int slotIndex, const WDL_String& modelPath)
-{
-  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotFixedModelPaths.size()) - 1);
-  mAmpSlotFixedModelPaths[slotIndex] = modelPath;
-}
-
-void NeuralAmpModeler::_SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath)
+void NeuralAmpModeler::_SetAmpSlotModelSource(int slotIndex, const AmpSlotModelSource& source, int variantIndex)
 {
   slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  variantIndex = _ResolveAmpSlotModelVariant(slotIndex, variantIndex);
+  const int storageIndex = _GetAmpSlotModelStorageIndex(slotIndex, variantIndex);
+  mAmpSlotModelSources[storageIndex].kind = source.kind;
+  mAmpSlotModelSources[storageIndex].value = source.value;
+}
+
+void NeuralAmpModeler::_SetAmpSlotFixedModelPath(int slotIndex, const WDL_String& modelPath, int variantIndex)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  variantIndex = _ResolveAmpSlotModelVariant(slotIndex, variantIndex);
+  mAmpSlotFixedModelPaths[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, variantIndex))] = modelPath;
+}
+
+void NeuralAmpModeler::_SetAmpSlotModelPath(int slotIndex, const WDL_String& modelPath, int variantIndex)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  variantIndex = _ResolveAmpSlotModelVariant(slotIndex, variantIndex);
   AmpSlotModelSource source;
   source.kind = AmpSlotModelSourceKind::ExternalPath;
   source.value = modelPath;
-  _SetAmpSlotModelSource(slotIndex, source);
-  mAmpNAMPaths[slotIndex] = modelPath;
-  if (slotIndex == mAmpSelectorIndex)
-    mNAMPath = modelPath;
+  _SetAmpSlotModelSource(slotIndex, source, variantIndex);
+  mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(slotIndex, variantIndex))] = modelPath;
+  if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+    _SetAmpSlotSelectedVariant(slotIndex, variantIndex);
 }
 
 void NeuralAmpModeler::_ModelLoadWorkerLoop()
@@ -6122,7 +6421,9 @@ void NeuralAmpModeler::_ModelLoadWorkerLoop()
     }
 
     const int slotIndex = std::clamp(job.slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
-    if (job.requestId != mSlotLoadRequestId[slotIndex].load(std::memory_order_relaxed))
+    const int variantIndex = _ResolveAmpSlotModelVariant(slotIndex, job.variantIndex);
+    const int storageIndex = _GetAmpSlotModelStorageIndex(slotIndex, variantIndex);
+    if (job.requestId != mSlotLoadRequestId[storageIndex].load(std::memory_order_relaxed))
       continue;
 
     bool success = false;
@@ -6156,26 +6457,66 @@ void NeuralAmpModeler::_ModelLoadWorkerLoop()
       success = false;
     }
 
-    if (job.requestId != mSlotLoadRequestId[slotIndex].load(std::memory_order_relaxed))
+    if (job.requestId != mSlotLoadRequestId[storageIndex].load(std::memory_order_relaxed))
       continue;
 
     if (success)
     {
-      _SetAmpSlotCapabilityState(slotIndex, hasLoudness, hasCalibration);
-      mPendingLoadedSlotRequestId[slotIndex].store(job.requestId, std::memory_order_release);
+      if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+        _SetAmpSlotCapabilityState(slotIndex, hasLoudness, hasCalibration);
+      mPendingLoadedSlotRequestId[storageIndex].store(job.requestId, std::memory_order_release);
       if (auto* oldPtr =
-            mPendingLoadedSlotModelRight[slotIndex].exchange(loadedModelRight.release(), std::memory_order_acq_rel))
+            mPendingLoadedSlotModelRight[storageIndex].exchange(loadedModelRight.release(), std::memory_order_acq_rel))
         delete oldPtr;
-      if (auto* oldPtr = mPendingLoadedSlotModel[slotIndex].exchange(loadedModel.release(), std::memory_order_acq_rel))
+      if (auto* oldPtr = mPendingLoadedSlotModel[storageIndex].exchange(loadedModel.release(), std::memory_order_acq_rel))
         delete oldPtr;
-      mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventLoaded, std::memory_order_relaxed);
+      mSlotLoadUIEvent[storageIndex].store(kSlotLoadUIEventLoaded, std::memory_order_relaxed);
     }
     else
     {
-      _ClearAmpSlotCapabilityState(slotIndex);
-      mSlotLoadUIEvent[slotIndex].store(kSlotLoadUIEventFailed, std::memory_order_relaxed);
+      if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+        _ClearAmpSlotCapabilityState(slotIndex);
+      mSlotLoadUIEvent[storageIndex].store(kSlotLoadUIEventFailed, std::memory_order_relaxed);
     }
   }
+}
+
+void NeuralAmpModeler::_SelectAmpSlotModelVariant(int slotIndex, int variantIndex)
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  variantIndex = _ResolveAmpSlotModelVariant(slotIndex, variantIndex);
+  const int currentVariant = mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)];
+  if (currentVariant == variantIndex)
+    return;
+
+  mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)] = variantIndex;
+  _SetAmpSlotSelectedVariant(slotIndex, variantIndex);
+
+  if (slotIndex != mAmpSelectorIndex)
+    return;
+
+  const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
+  const WDL_String& slotPath = mAmpNAMPaths[slotIndex];
+  if (slotPath.GetLength())
+  {
+    const int storageIndex = _GetSelectedAmpSlotModelStorageIndex(slotIndex);
+    const int slotModelState = mAmpSlotModelState[storageIndex].load(std::memory_order_relaxed);
+    if (slotModelState != kAmpSlotModelStateLoading && slotModelState != kAmpSlotModelStateReady)
+      _RequestModelLoadForSlot(slotPath, slotIndex, slotCtrlTag, false, variantIndex);
+  }
+  else
+  {
+    mShouldRemoveModelSlot[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(slotIndex))]
+      .store(true, std::memory_order_relaxed);
+    mAmpSlotModelState[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(slotIndex))]
+      .store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+    mSlotLoadRequestId[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(slotIndex))]
+      .fetch_add(1, std::memory_order_relaxed);
+    _ClearAmpSlotCapabilityState(slotIndex);
+  }
+
+  mPendingAmpModelSelection.store(_GetSelectedAmpSlotModelStorageIndex(slotIndex), std::memory_order_release);
+  _RefreshTopNavControls();
 }
 
 void NeuralAmpModeler::_SelectAmpSlot(int slotIndex)
@@ -6190,23 +6531,27 @@ void NeuralAmpModeler::_SelectAmpSlot(int slotIndex)
   _CaptureAmpSlotState(mAmpSelectorIndex);
   mAmpSelectorIndex = slotIndex;
   _MarkStandalonePresetDirty();
-  mPendingAmpSlotSwitch.store(slotIndex, std::memory_order_release);
+  _SetAmpSlotSelectedVariant(slotIndex, mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)]);
+  mPendingAmpModelSelection.store(_GetSelectedAmpSlotModelStorageIndex(slotIndex), std::memory_order_release);
 
   const int slotCtrlTag = _GetAmpModelCtrlTagForSlot(slotIndex);
   const WDL_String& slotPath = mAmpNAMPaths[slotIndex];
   if (slotPath.GetLength())
   {
     mNAMPath = slotPath;
-    const int slotModelState = mAmpSlotModelState[slotIndex].load(std::memory_order_relaxed);
+    const int slotModelState =
+      mAmpSlotModelState[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(slotIndex))].load(std::memory_order_relaxed);
     if (slotModelState != kAmpSlotModelStateLoading && slotModelState != kAmpSlotModelStateReady)
-      _RequestModelLoadForSlot(slotPath, slotIndex, slotCtrlTag);
+      _RequestModelLoadForSlot(
+        slotPath, slotIndex, slotCtrlTag, false, mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)]);
   }
   else
   {
     mNAMPath.Set("");
-    mShouldRemoveModelSlot[slotIndex].store(true, std::memory_order_relaxed);
-    mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
-    mSlotLoadRequestId[slotIndex].fetch_add(1, std::memory_order_relaxed);
+    const int storageIndex = _GetSelectedAmpSlotModelStorageIndex(slotIndex);
+    mShouldRemoveModelSlot[static_cast<size_t>(storageIndex)].store(true, std::memory_order_relaxed);
+    mAmpSlotModelState[static_cast<size_t>(storageIndex)].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+    mSlotLoadRequestId[static_cast<size_t>(storageIndex)].fetch_add(1, std::memory_order_relaxed);
     _ClearAmpSlotCapabilityState(slotIndex);
     mAmpSlotStates[slotIndex].modelToggle = 0.0;
     mAmpSlotStates[slotIndex].modelToggleTouched = true;
@@ -6304,6 +6649,53 @@ void NeuralAmpModeler::_RefreshTopNavControls()
           ampFaceArea, ampFaceLayout, static_cast<float>(pModelToggle->GetRECT().W()) / maxSwitchScale,
           static_cast<float>(pModelToggle->GetRECT().H()) / maxSwitchScale));
     }
+    if (auto* pVariantSwitch = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch))
+    {
+      const bool showAmp2VariantSwitch = showAmpSection && (mAmpSelectorIndex == 1);
+      pVariantSwitch->Hide(!showAmp2VariantSwitch);
+      if (showAmp2VariantSwitch)
+      {
+        if (auto* pAmpVariantSwitch = dynamic_cast<NAMRotatedBitmapToggleControl*>(pVariantSwitch))
+          pAmpVariantSwitch->SetState(mAmpSlotSelectedVariant[1] != 0);
+        pGraphics->SetControlBounds(
+          pVariantSwitch,
+          MakeAmpFaceVariantSwitchArea(
+            ampFaceArea,
+            ampFaceLayout,
+            static_cast<float>(pVariantSwitch->GetRECT().W()),
+            static_cast<float>(pVariantSwitch->GetRECT().H())));
+      }
+    }
+    if (auto* pVariantLabelTop = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelTop))
+    {
+      const bool showAmp2VariantSwitch = showAmpSection && (mAmpSelectorIndex == 1);
+      pVariantLabelTop->Hide(!showAmp2VariantSwitch);
+      if (showAmp2VariantSwitch)
+        pGraphics->SetControlBounds(
+          pVariantLabelTop,
+          MakeAmpFaceVariantSwitchLabelArea(
+            MakeAmpFaceVariantSwitchArea(
+              ampFaceArea,
+              ampFaceLayout,
+              static_cast<float>(pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch)->GetRECT().W()),
+              static_cast<float>(pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch)->GetRECT().H())),
+            true));
+    }
+    if (auto* pVariantLabelBottom = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelBottom))
+    {
+      const bool showAmp2VariantSwitch = showAmpSection && (mAmpSelectorIndex == 1);
+      pVariantLabelBottom->Hide(!showAmp2VariantSwitch);
+      if (showAmp2VariantSwitch)
+        pGraphics->SetControlBounds(
+          pVariantLabelBottom,
+          MakeAmpFaceVariantSwitchLabelArea(
+            MakeAmpFaceVariantSwitchArea(
+              ampFaceArea,
+              ampFaceLayout,
+              static_cast<float>(pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch)->GetRECT().W()),
+              static_cast<float>(pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch)->GetRECT().H())),
+            false));
+    }
 
     const bool showTunerReadout = tunerActive;
     if (auto* pTunerReadout = pGraphics->GetControlWithTag(kCtrlTagTunerReadout))
@@ -6344,6 +6736,12 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     hideAmpParamControl(kTonePresence);
     hideAmpParamControl(kToneDepth);
     hideAmpParamControl(kMasterVolume);
+    if (auto* pVariantSwitch = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch))
+      pVariantSwitch->Hide(!showAmpSection || mAmpSelectorIndex != 1);
+    if (auto* pVariantLabelTop = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelTop))
+      pVariantLabelTop->Hide(!showAmpSection || mAmpSelectorIndex != 1);
+    if (auto* pVariantLabelBottom = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelBottom))
+      pVariantLabelBottom->Hide(!showAmpSection || mAmpSelectorIndex != 1);
 
     const auto updateAmpSlot = [&](const int tag, const int slotIndex) {
       if (auto* pAmpSlot = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
@@ -6495,23 +6893,26 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   };
 
   // Slot-targeted model removals (requested from non-audio threads).
-  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+  for (int storageIndex = 0; storageIndex < static_cast<int>(mShouldRemoveModelSlot.size()); ++storageIndex)
   {
-    if (!mShouldRemoveModelSlot[slotIndex].exchange(false, std::memory_order_acq_rel))
+    if (!mShouldRemoveModelSlot[storageIndex].exchange(false, std::memory_order_acq_rel))
       continue;
 
-    _ClearAmpSlotCapabilityState(slotIndex);
-    mAmpSlotModelCache[slotIndex] = nullptr;
-    mAmpSlotModelCacheRight[slotIndex] = nullptr;
-    if (mAmpSlotModelState[slotIndex].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
-      mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+    const int slotIndex = storageIndex / kAmpModelVariantCount;
+    const int variantIndex = storageIndex % kAmpModelVariantCount;
+    if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)])
+      _ClearAmpSlotCapabilityState(slotIndex);
+    mAmpSlotModelCache[storageIndex] = nullptr;
+    mAmpSlotModelCacheRight[storageIndex] = nullptr;
+    if (mAmpSlotModelState[storageIndex].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
+      mAmpSlotModelState[storageIndex].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
 
-    if (slotIndex == mCurrentModelSlot)
+    if (slotIndex == mCurrentModelSlot && variantIndex == mCurrentModelVariant)
     {
       mModel = nullptr;
       mModelRight = nullptr;
-      if (slotIndex == mAmpSelectorIndex
-          && mAmpSlotModelState[slotIndex].load(std::memory_order_acquire) == kAmpSlotModelStateEmpty)
+      if (slotIndex == mAmpSelectorIndex && variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)]
+          && mAmpSlotModelState[storageIndex].load(std::memory_order_acquire) == kAmpSlotModelStateEmpty)
         mNAMPath.Set("");
       mModelCleared = true;
       triggerOutputDeClick = true;
@@ -6520,21 +6921,21 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   }
 
   // Worker -> audio lock-free handoff for newly loaded slot models.
-  for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
+  for (int storageIndex = 0; storageIndex < static_cast<int>(mPendingLoadedSlotModel.size()); ++storageIndex)
   {
-    ResamplingNAM* loadedLeft = mPendingLoadedSlotModel[slotIndex].load(std::memory_order_acquire);
+    ResamplingNAM* loadedLeft = mPendingLoadedSlotModel[storageIndex].load(std::memory_order_acquire);
     if (loadedLeft == nullptr)
       continue;
-    loadedLeft = mPendingLoadedSlotModel[slotIndex].exchange(nullptr, std::memory_order_acq_rel);
+    loadedLeft = mPendingLoadedSlotModel[storageIndex].exchange(nullptr, std::memory_order_acq_rel);
     if (loadedLeft == nullptr)
       continue;
     ResamplingNAM* loadedRight =
-      mPendingLoadedSlotModelRight[slotIndex].exchange(nullptr, std::memory_order_acq_rel);
+      mPendingLoadedSlotModelRight[storageIndex].exchange(nullptr, std::memory_order_acq_rel);
     if (loadedRight == nullptr)
     {
       // Worker publishes right then left; if we catch an in-flight handoff, retry next block.
       ResamplingNAM* expectedNull = nullptr;
-      if (!mPendingLoadedSlotModel[slotIndex].compare_exchange_strong(
+      if (!mPendingLoadedSlotModel[storageIndex].compare_exchange_strong(
             expectedNull, loadedLeft, std::memory_order_acq_rel))
       {
         delete loadedLeft;
@@ -6544,66 +6945,75 @@ void NeuralAmpModeler::_ApplyDSPStaging()
 
     std::unique_ptr<ResamplingNAM> loadedModel(loadedLeft);
     std::unique_ptr<ResamplingNAM> loadedModelRight(loadedRight);
-    const uint64_t pendingRequestId = mPendingLoadedSlotRequestId[slotIndex].load(std::memory_order_acquire);
-    const uint64_t activeRequestId = mSlotLoadRequestId[slotIndex].load(std::memory_order_relaxed);
+    const uint64_t pendingRequestId = mPendingLoadedSlotRequestId[storageIndex].load(std::memory_order_acquire);
+    const uint64_t activeRequestId = mSlotLoadRequestId[storageIndex].load(std::memory_order_relaxed);
     if (pendingRequestId != activeRequestId)
       continue;
 
-    if (slotIndex == mCurrentModelSlot)
+    const int slotIndex = storageIndex / kAmpModelVariantCount;
+    const int variantIndex = storageIndex % kAmpModelVariantCount;
+    if (slotIndex == mCurrentModelSlot && variantIndex == mCurrentModelVariant)
     {
       mModel = std::move(loadedModel);
       mModelRight = std::move(loadedModelRight);
-      if (mAmpNAMPaths[slotIndex].GetLength())
+      if (variantIndex == mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)] && mAmpNAMPaths[slotIndex].GetLength())
         mNAMPath = mAmpNAMPaths[slotIndex];
       mNewModelLoadedInDSP = true;
-      mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
+      mAmpSlotModelState[storageIndex].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
       triggerOutputDeClick = true;
       updateActiveModelGainsAndLatency();
     }
     else
     {
-      mAmpSlotModelCache[slotIndex] = std::move(loadedModel);
-      mAmpSlotModelCacheRight[slotIndex] = std::move(loadedModelRight);
-      mAmpSlotModelState[slotIndex].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
+      mAmpSlotModelCache[storageIndex] = std::move(loadedModel);
+      mAmpSlotModelCacheRight[storageIndex] = std::move(loadedModelRight);
+      mAmpSlotModelState[storageIndex].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
     }
   }
 
   // Slot switching is resolved on audio thread by swapping active model ownership.
-  const int requestedSlot = mPendingAmpSlotSwitch.exchange(-1, std::memory_order_acquire);
-  if (requestedSlot >= 0)
+  const int requestedSelection = mPendingAmpModelSelection.exchange(-1, std::memory_order_acquire);
+  if (requestedSelection >= 0)
   {
-    const int targetSlot = std::clamp(requestedSlot, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
-    if (targetSlot != mCurrentModelSlot)
+    const int maxSelectionIndex = static_cast<int>(mAmpSlotModelCache.size()) - 1;
+    const int targetSelection = std::clamp(requestedSelection, 0, maxSelectionIndex);
+    const int targetSlot = targetSelection / kAmpModelVariantCount;
+    const int targetVariant = targetSelection % kAmpModelVariantCount;
+    if (targetSlot != mCurrentModelSlot || targetVariant != mCurrentModelVariant)
     {
-      const bool targetHasPath = (mAmpNAMPaths[targetSlot].GetLength() > 0);
-      const int targetState = mAmpSlotModelState[targetSlot].load(std::memory_order_acquire);
-      const bool haveReadyTargetModel = (targetState == kAmpSlotModelStateReady) && (mAmpSlotModelCache[targetSlot] != nullptr)
-                                        && (!inputStereoMode || mAmpSlotModelCacheRight[targetSlot] != nullptr);
+      const bool targetHasPath = (mAmpNAMPathsByVariant[targetSelection].GetLength() > 0);
+      const int targetState = mAmpSlotModelState[targetSelection].load(std::memory_order_acquire);
+      const bool haveReadyTargetModel =
+        (targetState == kAmpSlotModelStateReady) && (mAmpSlotModelCache[targetSelection] != nullptr)
+        && (!inputStereoMode || mAmpSlotModelCacheRight[targetSelection] != nullptr);
       const bool waitForTargetLoad = targetHasPath && !haveReadyTargetModel
                                      && (targetState == kAmpSlotModelStateLoading);
       if (waitForTargetLoad)
       {
         // Keep current slot live until the target slot model has actually arrived.
-        mPendingAmpSlotSwitch.store(targetSlot, std::memory_order_release);
+        mPendingAmpModelSelection.store(targetSelection, std::memory_order_release);
       }
       else
       {
         const int previousSlot = mCurrentModelSlot;
+        const int previousVariant = mCurrentModelVariant;
         if (previousSlot >= 0 && previousSlot < static_cast<int>(mAmpNAMPaths.size()))
         {
-          mAmpSlotModelCache[previousSlot] = std::move(mModel);
-          mAmpSlotModelCacheRight[previousSlot] = std::move(mModelRight);
+          const int previousSelection = _GetAmpSlotModelStorageIndex(previousSlot, previousVariant);
+          mAmpSlotModelCache[previousSelection] = std::move(mModel);
+          mAmpSlotModelCacheRight[previousSelection] = std::move(mModelRight);
           const int prevState =
-            (mAmpSlotModelCache[previousSlot] != nullptr) ? kAmpSlotModelStateReady : kAmpSlotModelStateEmpty;
-          mAmpSlotModelState[previousSlot].store(prevState, std::memory_order_relaxed);
+            (mAmpSlotModelCache[previousSelection] != nullptr) ? kAmpSlotModelStateReady : kAmpSlotModelStateEmpty;
+          mAmpSlotModelState[previousSelection].store(prevState, std::memory_order_relaxed);
         }
 
         mCurrentModelSlot = targetSlot;
+        mCurrentModelVariant = targetVariant;
         if (haveReadyTargetModel)
         {
-          mModel = std::move(mAmpSlotModelCache[targetSlot]);
-          mModelRight = std::move(mAmpSlotModelCacheRight[targetSlot]);
-          mAmpSlotModelState[targetSlot].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
+          mModel = std::move(mAmpSlotModelCache[targetSelection]);
+          mModelRight = std::move(mAmpSlotModelCacheRight[targetSelection]);
+          mAmpSlotModelState[targetSelection].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
           mNewModelLoadedInDSP = true;
         }
         else
@@ -6611,8 +7021,8 @@ void NeuralAmpModeler::_ApplyDSPStaging()
           _ClearAmpSlotCapabilityState(targetSlot);
           mModel = nullptr;
           mModelRight = nullptr;
-          if (mAmpSlotModelState[targetSlot].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
-            mAmpSlotModelState[targetSlot].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+          if (mAmpSlotModelState[targetSelection].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
+            mAmpSlotModelState[targetSelection].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
           mModelCleared = true;
         }
 
@@ -6629,7 +7039,8 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mModel = nullptr;
     mModelRight = nullptr;
     mNAMPath.Set("");
-    mAmpSlotModelState[mCurrentModelSlot].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+    mAmpSlotModelState[static_cast<size_t>(_GetAmpSlotModelStorageIndex(mCurrentModelSlot, mCurrentModelVariant))]
+      .store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
     mShouldRemoveModel = false;
     mModelCleared = true;
     updateActiveModelGainsAndLatency();
@@ -6726,7 +7137,9 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mModelRight = std::move(mStagedModelRight);
     mStagedModelRight = nullptr;
     mCurrentModelSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
-    mAmpSlotModelState[mCurrentModelSlot].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
+    mCurrentModelVariant = mAmpSlotSelectedVariant[static_cast<size_t>(mCurrentModelSlot)];
+    mAmpSlotModelState[static_cast<size_t>(_GetAmpSlotModelStorageIndex(mCurrentModelSlot, mCurrentModelVariant))]
+      .store(kAmpSlotModelStateReady, std::memory_order_relaxed);
     _SetAmpSlotCapabilityState(mCurrentModelSlot, mModel->HasLoudness(), mModel->HasOutputLevel());
     mNewModelLoadedInDSP = true;
     updateActiveModelGainsAndLatency();
@@ -6796,9 +7209,12 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   {
     const int targetSlot =
       std::clamp(mPresetRecallTargetSlot.load(std::memory_order_acquire), 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
-    const int targetState = mAmpSlotModelState[targetSlot].load(std::memory_order_acquire);
+    const int targetSelection = _GetSelectedAmpSlotModelStorageIndex(targetSlot);
+    const int targetState = mAmpSlotModelState[targetSelection].load(std::memory_order_acquire);
     const bool targetHasPath = (mAmpNAMPaths[targetSlot].GetLength() > 0);
-    const bool targetReady = targetHasPath && (targetState == kAmpSlotModelStateReady) && (mCurrentModelSlot == targetSlot)
+    const bool targetReady =
+      targetHasPath && (targetState == kAmpSlotModelStateReady) && (mCurrentModelSlot == targetSlot)
+      && (mCurrentModelVariant == mAmpSlotSelectedVariant[static_cast<size_t>(targetSlot)])
                              && (mModel != nullptr) && (!inputStereoMode || mModelRight != nullptr);
     const bool targetSettledWithoutModel = !targetHasPath || (targetState == kAmpSlotModelStateEmpty)
                                            || (targetState == kAmpSlotModelStateFailed);
@@ -7197,9 +7613,11 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
     }
     if (slotIndex == mCurrentModelSlot && mModel != nullptr)
       _SetAmpSlotCapabilityState(slotIndex, mModel->HasLoudness(), mModel->HasOutputLevel());
-    else if (mAmpSlotModelCache[slotIndex] != nullptr)
+    else if (mAmpSlotModelCache[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(slotIndex))] != nullptr)
       _SetAmpSlotCapabilityState(
-        slotIndex, mAmpSlotModelCache[slotIndex]->HasLoudness(), mAmpSlotModelCache[slotIndex]->HasOutputLevel());
+        slotIndex,
+        mAmpSlotModelCache[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(slotIndex))]->HasLoudness(),
+        mAmpSlotModelCache[static_cast<size_t>(_GetSelectedAmpSlotModelStorageIndex(slotIndex))]->HasOutputLevel());
     else
       _ClearAmpSlotCapabilityState(slotIndex);
     _RefreshModelCapabilityIndicators();
@@ -7766,10 +8184,23 @@ void NeuralAmpModeler::_RefreshModelCapabilityIndicators()
 void NeuralAmpModeler::_UpdateLatency()
 {
   int latency = 0;
-  if (mModel)
+  const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+  int ampLatency = 0;
+  for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
   {
-    latency += mModel->GetLatency();
+    const int storageIndex = _GetAmpSlotModelStorageIndex(activeSlot, variantIndex);
+    if (activeSlot == mCurrentModelSlot && variantIndex == mCurrentModelVariant)
+    {
+      if (mModel != nullptr)
+        ampLatency = std::max(ampLatency, mModel->GetLatency());
+    }
+    else if (mAmpSlotModelCache[static_cast<size_t>(storageIndex)] != nullptr)
+    {
+      ampLatency = std::max(
+        ampLatency, mAmpSlotModelCache[static_cast<size_t>(storageIndex)]->GetLatency());
+    }
   }
+  latency += ampLatency;
   const int stompLatencyA = (mStompModel != nullptr) ? mStompModel->GetLatency() : 0;
   const int stompLatencyB = (mStompModelB != nullptr) ? mStompModelB->GetLatency() : 0;
   latency += std::max(stompLatencyA, stompLatencyB);
