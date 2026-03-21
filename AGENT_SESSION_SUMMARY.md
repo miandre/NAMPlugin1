@@ -1,4 +1,4 @@
-Last updated: 2026-03-19
+Last updated: 2026-03-21
 
 Purpose: concise handoff so a new agent can continue without replaying the full chat history.
 
@@ -10,16 +10,31 @@ Purpose: concise handoff so a new agent can continue without replaying the full 
 
 ## Current repository state
 - Active branch: `main`
-- Branch HEAD: `869fa37`
-- Working tree at handoff: clean
+- Branch HEAD: `1ef0be1`
+- Working tree at handoff: dirty
+- Current staged-only changes:
+  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_DOWN.png`
+  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_UP.png`
+- Current unstaged changes:
+  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
+  - `NeuralAmpModeler/NeuralAmpModeler.h`
+  - `NeuralAmpModeler/NeuralAmpModelerControls.h`
+  - `NeuralAmpModeler/Unserialization.cpp`
+  - `NeuralAmpModeler/config.h`
+  - `NeuralAmpModeler/resources/img/Hardware/HorizonalSwitch_L.png`
+  - `NeuralAmpModeler/resources/img/Hardware/HorizonalSwitch_R.png`
+  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_UP.png`
+  - `NeuralAmpModeler/resources/main.rc`
 - Recent relevant history:
+  - `1ef0be1` `Merge boost v2`
+  - `795c931` `Add boost A/B model selection`
+  - `084f695` `Add boost drive control`
+  - `13b3063` `Merge compressor stomp pedal`
+  - `302ac86` `Add built-in compressor algorithm`
+  - `bccee0b` `Enable compressor stomp controls`
+  - `7f779f0` `Updated graphics for Stomp section`
+  - `b08b093` `Update handover`
   - `869fa37` `Merge feature/interactive-cab-v1`
-  - `cb678d0` `Wire embedded curated cab IRs into release mode`
-  - `59abf22` `Add embedded curated cab IR assets`
-  - `5a1e4a2` `Implement interactive cab v1`
-  - `3412e9a` `Add interactive cab graphics`
-  - `a25d4e8` `Improved graphics for Amp2 and Cab`
-  - `816fbc6` `Transpose should not affect CPU when disabled.`
 
 ## What is completed now
 
@@ -60,76 +75,114 @@ Landed work:
   - `57`
   - `121`
 - Slider direction is mirrored correctly for the left slot
-- Cab UI was significantly redesigned:
-  - per-slot header rows
-  - `MIC` labeling
-  - dedicated cab picker styling
-  - mic bitmap slider handles
+- Cab UI was significantly redesigned
 - Old single `Cab Blend` concept was removed
 
 ### 6) Curated cab assets are embedded for release mode
 Outcome:
 - Release mode no longer depends on runtime disk reads for the curated cab mic set
 
-Landed work:
-- Generated embedded curated IR asset files:
-  - `NeuralAmpModeler/EmbeddedCabIRAssets.h`
-  - `NeuralAmpModeler/EmbeddedCabIRAssets.cpp`
-- Generator script:
-  - `tools/generate_embedded_cab_ir_assets.py`
-- Release-mode curated cab staging now loads from embedded PCM data instead of WAV files on disk
-- Visual Studio project files were updated to compile the generated asset source
-
 Important nuance:
 - `Custom IR` loading is still allowed in release mode
 - Only the curated mic set is embedded; user-loaded IRs still use the normal file path flow
 
-### 7) Transpose is still hidden and undecided
+### 7) Compressor stomp pedal v1 is landed
+Outcome:
+- A built-in compressor stomp now exists ahead of the amp path
+
+Landed work:
+- Controls:
+  - `Amount`
+  - `Level`
+  - `Soft/Hard`
+  - on/off
+- Built-in compressor DSP was added instead of a NAM-based stomp model
+- Control smoothing/state is preallocated and runs in the existing audio callback path
+- Stomp section graphics and control layout were updated to expose the compressor
+
+### 8) Boost v2 is landed
+Outcome:
+- The boost pedal now supports two switchable model variants while sharing one control surface
+
+Landed work:
+- Separate boost model paths for `A` and `B`
+- `A/B` switch in the stomp UI
+- Boost drive control added
+- Capability/latency/state handling follows the selected boost variant
+- Preset/session restore includes both boost model paths
+
+### 9) Transpose is still hidden and undecided
 - Hidden transpose feature still exists
-- A small RT-safe idle-path fix already landed:
-  - transpose should not keep doing steady-state off-path work when disabled
-- Recent app-side “transpose seems on” behavior was inspected
-- Most likely cause was standalone saved state restoring a nonzero transpose value, not a changed default
+- A small RT-safe idle-path fix already landed
+- Most recent investigation suggested apparent "transpose on" behavior was restored saved state, not a changed default
 - Current transpose default is still `0`
+
+## Current in-progress worktree state
+
+### Amp model variants v1 is partially implemented but not committed
+Intent:
+- Each amp slot should own multiple model variants, starting with `A` and `B`
+- Only one variant is active at a time per amp slot
+- Other controls for that amp slot remain shared across variants
+- The storage/load/swap architecture should be future-proof for more than two variants later
+
+Current dirty-tree scope:
+- Backend scaffolding changed from `slot` to `slot + variant` for amp model storage, loading, pending swaps, and UI event state
+- State serialization now stores per-variant amp paths plus the selected variant per slot
+- Settings UI now exposes amp model browser rows for `1B`, `2B`, and `3B`
+- Amp 2 has a first working on-face variant switch with vertical switch art and `LEAD` / `CRUNCH` labels
+- Amp 1 and Amp 3 are scaffolded for future UI switches but intentionally do not expose them yet
+
+Current behavioral status:
+- User-reported status is that Amp 2 variant switching is working as intended in both UI and DSP
+- Staged image additions belong to this feature
+- No fresh build/test run was performed in this recovery session
 
 ## Important tweak points and files
 
-### Cab system
-- Main cab DSP/state/UI path:
+### Amp variant system
+- Main amp DSP/state/UI path:
   - `NeuralAmpModeler/NeuralAmpModeler.cpp`
   - `NeuralAmpModeler/NeuralAmpModeler.h`
-- Cab-specific controls:
+- Amp-specific controls:
   - `NeuralAmpModeler/NeuralAmpModelerControls.h`
-- Embedded curated cab assets:
-  - `NeuralAmpModeler/EmbeddedCabIRAssets.h`
-  - `NeuralAmpModeler/EmbeddedCabIRAssets.cpp`
-- Embedded asset generator:
-  - `tools/generate_embedded_cab_ir_assets.py`
-
-### Cab UI assets
-- New mic images:
-  - `NeuralAmpModeler/resources/img/Mic/57.png`
-  - `NeuralAmpModeler/resources/img/Mic/121.png`
+- Legacy/JSON unserialization path:
+  - `NeuralAmpModeler/Unserialization.cpp`
 - Resource registration:
   - `NeuralAmpModeler/config.h`
   - `NeuralAmpModeler/resources/main.rc`
+- Switch art:
+  - `NeuralAmpModeler/resources/img/Hardware/HorizonalSwitch_L.png`
+  - `NeuralAmpModeler/resources/img/Hardware/HorizonalSwitch_R.png`
+  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_UP.png`
+  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_DOWN.png`
+
+### Stomp compressor / boost v2
+- Main stomp DSP/state/UI path:
+  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
+  - `NeuralAmpModeler/NeuralAmpModeler.h`
 
 ## Important behavioral conclusions
-- Interactive Cab V1 is considered a good baseline and should not be reworked casually
-- Keep the dual-slot “mono source, then pan” architecture
-- Curated mic alignment is expected to come from the IR assets themselves, not from app-side phase correction
+- Interactive Cab V1 is a good baseline and should not be reworked casually
+- Keep the dual-slot cab architecture
 - `Custom IR` support in release mode is intentional and should remain
 - `Input Stereo` should remain session/setup state, not preset-owned state
-- Plugin preset asset restore is sensitive; keep future changes there minimal and reviewable
+- Boost `A/B` established the pattern of "multiple model variants, one shared control surface"
+- Amp variants should follow that same product direction
+- Amp 2 variant UI is the current first slice; Amp 1 and Amp 3 UI can wait
 - Transpose is still not a settled product feature; avoid expanding it unless the user explicitly wants that
 
 ## Current plugin/app state
-- `main` contains Interactive Cab V1 and the embedded curated IR path
-- Working tree is clean at handoff
-- Release mode now supports:
+- `main` already includes:
+  - Interactive Cab V1
+  - embedded curated cab IRs
+  - built-in compressor stomp v1
+  - boost v2 with `A/B` model selection
+- The current worktree is not clean because amp model variants v1 is mid-implementation
+- Release mode currently supports:
   - embedded curated cab IRs
   - user-loaded custom IRs
-- No new build/test results were produced during the final merge pass
+- No new build/test results were produced during this handover recovery pass
 
 ## Build/config baseline to preserve
 - Audio/performance validation: `Release | x64` only
@@ -149,13 +202,13 @@ Important nuance:
   - breaking changes are acceptable if they improve architecture or iteration speed
 
 ## Suggested next coding step
-1. Unless the user redirects, inspect a built-in compressor stomp pedal v1
-2. Keep scope small:
-  - amount
-  - level / makeup gain
-  - soft / hard switch
-3. Prefer a simple built-in DSP compressor over a large stomp-architecture rewrite
-4. Keep transpose as a lower-priority decision path unless the user explicitly returns to it
+1. Review and commit amp model variants v1 as a small, coherent slice
+2. Keep scope to the current intended feature:
+  - per-slot `A/B` model storage/loading
+  - state restore of selected variant
+  - Amp 2 UI switch only
+3. Do not expand Amp 1 / Amp 3 front-panel variant UI unless the user explicitly wants that next
+4. After the amp variant slice is stable, return to lower-priority roadmap items such as transpose or release packaging
 
 ## Starter prompt for the next agent
 You are continuing work in `D:\Dev\NAMPlugin` on branch `main`.
@@ -180,23 +233,17 @@ Current baseline:
 4. Plugin preset stomp NAM and cab IR restore is fixed
 5. Interactive Cab V1 is merged to `main`
 6. Release mode embeds curated cab IRs but still allows custom IR loading
+7. Compressor stomp pedal v1 is merged to `main`
+8. Boost v2 with `A/B` model selection is merged to `main`
+
+Current working tree status:
+1. The tree is dirty with in-progress amp model variants v1 work
+2. Amp 2 variant switching is reported working in both UI and DSP
+3. Amp 1 and Amp 3 are backend-ready for variants but intentionally do not expose front-panel switches yet
 
 Suggested next task unless the user redirects:
-1. Inspect whether a built-in compressor stomp pedal v1 can be added with minimal architecture churn
-2. Propose the smallest RT-safe signal-chain insertion point and control set
-3. If the user wants code, implement only the smallest reviewable first slice
-
-Compressor idea currently under consideration:
-- controls:
-  - `Amount`
-  - `Level`
-  - `Soft/Hard` switch
-- likely behavior:
-  - built-in compressor DSP, not a NAM model
-  - soft/hard maps to different compression character, likely ratio/knee and possibly timing presets
-
-Constraints:
-- Keep diffs minimal
-- Keep audio-thread RT-safe
-- Do not run builds/tests unless explicitly requested
-- Dev mode: breaking changes are allowed when they improve architecture and iteration speed
+1. Inspect the current amp model variants diff and preserve the intended architecture
+2. Keep the current first slice minimal:
+  - per-slot `A/B` model loading/storage/persistence
+  - Amp 2 front-panel variant switch
+3. If making code changes, stay RT-safe and keep the patch reviewable

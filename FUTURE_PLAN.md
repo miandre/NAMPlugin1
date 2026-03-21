@@ -1,4 +1,4 @@
-Last updated: 2026-03-19
+Last updated: 2026-03-21
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -35,11 +35,6 @@ Outcome:
 Outcome:
 - `NAM_RELEASE_MODE=1` behaves like a first "release-feel" runtime path without full packaging yet
 
-Landed work:
-- Fixed amp/stomp/IR asset manifest scaffold
-- Controlled asset resolution from known `tmpLoad` locations
-- Release-mode startup/default/preset restore applies those fixed assets
-
 ### Done: Milestone E - gate UX reshape
 Outcome:
 - Gate now behaves as a one-knob macro instead of a raw threshold-only feel
@@ -47,9 +42,6 @@ Outcome:
 ### Done: Milestone G - doubler v1
 Outcome:
 - Doubler works as a double-track preview rather than a simple widener
-
-Current limitation:
-- Strong baseline, not a final polished production doubler
 
 ### Done: Milestone H - proper stereo/mono input and output metering
 Outcome:
@@ -63,78 +55,66 @@ Outcome:
 Outcome:
 - Interactive dual-cab workflow is now the main cab architecture
 
-Landed work:
-- Two independent cab slots:
-  - `Cab A`
-  - `Cab B`
-- Per-slot controls:
-  - enable
-  - source
-  - position
-  - level
-  - pan
-  - custom IR loader
-- Curated mic interpolation v1:
-  - 1D cone-position interpolation
-  - five captures per mic
-  - current mic set:
-    - `57`
-    - `121`
-- Left-slot slider direction mirrors correctly relative to the speaker art
-- Old single-cab blend workflow removed
-- Cab page UI redesign landed
-
-Current limitation:
-- This is a stable v1, not the end-state cab system
-- No distance axis yet
-- No more advanced dual-cab routing or speaker-selection logic yet
-
 ### Done: Release-mode curated cab embedding v1
 Outcome:
 - Curated cab IRs for the current mic set are embedded in release builds
 
-Landed work:
-- Generated embedded PCM asset path for curated cab IRs
-- Release-mode cab staging can load curated IRs from compiled data
-- Visual Studio projects include the generated asset source
-- `Custom IR` loading remains available in release mode
+### Done: Milestone I - Compressor stomp pedal v1
+Outcome:
+- A built-in compressor stomp is now available with a minimal musical control set
 
-Current limitation:
-- This only covers the curated cab mic set
-- Amp/stomp final embedded packaging strategy is still not finished
+Landed work:
+- Controls:
+  - `Amount`
+  - `Level`
+  - `Soft/Hard`
+  - on/off
+- Built-in DSP compressor, not a NAM model
+- RT-safe state/smoothing integrated into the current signal path
+
+### Done: Boost v2
+Outcome:
+- The boost pedal now supports switchable `A/B` model variants while sharing one control surface
+
+Landed work:
+- `A/B` boost model storage
+- UI switch for boost voice selection
+- boost drive control
+- state/preset/session restore for both boost model paths
 
 ## Active milestones
 
-### Milestone I: Compressor stomp pedal v1
+### Milestone J: Amp model variants v1
 Goal:
-- Add a built-in compressor stomp pedal with a very small, musical control set
+- Add per-slot amp model variants, starting with `A/B`, while keeping the rest of each amp slot's controls shared
 
-Proposed v1 scope:
-- controls:
-  - `Amount`
-  - `Level`
-  - `Soft/Hard` switch
-- likely implementation:
-  - built-in DSP compressor, not a NAM model
-  - soft/hard maps to different compression character via ratio/knee and optionally timing presets
+Current intended product behavior:
+- Each amp slot owns multiple models of the same amp family
+- Only one variant is active at a time
+- Shared controls such as gain and tonestack stay common to the amp slot
+- Architecture should be future-proof for more than two variants later
 
-Recommended design bias:
-- Keep it simple and reviewable
-- Use a fixed internal compressor design with just a few exposed musical controls
-- Prefer predictable preallocated DSP state over feature breadth
+Current implementation state:
+- Backend storage/load/swap plumbing is being migrated from `slot` to `slot + variant`
+- Serialization is being updated to store per-variant amp paths plus the selected variant per slot
+- Settings UI now includes amp model browsers for `A` and `B`
+- Amp 2 has a first working front-panel variant switch
+- Amp 1 and Amp 3 are intentionally backend-ready only for now
 
-Likely signal-chain placement:
-- stomp/preamp side of the chain
-- before the amp model
-- avoid larger architecture churn unless the user explicitly wants it
+Recommended v1 boundary:
+- Commit only the current first slice:
+  - per-slot `A/B` model storage and persistence
+  - active-variant switching
+  - Amp 2 front-panel switch
+- Defer extra front-panel switches for Amp 1 / Amp 3 unless explicitly requested
 
 Risk:
 - Medium
 
 RT safety watch-outs:
 - No allocations or dynamic graph changes in the callback
-- Smooth control changes where needed
-- Keep detector/state memory preallocated
+- Keep model swap ownership handoff deterministic
+- Preserve existing preset-recall mute/swap safety
 
 ### Milestone F: Transpose decision path
 Goal:
@@ -143,7 +123,7 @@ Goal:
 Current state:
 - Feature is hidden
 - Idle off-path CPU issue was already reduced
-- App-side “transpose seems on” behavior appears to have been old standalone-state restore rather than a changed default
+- App-side "transpose seems on" behavior appears to have been old standalone-state restore rather than a changed default
 
 Risk:
 - Medium
@@ -200,7 +180,7 @@ Examples:
 - cab control alignment/padding cleanup
 
 ## Recommended execution order from now
-1. Milestone I: compressor stomp pedal v1
+1. Milestone J: amp model variants v1
 2. Milestone F: transpose decision path only if the user returns to it
 3. Resume Milestone B when final release asset set and hardware-switch behavior are clearer
 4. Milestone D only after Cab v1 remains stable in regular use
@@ -223,24 +203,17 @@ Then confirm repo/submodule state:
 - `git -C iPlug2 remote -v`
 
 Current direction:
-1. Metering, gate/stomp decoupling, preset/session restore fixes, and Interactive Cab V1 are already landed
+1. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, and boost v2 are already landed
 2. Do not reopen the metering or plugin preset-restore paths unless the user asks
-3. Release mode now embeds curated cab IRs but still allows custom IR loading
+3. Release mode embeds curated cab IRs but still allows custom IR loading
 4. Prefer small, reviewable follow-ups from the current stable baseline
 
 Suggested next task unless the user redirects:
-1. Inspect how to add a built-in compressor stomp pedal with minimal architecture churn
-2. Propose the smallest RT-safe insertion point and control set
-3. If the user wants code, implement only the smallest reviewable first slice
-
-Compressor idea under consideration:
-- controls:
-  - `Amount`
-  - `Level`
-  - `Soft/Hard`
-- likely behavior:
-  - built-in compressor DSP
-  - soft/hard maps to ratio/knee and possibly timing presets
+1. Inspect the current dirty-tree amp variant work
+2. Preserve the intended first slice:
+  - per-slot `A/B` model storage/loading/persistence
+  - Amp 2 front-panel switch
+3. If making code changes, keep the patch RT-safe and reviewable
 
 Constraints:
 - Keep diffs minimal
