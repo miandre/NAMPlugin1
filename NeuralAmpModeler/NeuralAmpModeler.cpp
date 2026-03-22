@@ -989,7 +989,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kToneDepth)->InitDouble("Depth", 5.0, 0.0, 10.0, 0.1);
   GetParam(kMasterVolume)->InitDouble("Master", 5.0, 0.0, 10.0, 0.1);
   GetParam(kTunerActive)->InitBool("Tuner", false);
-  GetParam(kTunerMonitorMode)->InitEnum("Tuner Monitor", 1, {"Mute", "Bypass", "Full"});
+  GetParam(kTunerMonitorMode)->InitEnum("Tuner Monitor", 0, {"Mute", "Bypass", "Full"});
   GetParam(kTransposeSemitones)->InitDouble("Transpose", 0.0, -8.0, 8.0, 1.0, "");
   GetParam(kInputStereoMode)->InitBool("Input Stereo", false);
   GetParam(kOutputLevel)->InitGain("Output", 0.0, -40.0, 40.0, 0.1);
@@ -1564,7 +1564,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto settingsAmp3HasCalibrationArea = makeCapabilityArea(settingsAmpModelArea3, 1);
     const auto settingsStompHasLoudnessArea = makeCapabilityArea(settingsStompModelArea, 0);
     const auto settingsStompHasCalibrationArea = makeCapabilityArea(settingsStompModelArea, 1);
-    const float tunerPanelWidth = 700.0f;
+    const float tunerPanelWidth = 580.0f;
     const float tunerPanelHeight = 150.0f;
     const float tunerPanelTop = topUtilityRowArea.B + 90.0f;
     const auto tunerReadoutArea =

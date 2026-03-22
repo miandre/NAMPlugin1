@@ -1781,13 +1781,14 @@ public:
       return;
     }
 
-    // Only accept a new note after a few consistent updates, to ignore pluck transients.
+    // The analyzer already does note locking and attack handling, so keep the display
+    // responsive and avoid adding another heavy layer of lag here.
     if (mDisplayedMidiNote < 0)
     {
       mDisplayedMidiNote = midiNote;
       mPendingMidiNote = -1;
       mPendingMidiCount = 0;
-      mNeedleHoldFrames = 2;
+      mNeedleHoldFrames = 1;
     }
     else if (midiNote != mDisplayedMidiNote)
     {
@@ -1799,17 +1800,16 @@ public:
         mPendingMidiCount = 1;
       }
 
-      if (mPendingMidiCount >= 3)
+      if (mPendingMidiCount >= 2)
       {
         mDisplayedMidiNote = midiNote;
         mPendingMidiNote = -1;
         mPendingMidiCount = 0;
-        mNeedleHoldFrames = 3;
+        mNeedleHoldFrames = 1;
       }
       else
       {
-        // Keep current display until the new note has settled.
-        mNeedleHoldFrames = std::max(mNeedleHoldFrames, 2);
+        mNeedleHoldFrames = std::max(mNeedleHoldFrames, 1);
       }
     }
     else
@@ -1826,8 +1826,16 @@ public:
     else
     {
       const float delta = mTargetCents - mDisplayCents;
-      const float alpha = std::fabs(delta) > 14.0f ? 0.50f : 0.24f;
-      mDisplayCents += alpha * delta;
+      const bool movingAwayFromCenter =
+        (std::fabs(mTargetCents) > std::fabs(mDisplayCents)) && ((mTargetCents * mDisplayCents) >= 0.0f);
+      const float alpha = std::fabs(delta) > 14.0f ? 0.46f : 0.26f;
+      float step = alpha * delta;
+      if (movingAwayFromCenter)
+        step *= 0.78f;
+
+      const float maxStep = movingAwayFromCenter ? 4.8f : 7.0f;
+      step = std::clamp(step, -maxStep, maxStep);
+      mDisplayCents += step;
     }
 
     SetDirty(false);
@@ -1878,6 +1886,14 @@ public:
     }
 
     g.DrawText(primaryText, _GetNoteNameNoOctave(mDisplayedMidiNote), panel.GetFromTop(std::max(44.0f, panel.H() * 0.46f)));
+
+    std::ostringstream centsStream;
+    centsStream.setf(std::ios::showpos);
+    centsStream.setf(std::ios::fixed);
+    centsStream.precision(1);
+    centsStream << mTargetCents;
+    const IRECT centsRect(panel.L, lineY - 48.0f, panel.R, lineY - 28.0f);
+    g.DrawText(secondaryText, centsStream.str().c_str(), centsRect);
 
     const float needleX = centerX + (mDisplayCents / 50.0f) * xRange;
     const IColor needleColor =

@@ -39,7 +39,6 @@ private:
   std::atomic<bool> mHasPitch = false;
   std::atomic<int> mMidiNote = 0;
   std::atomic<float> mCents = 0.0f;
-  int mAnalysisDecim = 0;
   int mHoldFrames = 0;
   float mSmoothedFrequencyHz = 0.0f;
   float mSmoothedCents = 0.0f;
@@ -52,4 +51,5 @@ private:
   int mStableDetections = 0;
   double mPrevRms = 0.0;
   int mAttackIgnoreFrames = 0;
+  int mPostAttackSettleFrames = 0;
 };

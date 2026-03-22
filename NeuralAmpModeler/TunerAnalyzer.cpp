@@ -21,7 +21,6 @@ void TunerAnalyzer::Reset() noexcept
   mMidiNote.store(0, std::memory_order_relaxed);
   mCents.store(0.0f, std::memory_order_relaxed);
   mWriteIndex.store(0, std::memory_order_relaxed);
-  mAnalysisDecim = 0;
   mHoldFrames = 0;
   mSmoothedFrequencyHz = 0.0f;
   mSmoothedCents = 0.0f;
@@ -34,6 +33,7 @@ void TunerAnalyzer::Reset() noexcept
   mStableDetections = 0;
   mPrevRms = 0.0;
   mAttackIgnoreFrames = 0;
+  mPostAttackSettleFrames = 0;
 }
 
 void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
@@ -41,14 +41,10 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
   if (pluginSampleRate <= 0.0)
     return;
 
-  mAnalysisDecim = (mAnalysisDecim + 1) % 2; // Analyze at ~30 Hz
-  if (mAnalysisDecim != 0)
-    return;
-
   constexpr int kTunerDownsample = 4;
   constexpr double kTunerMinHz = 24.0;
-  constexpr double kTunerMaxHz = 350.0;
-  constexpr double kTunerLowPassHz = 900.0;
+  constexpr double kTunerMaxHz = 450.0;
+  constexpr double kTunerLowPassHz = 1400.0;
   constexpr int kTunerHistoryWindow = 3;
   constexpr double kPi = 3.14159265358979323846;
   bool pitchValid = false;
@@ -76,21 +72,28 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
     rawRms = std::sqrt(rawSumSq / static_cast<double>(kAnalysisSize));
     const double onsetThreshold = std::max(0.004, mPrevRms * 1.5);
     const bool strongOnset = rawRms > std::max(0.008, mPrevRms * 2.2);
+    const bool hadTrackedPitch =
+      mHasPitch.load(std::memory_order_relaxed) && mLockedMidiNote >= 0 && mSmoothedFrequencyHz > 0.0f;
     if (rawRms > onsetThreshold)
     {
-      // Briefly ignore attack transients; use a slightly longer gate on strong plucks.
-      mAttackIgnoreFrames = strongOnset ? 2 : 1;
+      // Briefly ignore attack transients. On a strong onset, clear old-note inertia so
+      // a new string can be acquired quickly instead of easing in from the last pitch.
+      mAttackIgnoreFrames = strongOnset ? 3 : 1;
+      mPostAttackSettleFrames = strongOnset ? 4 : 2;
       if (strongOnset)
       {
-        // New pluck/string transition: clear short-term frequency memory so previous-string
-        // inertia does not pull early estimates.
-        if (!mHasPitch.load(std::memory_order_relaxed))
+        if (!hadTrackedPitch)
           mLockedMidiNote = -1;
         mFrequencyHistoryCount = 0;
         mFrequencyHistoryIndex = 0;
         mLastDetectedFrequencyHz = 0.0f;
         mStableDetections = 0;
-        mNeedleHoldFrames = std::max(mNeedleHoldFrames, 3);
+        if (!hadTrackedPitch)
+        {
+          mSmoothedFrequencyHz = 0.0f;
+          mSmoothedCents = 0.0f;
+        }
+        mNeedleHoldFrames = std::max(mNeedleHoldFrames, 1);
       }
     }
     mPrevRms = 0.85 * mPrevRms + 0.15 * rawRms;
@@ -158,10 +161,12 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
             bestLag = lag;
           }
         }
+        const bool initialHighCandidate = bestLag < static_cast<int>(sampleRate / 180.0);
         if (bestLag * 2 <= maxLag)
         {
           const double corr2 = correlationAtLag(bestLag * 2);
-          if (corr2 > bestCorr * 0.93)
+          const double octavePromotionRatio = initialHighCandidate ? 0.975 : 0.93;
+          if (corr2 > bestCorr * octavePromotionRatio)
           {
             bestLag *= 2;
             bestCorr = corr2;
@@ -169,7 +174,8 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
         }
 
         const bool lowCandidate = bestLag > static_cast<int>(sampleRate / 90.0);
-        const double corrThreshold = lowCandidate ? 0.60 : 0.68;
+        const bool highCandidate = bestLag < static_cast<int>(sampleRate / 180.0);
+        const double corrThreshold = lowCandidate ? 0.60 : (highCandidate ? 0.62 : 0.68);
         if (bestCorr > corrThreshold)
         {
           double refinedLag = static_cast<double>(bestLag);
@@ -187,12 +193,19 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
           }
 
           const double frequency = sampleRate / std::max(1.0, refinedLag);
+          const bool trackingLocked =
+            mHasPitch.load(std::memory_order_relaxed) && mLockedMidiNote >= 0 && mStableDetections >= 2;
+          const double detectedMidiFloat = 69.0 + 12.0 * std::log2(std::max(1e-6, frequency) / 440.0);
+          const double semitoneJump =
+            trackingLocked ? std::fabs(detectedMidiFloat - static_cast<double>(mLockedMidiNote)) : 0.0;
           const bool isLargeJump =
             (mSmoothedFrequencyHz > 0.0f) &&
             (frequency < 0.40 * static_cast<double>(mSmoothedFrequencyHz) ||
              frequency > 2.50 * static_cast<double>(mSmoothedFrequencyHz));
+          const bool isTrackedOutlier =
+            trackingLocked && !strongOnset && semitoneJump > 2.25 && bestCorr < (highCandidate ? 0.80 : 0.82);
 
-          if (!isLargeJump)
+          if (!isLargeJump && !isTrackedOutlier)
           {
             bool plausible = true;
             if (mLastDetectedFrequencyHz > 0.0f)
@@ -220,14 +233,16 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
 
               const float medianHz = _MedianFromHistory(mFrequencyHistory, mFrequencyHistoryCount);
               const float prevHz = mSmoothedFrequencyHz;
+              const bool acquiringPitch =
+                !mHasPitch.load(std::memory_order_relaxed) || mStableDetections < 2 || mLockedMidiNote < 0;
               if (prevHz > 0.0f)
               {
                 const float relDiff = std::fabs(medianHz - prevHz) / std::max(1.0f, prevHz);
-                float alphaHz = 0.18f;
+                float alphaHz = acquiringPitch ? 0.72f : 0.24f;
                 if (relDiff > 0.12f)
-                  alphaHz = 0.60f;
+                  alphaHz = acquiringPitch ? 0.88f : 0.68f;
                 else if (relDiff > 0.05f)
-                  alphaHz = 0.45f;
+                  alphaHz = acquiringPitch ? 0.80f : 0.50f;
                 mSmoothedFrequencyHz = (1.0f - alphaHz) * prevHz + alphaHz * medianHz;
               }
               else
@@ -238,26 +253,28 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
               const double midiFloat =
                 69.0 + 12.0 * std::log2(std::max(1e-6, static_cast<double>(mSmoothedFrequencyHz)) / 440.0);
               const int previousLockedMidi = mLockedMidiNote;
-              int midi = previousLockedMidi;
-              if (midi < 0 || midi > 127)
+              int candidateMidi = previousLockedMidi;
+              if (candidateMidi < 0 || candidateMidi > 127)
               {
-                midi = static_cast<int>(std::lround(midiFloat));
+                candidateMidi = static_cast<int>(std::lround(midiFloat));
               }
               else
               {
-                if (midiFloat > static_cast<double>(midi) + 0.58 || midiFloat < static_cast<double>(midi) - 0.58)
-                  midi = static_cast<int>(std::lround(midiFloat));
+                const double noteChangeThreshold = acquiringPitch ? 0.34 : 0.50;
+                if (midiFloat > static_cast<double>(candidateMidi) + noteChangeThreshold
+                    || midiFloat < static_cast<double>(candidateMidi) - noteChangeThreshold)
+                  candidateMidi = static_cast<int>(std::lround(midiFloat));
               }
 
+              int midi = candidateMidi;
               if (midi >= 0 && midi <= 127)
               {
                 const bool noteChanged = (previousLockedMidi >= 0 && midi != previousLockedMidi);
                 if (noteChanged)
                 {
-                  // Keep needle steady briefly when changing strings/notes to avoid sharp->flat swing,
-                  // and reset frequency-memory anchors to the newly selected note.
-                  mNeedleHoldFrames = std::max(mNeedleHoldFrames, 3);
-                  mSmoothedCents = 0.0f;
+                  // Reset frequency-memory anchors to the newly selected note, but do not hold the
+                  // display for long; the goal is a fast, decisive string change.
+                  mNeedleHoldFrames = std::max(mNeedleHoldFrames, 1);
                   mSmoothedFrequencyHz = static_cast<float>(frequency);
                   mLastDetectedFrequencyHz = static_cast<float>(frequency);
                   mFrequencyHistory.fill(0.0f);
@@ -276,9 +293,46 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
                 }
                 else if (mHasPitch.load(std::memory_order_relaxed))
                 {
-                  const float centsDelta = std::fabs(centsRaw - mSmoothedCents);
-                  const float alphaCents = centsDelta > 10.0f ? 0.55f : 0.28f;
-                  mSmoothedCents = (1.0f - alphaCents) * mSmoothedCents + alphaCents * centsRaw;
+                  const bool settling = acquiringPitch || noteChanged || mStableDetections < 3;
+                  const bool highTracked = (midi >= 64) || (mSmoothedFrequencyHz > 150.0f);
+                  const bool weakTracking = !settling && (bestCorr - corrThreshold) < (highTracked ? 0.12 : 0.10);
+                  const bool farFromCenter =
+                    !settling && (std::max(std::fabs(centsRaw), std::fabs(mSmoothedCents)) > 12.0f);
+                  float centsTarget = centsRaw;
+                  if (mPostAttackSettleFrames > 0)
+                  {
+                    // Right after a pick attack, keep the cents estimate from jumping too far in
+                    // a single update. This targets sharp attack spikes without slowing the whole tuner.
+                    const float maxAttackStep = highTracked ? 5.0f : 6.0f;
+                    const float limitedDelta =
+                      std::clamp(centsTarget - mSmoothedCents, -maxAttackStep, maxAttackStep);
+                    centsTarget = mSmoothedCents + limitedDelta;
+                  }
+                  else if (!settling)
+                  {
+                    // Once the note is locked, avoid large same-note cents jumps from a single noisy
+                    // estimate. This keeps tuning movement smoother without slowing acquisition.
+                    const float maxCentsStep = weakTracking
+                                                 ? (farFromCenter ? (highTracked ? 1.6f : 2.1f)
+                                                                  : (highTracked ? 2.5f : 3.25f))
+                                                 : (farFromCenter ? (highTracked ? 2.2f : 2.8f)
+                                                                  : (highTracked ? 4.0f : 5.0f));
+                    const float limitedDelta = std::clamp(centsRaw - mSmoothedCents, -maxCentsStep, maxCentsStep);
+                    centsTarget = mSmoothedCents + limitedDelta;
+                  }
+
+                  const float centsDelta = std::fabs(centsTarget - mSmoothedCents);
+                  const float alphaCents =
+                    settling ? (centsDelta > 8.0f ? 0.82f : 0.62f)
+                             : (weakTracking ? (farFromCenter ? (highTracked ? 0.08f : 0.10f)
+                                                              : (highTracked ? 0.14f : 0.18f))
+                                             : (farFromCenter ? (highTracked ? 0.14f : 0.18f)
+                                                              : (highTracked ? (centsDelta > 5.0f ? 0.32f : 0.18f)
+                                                                             : (centsDelta > 6.0f ? 0.38f : 0.22f))));
+                  const float maxAnalyzerStep = farFromCenter ? (highTracked ? 2.5f : 3.0f)
+                                                              : (highTracked ? 4.5f : 5.5f);
+                  const float smoothedStep = alphaCents * (centsTarget - mSmoothedCents);
+                  mSmoothedCents += std::clamp(smoothedStep, -maxAnalyzerStep, maxAnalyzerStep);
                   displayCents = mSmoothedCents;
                 }
                 else
@@ -290,6 +344,8 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
                 mMidiNote.store(midi, std::memory_order_relaxed);
                 mCents.store(displayCents, std::memory_order_relaxed);
                 pitchValid = true;
+                if (mPostAttackSettleFrames > 0)
+                  --mPostAttackSettleFrames;
               }
             }
           }
@@ -301,7 +357,7 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
   if (pitchValid)
   {
     const bool lowNote = (mSmoothedFrequencyHz > 0.0f && mSmoothedFrequencyHz < 90.0f);
-    mHoldFrames = lowNote ? 18 : 10;
+    mHoldFrames = lowNote ? 16 : 10;
     mHasPitch.store(true, std::memory_order_relaxed);
   }
   else
@@ -311,7 +367,7 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
       const bool lowNote = (mSmoothedFrequencyHz > 0.0f && mSmoothedFrequencyHz < 90.0f);
       const double signalKeepThreshold = lowNote ? 0.0009 : 0.0016;
       if (rawRms > signalKeepThreshold)
-        mHoldFrames = std::max(mHoldFrames, lowNote ? 8 : 5);
+        mHoldFrames = std::max(mHoldFrames, lowNote ? 8 : 6);
       else if (rawRms < 0.00035)
         mHoldFrames = std::min(mHoldFrames, 2);
     }
@@ -331,6 +387,7 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
       mNeedleHoldFrames = 0;
       mLastDetectedFrequencyHz = 0.0f;
       mStableDetections = 0;
+      mPostAttackSettleFrames = 0;
     }
   }
 }
