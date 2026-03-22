@@ -1,4 +1,4 @@
-Last updated: 2026-03-21
+Last updated: 2026-03-22
 
 Purpose: concise handoff so a new agent can continue without replaying the full chat history.
 
@@ -10,39 +10,25 @@ Purpose: concise handoff so a new agent can continue without replaying the full 
 
 ## Current repository state
 - Active branch: `main`
-- Branch HEAD: `1ef0be1`
-- Working tree at handoff: dirty
-- Current staged-only changes:
-  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_DOWN.png`
-  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_UP.png`
-- Current unstaged changes:
-  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
-  - `NeuralAmpModeler/NeuralAmpModeler.h`
-  - `NeuralAmpModeler/NeuralAmpModelerControls.h`
-  - `NeuralAmpModeler/Unserialization.cpp`
-  - `NeuralAmpModeler/config.h`
-  - `NeuralAmpModeler/resources/img/Hardware/HorizonalSwitch_L.png`
-  - `NeuralAmpModeler/resources/img/Hardware/HorizonalSwitch_R.png`
-  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_UP.png`
-  - `NeuralAmpModeler/resources/main.rc`
+- Branch HEAD: `328c1ba`
+- Working tree at handoff: clean
 - Recent relevant history:
+  - `328c1ba` `Polish tuner note display and rollover`
+  - `a8b8ffe` `Improve tuner tracking and UI`
+  - `6e9cbd6` `Make dev mode default`
+  - `1edb497` `Update handover for amp variants baseline`
+  - `6fda324` `Add amp model variants v1`
   - `1ef0be1` `Merge boost v2`
   - `795c931` `Add boost A/B model selection`
   - `084f695` `Add boost drive control`
   - `13b3063` `Merge compressor stomp pedal`
-  - `302ac86` `Add built-in compressor algorithm`
-  - `bccee0b` `Enable compressor stomp controls`
-  - `7f779f0` `Updated graphics for Stomp section`
-  - `b08b093` `Update handover`
-  - `869fa37` `Merge feature/interactive-cab-v1`
 
 ## What is completed now
 
 ### 1) Metering overhaul is landed and stable
 - Input/output metering is mono/stereo-aware
-- Meter UI is now vector-based and cleaner than the old striped/bitmap look
+- Meter UI is vector-based
 - Clip warning latch exists and clears by clicking either meter
-- Meter decay/peak timing was tightened and accepted
 
 ### 2) Gate/stomp coupling bug is fixed
 - Gate is decoupled from stomp bypass
@@ -50,7 +36,7 @@ Purpose: concise handoff so a new agent can continue without replaying the full 
 
 ### 3) Preset/session context restore is fixed
 - Standalone restart restores preset context, name, and dirty `*` state
-- Plugin/session restore also restores preset context instead of always showing `Unsaved`
+- Plugin/session restore restores preset context instead of always showing `Unsaved`
 - `Input Stereo` remains session/setup state, not preset-owned state
 
 ### 4) Plugin preset asset restore is fixed
@@ -75,7 +61,6 @@ Landed work:
   - `57`
   - `121`
 - Slider direction is mirrored correctly for the left slot
-- Cab UI was significantly redesigned
 - Old single `Cab Blend` concept was removed
 
 ### 6) Curated cab assets are embedded for release mode
@@ -98,11 +83,10 @@ Landed work:
   - on/off
 - Built-in compressor DSP was added instead of a NAM-based stomp model
 - Control smoothing/state is preallocated and runs in the existing audio callback path
-- Stomp section graphics and control layout were updated to expose the compressor
 
 ### 8) Boost v2 is landed
 Outcome:
-- The boost pedal now supports two switchable model variants while sharing one control surface
+- The boost pedal supports two switchable model variants while sharing one control surface
 
 Landed work:
 - Separate boost model paths for `A` and `B`
@@ -111,56 +95,79 @@ Landed work:
 - Capability/latency/state handling follows the selected boost variant
 - Preset/session restore includes both boost model paths
 
-### 9) Transpose is still hidden and undecided
+### 9) Amp model variants v1 is landed
+Outcome:
+- Each amp slot now supports multiple model variants, starting with `A` and `B`
+
+Landed work:
+- Per-slot `A/B` model storage/loading/persistence
+- Selected variant is stored and restored per amp slot
+- Shared amp controls remain common to the slot, not per variant
+- Amp 2 has the first front-panel variant switch
+- Amp 1 and Amp 3 are backend-ready for variants but intentionally do not expose front-panel switches yet
+- Release mode preload now expects:
+  - `Amp1A`
+  - `Amp1B`
+  - `Amp2A`
+  - `Amp2B`
+  - `Amp3A`
+  - `Amp3B`
+
+### 10) Tuner improvements are landed
+Outcome:
+- The tuner is much more usable than the old baseline and the major center-jump bug is fixed
+
+Landed work:
+- Analyzer now updates every idle tick instead of the old decimated cadence
+- High-string acquisition was improved, especially on `B` and high `E`
+- Re-picks and semitone-boundary rollovers behave much better
+- The core bug was that note changes reset cents to `0`; removing that fixed the worst UX issue
+- Tuner now shows numeric signed cents offset
+- Sharp notes now render with dual names:
+  - `C#/Db`
+  - `D#/Eb`
+  - `F#/Gb`
+  - `G#/Ab`
+  - `A#/Bb`
+- Tuner UI was narrowed slightly and smoothed for a steadier feel
+- Tuner monitor default is now `MUTE`
+
+### 11) Transpose is still hidden and undecided
 - Hidden transpose feature still exists
-- A small RT-safe idle-path fix already landed
-- Most recent investigation suggested apparent "transpose on" behavior was restored saved state, not a changed default
 - Current transpose default is still `0`
+- Do not expand it unless the user explicitly wants that
 
-## Current in-progress worktree state
+## Important tuner conclusions
+- The main tuner bug was not the display layer by itself; it was the analyzer resetting cents to center on note change
+- Several attempted simplifications were tested and rejected because they reintroduced bad behavior
+- Keep the current tuner behavior as-is unless the user explicitly wants further tuner work
+- If cleanup is desired later, prefer non-behavioral cleanup only:
+  - extract constants
+  - improve comments
+  - group related state
 
-### Amp model variants v1 is partially implemented but not committed
-Intent:
-- Each amp slot should own multiple model variants, starting with `A` and `B`
-- Only one variant is active at a time per amp slot
-- Other controls for that amp slot remain shared across variants
-- The storage/load/swap architecture should be future-proof for more than two variants later
-
-Current dirty-tree scope:
-- Backend scaffolding changed from `slot` to `slot + variant` for amp model storage, loading, pending swaps, and UI event state
-- State serialization now stores per-variant amp paths plus the selected variant per slot
-- Settings UI now exposes amp model browser rows for `1B`, `2B`, and `3B`
-- Amp 2 has a first working on-face variant switch with vertical switch art and `LEAD` / `CRUNCH` labels
-- Amp 1 and Amp 3 are scaffolded for future UI switches but intentionally do not expose them yet
-
-Current behavioral status:
-- User-reported status is that Amp 2 variant switching is working as intended in both UI and DSP
-- Staged image additions belong to this feature
-- No fresh build/test run was performed in this recovery session
-
-## Important tweak points and files
-
-### Amp variant system
-- Main amp DSP/state/UI path:
+## Important doubler findings
+- The virtual doubler path is more complex and more subjective than the tuner
+- Main insertion is post-cab and pre-delay/reverb in:
   - `NeuralAmpModeler/NeuralAmpModeler.cpp`
+- Main DSP implementation is in:
+  - `NeuralAmpModeler/NeuralAmpModelerFX.cpp`
+- Supporting state is in:
   - `NeuralAmpModeler/NeuralAmpModeler.h`
-- Amp-specific controls:
-  - `NeuralAmpModeler/NeuralAmpModelerControls.h`
-- Legacy/JSON unserialization path:
-  - `NeuralAmpModeler/Unserialization.cpp`
-- Resource registration:
-  - `NeuralAmpModeler/config.h`
-  - `NeuralAmpModeler/resources/main.rc`
-- Switch art:
-  - `NeuralAmpModeler/resources/img/Hardware/HorizonalSwitch_L.png`
-  - `NeuralAmpModeler/resources/img/Hardware/HorizonalSwitch_R.png`
-  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_UP.png`
-  - `NeuralAmpModeler/resources/img/Hardware/VerticalSwitch_DOWN.png`
 
-### Stomp compressor / boost v2
-- Main stomp DSP/state/UI path:
-  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
-  - `NeuralAmpModeler/NeuralAmpModeler.h`
+Current doubler behavior:
+- Mono-source-only availability
+- Short-delay-based "other take" synthesis
+- Onset-driven retargeting/jitter
+- Asymmetric left/right voicing
+- Tone shaping, width processing, and output compensation
+- Only one exposed control: amount
+
+Current concerns:
+- A lot of hidden behavior is packed behind one control
+- It is difficult to form a simple user mental model for what the doubler is doing
+- It may sound good in one case and odd or phasey in another without an obvious control to fix it
+- Any changes here are likely to be more subjective and iterative than tuner work
 
 ## Important behavioral conclusions
 - Interactive Cab V1 is a good baseline and should not be reworked casually
@@ -168,9 +175,9 @@ Current behavioral status:
 - `Custom IR` support in release mode is intentional and should remain
 - `Input Stereo` should remain session/setup state, not preset-owned state
 - Boost `A/B` established the pattern of "multiple model variants, one shared control surface"
-- Amp variants should follow that same product direction
+- Amp variants now follow that same product direction
 - Amp 2 variant UI is the current first slice; Amp 1 and Amp 3 UI can wait
-- Transpose is still not a settled product feature; avoid expanding it unless the user explicitly wants that
+- The tuner is now in a good usable state; avoid reopening it casually
 
 ## Current plugin/app state
 - `main` already includes:
@@ -178,11 +185,13 @@ Current behavioral status:
   - embedded curated cab IRs
   - built-in compressor stomp v1
   - boost v2 with `A/B` model selection
-- The current worktree is not clean because amp model variants v1 is mid-implementation
+  - amp model variants v1
+  - tuner improvements and tuner UI polish
+- The current worktree is clean
 - Release mode currently supports:
   - embedded curated cab IRs
+  - preloaded amp variant assets `Amp1A/B`, `Amp2A/B`, `Amp3A/B`
   - user-loaded custom IRs
-- No new build/test results were produced during this handover recovery pass
 
 ## Build/config baseline to preserve
 - Audio/performance validation: `Release | x64` only
@@ -202,13 +211,10 @@ Current behavioral status:
   - breaking changes are acceptable if they improve architecture or iteration speed
 
 ## Suggested next coding step
-1. Review and commit amp model variants v1 as a small, coherent slice
-2. Keep scope to the current intended feature:
-  - per-slot `A/B` model storage/loading
-  - state restore of selected variant
-  - Amp 2 UI switch only
-3. Do not expand Amp 1 / Amp 3 front-panel variant UI unless the user explicitly wants that next
-4. After the amp variant slice is stable, return to lower-priority roadmap items such as transpose or release packaging
+1. Inspect the virtual doubler for product-level improvement opportunities
+2. Start with a code-reading/review pass, not immediate DSP changes
+3. Preserve RT safety and keep the first doubler patch minimal and reviewable
+4. Prefer improving predictability and user mental model over adding many new controls immediately
 
 ## Starter prompt for the next agent
 You are continuing work in `D:\Dev\NAMPlugin` on branch `main`.
@@ -232,18 +238,20 @@ Current baseline:
 3. Standalone/plugin preset context restore is fixed
 4. Plugin preset stomp NAM and cab IR restore is fixed
 5. Interactive Cab V1 is merged to `main`
-6. Release mode embeds curated cab IRs but still allows custom IR loading
+6. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
 7. Compressor stomp pedal v1 is merged to `main`
 8. Boost v2 with `A/B` model selection is merged to `main`
+9. Amp model variants v1 is merged to `main`
+10. Tuner improvements and tuner UI polish are merged to `main`
 
 Current working tree status:
-1. The tree is dirty with in-progress amp model variants v1 work
-2. Amp 2 variant switching is reported working in both UI and DSP
-3. Amp 1 and Amp 3 are backend-ready for variants but intentionally do not expose front-panel switches yet
+1. The tree should be clean
+2. Do not reopen tuner work unless the user asks
 
 Suggested next task unless the user redirects:
-1. Inspect the current amp model variants diff and preserve the intended architecture
-2. Keep the current first slice minimal:
-  - per-slot `A/B` model loading/storage/persistence
-  - Amp 2 front-panel variant switch
-3. If making code changes, stay RT-safe and keep the patch reviewable
+1. Inspect the virtual doubler implementation and summarize its current behavior, risks, and likely improvement points
+2. Main files:
+  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
+  - `NeuralAmpModeler/NeuralAmpModelerFX.cpp`
+  - `NeuralAmpModeler/NeuralAmpModeler.h`
+3. Keep the first doubler improvement slice minimal, RT-safe, and reviewable

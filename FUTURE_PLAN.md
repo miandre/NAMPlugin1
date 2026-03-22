@@ -1,4 +1,4 @@
-Last updated: 2026-03-21
+Last updated: 2026-03-22
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -63,58 +63,74 @@ Outcome:
 Outcome:
 - A built-in compressor stomp is now available with a minimal musical control set
 
-Landed work:
-- Controls:
-  - `Amount`
-  - `Level`
-  - `Soft/Hard`
-  - on/off
-- Built-in DSP compressor, not a NAM model
-- RT-safe state/smoothing integrated into the current signal path
-
 ### Done: Boost v2
 Outcome:
-- The boost pedal now supports switchable `A/B` model variants while sharing one control surface
+- The boost pedal supports switchable `A/B` model variants while sharing one control surface
+
+### Done: Milestone J - Amp model variants v1
+Outcome:
+- Each amp slot now supports `A/B` model variants with shared per-slot controls
 
 Landed work:
-- `A/B` boost model storage
-- UI switch for boost voice selection
-- boost drive control
-- state/preset/session restore for both boost model paths
+- Per-slot `A/B` amp model storage/loading/persistence
+- Selected variant restored per amp slot
+- Amp 2 front-panel variant switch
+- Amp 1 and Amp 3 backend-ready but no front-panel switch yet
+- Release mode preload updated to `Amp1A/B`, `Amp2A/B`, `Amp3A/B`
+
+### Done: Tuner improvement pass
+Outcome:
+- The tuner is much more usable and the major center-jump bug is fixed
+
+Landed work:
+- Faster analyzer updates
+- Improved high-string acquisition
+- Correct semitone-boundary rollover behavior
+- Numeric signed cents readout
+- Dual accidental note labels such as `A#/Bb`
+- Narrower, steadier tuner UI
+- Tuner monitor default set to `MUTE`
+
+Important note:
+- The key tuner fix was removing the forced cents reset to `0` on committed note changes
+- Several attempted simplifications were tested and rejected; do not casually reopen tuner behavior
 
 ## Active milestones
 
-### Milestone J: Amp model variants v1
+### Milestone K: Doubler improvement pass
 Goal:
-- Add per-slot amp model variants, starting with `A/B`, while keeping the rest of each amp slot's controls shared
+- Improve the virtual/fake doubler so it feels more predictable and more musical in real use
 
-Current intended product behavior:
-- Each amp slot owns multiple models of the same amp family
-- Only one variant is active at a time
-- Shared controls such as gain and tonestack stay common to the amp slot
-- Architecture should be future-proof for more than two variants later
+Current implementation shape:
+- Main insertion is post-cab and pre-delay/reverb
+- Main DSP lives in:
+  - `NeuralAmpModeler/NeuralAmpModelerFX.cpp`
+- Main state/plumbing lives in:
+  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
+  - `NeuralAmpModeler/NeuralAmpModeler.h`
+- Mono-source-only availability
+- Short-delay-based "other take" synthesis
+- Onset-driven retargeting/jitter
+- Asymmetric left/right voicing
+- Tone shaping, width processing, and output compensation
+- Only one exposed user control: amount
 
-Current implementation state:
-- Backend storage/load/swap plumbing is being migrated from `slot` to `slot + variant`
-- Serialization is being updated to store per-variant amp paths plus the selected variant per slot
-- Settings UI now includes amp model browsers for `A` and `B`
-- Amp 2 has a first working front-panel variant switch
-- Amp 1 and Amp 3 are intentionally backend-ready only for now
+Current concerns:
+- Too much hidden behavior behind one control
+- Hard for the user to build a simple mental model of what the doubler is doing
+- Likely to sound good in some cases and phasey or synthetic in others without an obvious fix
+- Changes here will likely be more subjective and iterative than tuner changes
 
-Recommended v1 boundary:
-- Commit only the current first slice:
-  - per-slot `A/B` model storage and persistence
-  - active-variant switching
-  - Amp 2 front-panel switch
-- Defer extra front-panel switches for Amp 1 / Amp 3 unless explicitly requested
+Recommended first step:
+- Do a focused read/review pass and summarize the current algorithm before changing DSP
+- Identify the smallest change that improves predictability without adding much architecture churn
 
 Risk:
-- Medium
+- Medium-high
 
 RT safety watch-outs:
-- No allocations or dynamic graph changes in the callback
-- Keep model swap ownership handoff deterministic
-- Preserve existing preset-recall mute/swap safety
+- Keep all processing allocation-free in the callback
+- No random heap use, locks, file access, or dynamic graph changes
 
 ### Milestone F: Transpose decision path
 Goal:
@@ -122,7 +138,6 @@ Goal:
 
 Current state:
 - Feature is hidden
-- Idle off-path CPU issue was already reduced
 - App-side "transpose seems on" behavior appears to have been old standalone-state restore rather than a changed default
 
 Risk:
@@ -130,22 +145,21 @@ Risk:
 
 ### Milestone B: Release asset packaging and final variant strategy
 Goal:
-- Finish the remaining release-mode packaging strategy beyond the current curated cab embedding
+- Finish the remaining release-mode packaging strategy beyond the current curated cab and amp variant embedding
 
 Current state:
 - Curated cab IR embedding exists
-- Final amp/stomp embedded asset strategy is still incomplete
+- Release amp variant preload exists
+- Final stomp/amp embedded asset strategy is still incomplete
 - Final model list is not known yet
-- Hardware-switch mapping for amp variants is not finalized yet
 
 What can wait:
 - encryption/obfuscation decisions
 - final asset-ID catalog
-- hardware-switch variant mapping
+- any broader packaging hardening
 
 Resume this milestone when:
 - the bundled model set is clearer
-- the amp hardware-switch behavior is specified
 
 Risk:
 - Medium-high
@@ -180,9 +194,9 @@ Examples:
 - cab control alignment/padding cleanup
 
 ## Recommended execution order from now
-1. Milestone J: amp model variants v1
+1. Milestone K: doubler improvement pass
 2. Milestone F: transpose decision path only if the user returns to it
-3. Resume Milestone B when final release asset set and hardware-switch behavior are clearer
+3. Resume Milestone B when final release asset set is clearer
 4. Milestone D only after Cab v1 remains stable in regular use
 5. Treat additional UI polish as a low-risk side lane, not the main roadmap
 
@@ -203,17 +217,18 @@ Then confirm repo/submodule state:
 - `git -C iPlug2 remote -v`
 
 Current direction:
-1. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, and boost v2 are already landed
-2. Do not reopen the metering or plugin preset-restore paths unless the user asks
-3. Release mode embeds curated cab IRs but still allows custom IR loading
+1. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, boost v2, amp variants v1, and tuner improvements are already landed
+2. Do not reopen tuner work unless the user explicitly asks
+3. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
 4. Prefer small, reviewable follow-ups from the current stable baseline
 
 Suggested next task unless the user redirects:
-1. Inspect the current dirty-tree amp variant work
-2. Preserve the intended first slice:
-  - per-slot `A/B` model storage/loading/persistence
-  - Amp 2 front-panel switch
-3. If making code changes, keep the patch RT-safe and reviewable
+1. Inspect the current doubler implementation and summarize what it is doing today
+2. Focus files:
+  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
+  - `NeuralAmpModeler/NeuralAmpModelerFX.cpp`
+  - `NeuralAmpModeler/NeuralAmpModeler.h`
+3. Identify the smallest RT-safe first improvement that makes the doubler feel more predictable or controllable
 
 Constraints:
 - Keep diffs minimal
