@@ -270,11 +270,14 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
               if (midi >= 0 && midi <= 127)
               {
                 const bool noteChanged = (previousLockedMidi >= 0 && midi != previousLockedMidi);
+                const float centsRaw =
+                  static_cast<float>(std::clamp(100.0 * (midiFloat - static_cast<double>(midi)), -50.0, 50.0));
                 if (noteChanged)
                 {
                   // Reset frequency-memory anchors to the newly selected note, but do not hold the
                   // display for long; the goal is a fast, decisive string change.
                   mNeedleHoldFrames = std::max(mNeedleHoldFrames, 1);
+                  mSmoothedCents = centsRaw;
                   mSmoothedFrequencyHz = static_cast<float>(frequency);
                   mLastDetectedFrequencyHz = static_cast<float>(frequency);
                   mFrequencyHistory.fill(0.0f);
@@ -283,8 +286,6 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
                   mFrequencyHistoryIndex = 1 % kTunerHistoryWindow;
                 }
                 mLockedMidiNote = midi;
-                const float centsRaw =
-                  static_cast<float>(std::clamp(100.0 * (midiFloat - static_cast<double>(midi)), -50.0, 50.0));
                 float displayCents = mCents.load(std::memory_order_relaxed);
                 if (mNeedleHoldFrames > 0)
                 {

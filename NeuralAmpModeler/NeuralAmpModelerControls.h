@@ -3,6 +3,7 @@
 #include <array>
 #include <algorithm> // std::clamp
 #include <cmath> // std::round
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <sstream> // std::stringstream
@@ -1767,6 +1768,7 @@ public:
   void SetTunerState(const bool active, const bool hasPitch, const int midiNote, const float cents)
   {
     const float clampedCents = static_cast<float>(std::clamp(static_cast<double>(cents), -50.0, 50.0));
+    bool snapToTarget = false;
     mActive = active;
     mHasPitch = hasPitch;
     if (!mActive || !mHasPitch)
@@ -1788,7 +1790,7 @@ public:
       mDisplayedMidiNote = midiNote;
       mPendingMidiNote = -1;
       mPendingMidiCount = 0;
-      mNeedleHoldFrames = 1;
+      snapToTarget = true;
     }
     else if (midiNote != mDisplayedMidiNote)
     {
@@ -1805,7 +1807,7 @@ public:
         mDisplayedMidiNote = midiNote;
         mPendingMidiNote = -1;
         mPendingMidiCount = 0;
-        mNeedleHoldFrames = 1;
+        snapToTarget = true;
       }
       else
       {
@@ -1819,7 +1821,12 @@ public:
     }
 
     mTargetCents = clampedCents;
-    if (mNeedleHoldFrames > 0)
+    if (snapToTarget)
+    {
+      mNeedleHoldFrames = 0;
+      mDisplayCents = mTargetCents;
+    }
+    else if (mNeedleHoldFrames > 0)
     {
       --mNeedleHoldFrames;
     }
@@ -1885,7 +1892,11 @@ public:
       return;
     }
 
-    g.DrawText(primaryText, _GetNoteNameNoOctave(mDisplayedMidiNote), panel.GetFromTop(std::max(44.0f, panel.H() * 0.46f)));
+    const char* noteLabel = _GetNoteNameNoOctave(mDisplayedMidiNote);
+    IText noteText = primaryText;
+    if (std::strlen(noteLabel) > 2)
+      noteText.mSize *= 0.78f;
+    g.DrawText(noteText, noteLabel, panel.GetFromTop(std::max(44.0f, panel.H() * 0.46f)));
 
     std::ostringstream centsStream;
     centsStream.setf(std::ios::showpos);
@@ -1905,7 +1916,7 @@ public:
 private:
   static const char* _GetNoteNameNoOctave(const int midiNote)
   {
-    static const char* kNoteNames[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    static const char* kNoteNames[] = {"C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B"};
     const int idx = ((midiNote % 12) + 12) % 12;
     return kNoteNames[idx];
   }
