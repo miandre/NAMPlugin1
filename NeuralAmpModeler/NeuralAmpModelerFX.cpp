@@ -102,7 +102,6 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
   constexpr std::array<double, 2> kTakeSecondaryShadowBlend = {0.0, 0.0};
   constexpr std::array<double, 2> kTakeDirectAttackScaleBase = {0.18, -0.11};
   constexpr std::array<double, 2> kTakeShadowAttackScaleBase = {0.02, 0.18};
-  constexpr double kTakeBSoftClipDrive = 1.16;
   constexpr double kOtherPlayerMaxBlend = 0.45;
   constexpr double kFastEnvelopeAttackMs = 0.8;
   constexpr double kFastEnvelopeReleaseMs = 18.0;
@@ -119,7 +118,7 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
   constexpr double kShadowScale = 1.2;
   constexpr double kAsymmetry = 1.71;
   constexpr double kDirectScale = 1.46;
-  constexpr double kRightTrimMaxDB = -3.5;
+  constexpr double kRightTrimMaxDB = -3.9;
   constexpr double kSideWidthMax = 1.15;
   constexpr double kMidTrim = 0.96;
   constexpr double kKnobMinSpreadMs = 6.0;
@@ -257,8 +256,7 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
                                  (1.0 + takeShadowAttackScale[1] * attackAccent * otherPlayerBlend);
       const double takeA = takeADirect + takeAShadow;
       const double takeBRaw = takeBDirect + takeBShadow;
-      const double takeBSoftClipDriveBlended = 1.0 + (kTakeBSoftClipDrive - 1.0) * otherPlayerBlend;
-      const double takeB = std::tanh(takeBSoftClipDriveBlended * takeBRaw) / std::tanh(takeBSoftClipDriveBlended);
+      const double takeB = takeBRaw;
       const double renderedLeft =
         ((1.0 - takePreviewMix) * (0.62 * dryLeft) + takePreviewMix * takeA) * outputCompensation;
       const double renderedRight =
