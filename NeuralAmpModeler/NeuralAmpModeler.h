@@ -355,6 +355,53 @@ private:
     double master = 5.0;
   };
 
+  enum class AmpControlId : int
+  {
+    PreModelGain = 0,
+    Bass,
+    Mid,
+    Treble,
+    Presence,
+    Depth,
+    Master,
+    ModelToggle,
+    VariantSwitch,
+    Count
+  };
+
+  static constexpr size_t kAmpControlCount = static_cast<size_t>(AmpControlId::Count);
+
+  enum class ToneStackKind : int
+  {
+    BasicNam = 0
+  };
+
+  struct AmpSlotPresentationSpec
+  {
+    int layoutSlotIndex = 0;
+    bool hasVariantSwitch = false;
+    std::array<bool, kAmpControlCount> visibleControls = {};
+    std::array<float, kAmpControlCount> knobColumnOffsets = {};
+    std::array<const char*, 2> variantLabels = {"LEAD", "CRUNCH"};
+  };
+
+  struct AmpSlotBehaviorSpec
+  {
+    ToneStackKind toneStackKind = ToneStackKind::BasicNam;
+    std::array<bool, kAmpControlCount> supportedControls = {};
+  };
+
+  struct AmpSlotResolvedSpec
+  {
+    AmpSlotPresentationSpec presentation = {};
+    AmpSlotBehaviorSpec behavior = {};
+  };
+
+  static constexpr size_t _GetAmpControlSpecIndex(const AmpControlId controlId)
+  {
+    return static_cast<size_t>(controlId);
+  }
+
   struct BuiltInCompressorState
   {
     double sampleRate = 48000.0; //Default
@@ -516,6 +563,13 @@ private:
   void _ToggleTopNavSectionBypass(TopNavSection section);
   void _RefreshTopNavControls();
   void _SyncTunerParamToTopNav();
+  AmpSlotState _GetDefaultAmpSlotState(int slotIndex) const;
+  AmpSlotPresentationSpec _GetAmpSlotPresentationSpec(int slotIndex) const;
+  AmpSlotBehaviorSpec _GetAmpSlotBehaviorSpec(int slotIndex) const;
+  AmpSlotResolvedSpec _ResolveAmpSlotSpec(int slotIndex) const;
+  bool _AmpSlotSpecShowsControl(const AmpSlotResolvedSpec& spec, AmpControlId controlId) const;
+  bool _AmpSlotSpecSupportsControl(const AmpSlotResolvedSpec& spec, AmpControlId controlId) const;
+  std::unique_ptr<dsp::tone_stack::AbstractToneStack> _CreateToneStack(ToneStackKind kind) const;
   void _CaptureAmpSlotState(int slotIndex);
   void _ApplyAmpSlotState(int slotIndex);
   void _ApplyAmpSlotStateToToneStack(int slotIndex);

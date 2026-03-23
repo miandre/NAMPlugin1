@@ -1101,11 +1101,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     ->InitDouble(kInputCalibrationLevelParamName.c_str(), kDefaultInputCalibrationLevel, -60.0, 60.0, 0.1, "dBu");
   mTopNavBypassed[static_cast<size_t>(TopNavSection::Tuner)] = !GetParam(kTunerActive)->Bool();
   _SetMasterGain();
-  _CaptureAmpSlotState(mAmpSelectorIndex);
   for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpSlotStates.size()); ++slotIndex)
   {
-    if (slotIndex != mAmpSelectorIndex)
-      mAmpSlotStates[slotIndex] = mAmpSlotStates[mAmpSelectorIndex];
+    mAmpSlotStates[slotIndex] = _GetDefaultAmpSlotState(slotIndex);
     _ApplyAmpSlotStateToToneStack(slotIndex);
   }
 
@@ -1326,8 +1324,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto topGateAttenuationLedArea =
       IRECT(topGateKnobArea.MW() - 6.0f, topGateKnobArea.MH() + 27.0f, topGateKnobArea.MW() + 6.0f, topGateKnobArea.MH() + 39.0f);
 
-    // Amp-face controls: each amp slot owns its row geometry independently.
-    const AmpFaceLayout ampFaceLayout = GetAmpFaceLayout(mAmpSelectorIndex);
+    // Amp-face controls: presentation comes from the active slot spec.
+    const auto activeAmpSlotSpec = _ResolveAmpSlotSpec(mAmpSelectorIndex);
+    const AmpFaceLayout ampFaceLayout = GetAmpFaceLayout(activeAmpSlotSpec.presentation.layoutSlotIndex);
     const auto preModelGainArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[0]);
     const auto bassKnobArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[1]);
     const auto midKnobArea = MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, kAmpFaceKnobColumnOffsets[2]);
@@ -1978,26 +1977,35 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     pGraphics->AttachControl(
       new NAMAmpBitmapToggleControl(modelToggleArea, kModelToggle, ampModelSwitchOffBitmaps, ampModelSwitchOnBitmaps, kAmpModelSwitchScales, mAmpSelectorIndex))
       ->SetTooltip("Model On/Off");
-    auto toggleAmp2Variant = [this](const bool useVariantB) {
-      _SelectAmpSlotModelVariant(1, useVariantB ? 1 : 0);
+    auto toggleAmpVariant = [this](const bool useVariantB) {
+      const auto activeAmpSlotSpec = _ResolveAmpSlotSpec(mAmpSelectorIndex);
+      if (!_AmpSlotSpecShowsControl(activeAmpSlotSpec, AmpControlId::VariantSwitch))
+        return;
+      _SelectAmpSlotModelVariant(mAmpSelectorIndex, useVariantB ? 1 : 0);
       _MarkStandalonePresetDirty();
     };
     pGraphics->AttachControl(
       new NAMRotatedBitmapToggleControl(
         ampVariantSwitchArea,
-        mAmpSlotSelectedVariant[1] != 0,
+        mAmpSlotSelectedVariant[static_cast<size_t>(mAmpSelectorIndex)] != 0,
         verticalSwitchUpBitmap,
         verticalSwitchDownBitmap,
         0.0f,
-        toggleAmp2Variant),
+        toggleAmpVariant),
       kCtrlTagAmpModelVariantSwitch)
       ->SetTooltip("Amp 2 voice: A / B.");
     pGraphics->AttachControl(
-      new ITextControl(MakeAmpFaceVariantSwitchLabelArea(ampVariantSwitchArea, true), "LEAD", ampVariantLabelText, COLOR_TRANSPARENT),
+      new ITextControl(MakeAmpFaceVariantSwitchLabelArea(ampVariantSwitchArea, true),
+                       activeAmpSlotSpec.presentation.variantLabels[0],
+                       ampVariantLabelText,
+                       COLOR_TRANSPARENT),
       kCtrlTagAmpModelVariantLabelTop)
       ->SetIgnoreMouse(true);
     pGraphics->AttachControl(
-      new ITextControl(MakeAmpFaceVariantSwitchLabelArea(ampVariantSwitchArea, false), "CRUNCH", ampVariantLabelText, COLOR_TRANSPARENT),
+      new ITextControl(MakeAmpFaceVariantSwitchLabelArea(ampVariantSwitchArea, false),
+                       activeAmpSlotSpec.presentation.variantLabels[1],
+                       ampVariantLabelText,
+                       COLOR_TRANSPARENT),
       kCtrlTagAmpModelVariantLabelBottom)
       ->SetIgnoreMouse(true);
     pGraphics->AttachControl(
@@ -6570,23 +6578,30 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     const auto mainArea = bounds.GetPadded(-kOuterPad);
     const auto contentArea = mainArea.GetPadded(-kInnerPad);
     const auto ampFaceArea = IRECT(contentArea.L + 66.0f, contentArea.T + 215.0f, contentArea.R - 66.0f, contentArea.T + 496.0f);
-    const AmpFaceLayout ampFaceLayout = GetAmpFaceLayout(mAmpSelectorIndex);
+    const auto ampSlotSpec = _ResolveAmpSlotSpec(mAmpSelectorIndex);
+    const AmpFaceLayout ampFaceLayout = GetAmpFaceLayout(ampSlotSpec.presentation.layoutSlotIndex);
 
-    auto updateAmpFaceKnob = [this, pGraphics, &ampFaceArea, &ampFaceLayout](const int paramIdx, const float columnOffset) {
+    auto updateAmpFaceKnob = [this, pGraphics, &ampFaceArea, &ampFaceLayout, &ampSlotSpec](const int paramIdx,
+                                                                                             const AmpControlId controlId) {
       if (auto* pControl = dynamic_cast<NAMAmpBitmapKnobControl*>(pGraphics->GetControlWithParamIdx(paramIdx)))
       {
         pControl->SetAmpStyle(mAmpSelectorIndex);
         pControl->SetLayout(ampFaceLayout.knobScale, ampFaceLayout.labelYOffset);
-        pGraphics->SetControlBounds(pControl, MakeAmpFaceKnobArea(ampFaceArea, ampFaceLayout, columnOffset));
+        pGraphics->SetControlBounds(
+          pControl,
+          MakeAmpFaceKnobArea(
+            ampFaceArea,
+            ampFaceLayout,
+            ampSlotSpec.presentation.knobColumnOffsets[_GetAmpControlSpecIndex(controlId)]));
       }
     };
-    updateAmpFaceKnob(kPreModelGain, kAmpFaceKnobColumnOffsets[0]);
-    updateAmpFaceKnob(kToneBass, kAmpFaceKnobColumnOffsets[1]);
-    updateAmpFaceKnob(kToneMid, kAmpFaceKnobColumnOffsets[2]);
-    updateAmpFaceKnob(kToneTreble, kAmpFaceKnobColumnOffsets[3]);
-    updateAmpFaceKnob(kTonePresence, kAmpFaceKnobColumnOffsets[4]);
-    updateAmpFaceKnob(kToneDepth, kAmpFaceKnobColumnOffsets[5]);
-    updateAmpFaceKnob(kMasterVolume, kAmpFaceKnobColumnOffsets[6]);
+    updateAmpFaceKnob(kPreModelGain, AmpControlId::PreModelGain);
+    updateAmpFaceKnob(kToneBass, AmpControlId::Bass);
+    updateAmpFaceKnob(kToneMid, AmpControlId::Mid);
+    updateAmpFaceKnob(kToneTreble, AmpControlId::Treble);
+    updateAmpFaceKnob(kTonePresence, AmpControlId::Presence);
+    updateAmpFaceKnob(kToneDepth, AmpControlId::Depth);
+    updateAmpFaceKnob(kMasterVolume, AmpControlId::Master);
 
     if (auto* pModelToggle = pGraphics->GetControlWithParamIdx(kModelToggle))
     {
@@ -6601,12 +6616,12 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     }
     if (auto* pVariantSwitch = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch))
     {
-      const bool showAmp2VariantSwitch = showAmpSection && (mAmpSelectorIndex == 1);
-      pVariantSwitch->Hide(!showAmp2VariantSwitch);
-      if (showAmp2VariantSwitch)
+      const bool showVariantSwitch = showAmpSection && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch);
+      pVariantSwitch->Hide(!showVariantSwitch);
+      if (showVariantSwitch)
       {
         if (auto* pAmpVariantSwitch = dynamic_cast<NAMRotatedBitmapToggleControl*>(pVariantSwitch))
-          pAmpVariantSwitch->SetState(mAmpSlotSelectedVariant[1] != 0);
+          pAmpVariantSwitch->SetState(mAmpSlotSelectedVariant[static_cast<size_t>(mAmpSelectorIndex)] != 0);
         pGraphics->SetControlBounds(
           pVariantSwitch,
           MakeAmpFaceVariantSwitchArea(
@@ -6618,9 +6633,11 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     }
     if (auto* pVariantLabelTop = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelTop))
     {
-      const bool showAmp2VariantSwitch = showAmpSection && (mAmpSelectorIndex == 1);
-      pVariantLabelTop->Hide(!showAmp2VariantSwitch);
-      if (showAmp2VariantSwitch)
+      if (auto* pVariantLabelText = dynamic_cast<ITextControl*>(pVariantLabelTop))
+        pVariantLabelText->SetStr(ampSlotSpec.presentation.variantLabels[0]);
+      const bool showVariantSwitch = showAmpSection && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch);
+      pVariantLabelTop->Hide(!showVariantSwitch);
+      if (showVariantSwitch)
         pGraphics->SetControlBounds(
           pVariantLabelTop,
           MakeAmpFaceVariantSwitchLabelArea(
@@ -6633,9 +6650,11 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     }
     if (auto* pVariantLabelBottom = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelBottom))
     {
-      const bool showAmp2VariantSwitch = showAmpSection && (mAmpSelectorIndex == 1);
-      pVariantLabelBottom->Hide(!showAmp2VariantSwitch);
-      if (showAmp2VariantSwitch)
+      if (auto* pVariantLabelText = dynamic_cast<ITextControl*>(pVariantLabelBottom))
+        pVariantLabelText->SetStr(ampSlotSpec.presentation.variantLabels[1]);
+      const bool showVariantSwitch = showAmpSection && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch);
+      pVariantLabelBottom->Hide(!showVariantSwitch);
+      if (showVariantSwitch)
         pGraphics->SetControlBounds(
           pVariantLabelBottom,
           MakeAmpFaceVariantSwitchLabelArea(
@@ -6656,7 +6675,7 @@ void NeuralAmpModeler::_RefreshTopNavControls()
       pTunerClose->Hide(!showTunerReadout);
 
     if (auto* pModelToggle = pGraphics->GetControlWithParamIdx(kModelToggle))
-      pModelToggle->Hide(!showAmpSection);
+      pModelToggle->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::ModelToggle));
     if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
       pBoostOnLED->Hide(!showStompSection);
     pGraphics->ForControlInGroup("STOMP_CONTROLS", [showStompSection](IControl* pControl) {
@@ -6675,23 +6694,23 @@ void NeuralAmpModeler::_RefreshTopNavControls()
       pControl->Hide(!showEqSection);
     });
 
-    const auto hideAmpParamControl = [&](const int paramIdx) {
+    const auto hideAmpParamControl = [&](const int paramIdx, const AmpControlId controlId) {
       if (auto* pControl = pGraphics->GetControlWithParamIdx(paramIdx))
-        pControl->Hide(!showAmpSection);
+        pControl->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, controlId));
     };
-    hideAmpParamControl(kPreModelGain);
-    hideAmpParamControl(kToneBass);
-    hideAmpParamControl(kToneMid);
-    hideAmpParamControl(kToneTreble);
-    hideAmpParamControl(kTonePresence);
-    hideAmpParamControl(kToneDepth);
-    hideAmpParamControl(kMasterVolume);
+    hideAmpParamControl(kPreModelGain, AmpControlId::PreModelGain);
+    hideAmpParamControl(kToneBass, AmpControlId::Bass);
+    hideAmpParamControl(kToneMid, AmpControlId::Mid);
+    hideAmpParamControl(kToneTreble, AmpControlId::Treble);
+    hideAmpParamControl(kTonePresence, AmpControlId::Presence);
+    hideAmpParamControl(kToneDepth, AmpControlId::Depth);
+    hideAmpParamControl(kMasterVolume, AmpControlId::Master);
     if (auto* pVariantSwitch = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch))
-      pVariantSwitch->Hide(!showAmpSection || mAmpSelectorIndex != 1);
+      pVariantSwitch->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch));
     if (auto* pVariantLabelTop = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelTop))
-      pVariantLabelTop->Hide(!showAmpSection || mAmpSelectorIndex != 1);
+      pVariantLabelTop->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch));
     if (auto* pVariantLabelBottom = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelBottom))
-      pVariantLabelBottom->Hide(!showAmpSection || mAmpSelectorIndex != 1);
+      pVariantLabelBottom->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch));
 
     const auto updateAmpSlot = [&](const int tag, const int slotIndex) {
       if (auto* pAmpSlot = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
@@ -6718,6 +6737,105 @@ void NeuralAmpModeler::_SyncTunerParamToTopNav()
     GetParam(kTunerActive)->Set(shouldTunerBeActive ? 1.0 : 0.0);
     SendParameterValueFromDelegate(kTunerActive, GetParam(kTunerActive)->GetNormalized(), true);
     OnParamChange(kTunerActive);
+  }
+}
+
+NeuralAmpModeler::AmpSlotState NeuralAmpModeler::_GetDefaultAmpSlotState(int slotIndex) const
+{
+  slotIndex = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotStates.size()) - 1);
+  (void) slotIndex;
+
+  AmpSlotState state;
+  state.modelToggle = GetParam(kModelToggle)->Bool() ? 1.0 : 0.0;
+  state.modelToggleTouched = false;
+  state.toneStackActive = GetParam(kEQActive)->Bool() ? 1.0 : 0.0;
+  state.preModelGain = GetParam(kPreModelGain)->Value();
+  state.bass = GetParam(kToneBass)->Value();
+  state.mid = GetParam(kToneMid)->Value();
+  state.treble = GetParam(kToneTreble)->Value();
+  state.presence = GetParam(kTonePresence)->Value();
+  state.depth = GetParam(kToneDepth)->Value();
+  state.master = GetParam(kMasterVolume)->Value();
+  return state;
+}
+
+NeuralAmpModeler::AmpSlotPresentationSpec NeuralAmpModeler::_GetAmpSlotPresentationSpec(int slotIndex) const
+{
+  const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotStates.size()) - 1);
+  AmpSlotPresentationSpec spec;
+  spec.layoutSlotIndex = clampedSlot;
+  spec.visibleControls.fill(false);
+  spec.knobColumnOffsets.fill(0.0f);
+
+  spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::PreModelGain)] = true;
+  spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::Bass)] = true;
+  spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::Mid)] = true;
+  spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::Treble)] = true;
+  spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::Presence)] = true;
+  spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::Depth)] = true;
+  spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::Master)] = true;
+  spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::ModelToggle)] = true;
+
+  spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::PreModelGain)] = kAmpFaceKnobColumnOffsets[0];
+  spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Bass)] = kAmpFaceKnobColumnOffsets[1];
+  spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Mid)] = kAmpFaceKnobColumnOffsets[2];
+  spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Treble)] = kAmpFaceKnobColumnOffsets[3];
+  spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Presence)] = kAmpFaceKnobColumnOffsets[4];
+  spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Depth)] = kAmpFaceKnobColumnOffsets[5];
+  spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Master)] = kAmpFaceKnobColumnOffsets[6];
+
+  spec.hasVariantSwitch = (clampedSlot == 1);
+  spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)] = spec.hasVariantSwitch;
+  return spec;
+}
+
+NeuralAmpModeler::AmpSlotBehaviorSpec NeuralAmpModeler::_GetAmpSlotBehaviorSpec(int slotIndex) const
+{
+  const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotStates.size()) - 1);
+  AmpSlotBehaviorSpec spec;
+  spec.supportedControls.fill(false);
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::PreModelGain)] = true;
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Bass)] = true;
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Mid)] = true;
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Treble)] = true;
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Presence)] = true;
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Depth)] = true;
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Master)] = true;
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::ModelToggle)] = true;
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)] = (clampedSlot == 1);
+  return spec;
+}
+
+NeuralAmpModeler::AmpSlotResolvedSpec NeuralAmpModeler::_ResolveAmpSlotSpec(int slotIndex) const
+{
+  AmpSlotResolvedSpec spec;
+  spec.presentation = _GetAmpSlotPresentationSpec(slotIndex);
+  spec.behavior = _GetAmpSlotBehaviorSpec(slotIndex);
+
+  for (size_t i = 0; i < spec.presentation.visibleControls.size(); ++i)
+    spec.presentation.visibleControls[i] = spec.presentation.visibleControls[i] && spec.behavior.supportedControls[i];
+
+  spec.presentation.hasVariantSwitch = spec.presentation.hasVariantSwitch
+                                       && spec.behavior.supportedControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)];
+  return spec;
+}
+
+bool NeuralAmpModeler::_AmpSlotSpecShowsControl(const AmpSlotResolvedSpec& spec, const AmpControlId controlId) const
+{
+  return spec.presentation.visibleControls[_GetAmpControlSpecIndex(controlId)];
+}
+
+bool NeuralAmpModeler::_AmpSlotSpecSupportsControl(const AmpSlotResolvedSpec& spec, const AmpControlId controlId) const
+{
+  return spec.behavior.supportedControls[_GetAmpControlSpecIndex(controlId)];
+}
+
+std::unique_ptr<dsp::tone_stack::AbstractToneStack> NeuralAmpModeler::_CreateToneStack(const ToneStackKind kind) const
+{
+  switch (kind)
+  {
+    case ToneStackKind::BasicNam:
+    default: return std::make_unique<dsp::tone_stack::BasicNamToneStack>();
   }
 }
 
@@ -6760,12 +6878,18 @@ void NeuralAmpModeler::_ApplyAmpSlotStateToToneStack(int slotIndex)
   if (toneStack == nullptr)
     return;
 
+  const auto slotSpec = _ResolveAmpSlotSpec(slotIndex);
   const auto& state = mAmpSlotStates[slotIndex];
-  toneStack->SetParam("bass", state.bass);
-  toneStack->SetParam("middle", state.mid);
-  toneStack->SetParam("treble", state.treble);
-  toneStack->SetParam("presence", state.presence);
-  toneStack->SetParam("depth", state.depth);
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Bass))
+    toneStack->SetParam("bass", state.bass);
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Mid))
+    toneStack->SetParam("middle", state.mid);
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Treble))
+    toneStack->SetParam("treble", state.treble);
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Presence))
+    toneStack->SetParam("presence", state.presence);
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Depth))
+    toneStack->SetParam("depth", state.depth);
 }
 
 void NeuralAmpModeler::_ApplyCurrentAmpParamsToActiveToneStack()
@@ -6775,11 +6899,17 @@ void NeuralAmpModeler::_ApplyCurrentAmpParamsToActiveToneStack()
   if (toneStack == nullptr)
     return;
 
-  toneStack->SetParam("bass", GetParam(kToneBass)->Value());
-  toneStack->SetParam("middle", GetParam(kToneMid)->Value());
-  toneStack->SetParam("treble", GetParam(kToneTreble)->Value());
-  toneStack->SetParam("presence", GetParam(kTonePresence)->Value());
-  toneStack->SetParam("depth", GetParam(kToneDepth)->Value());
+  const auto slotSpec = _ResolveAmpSlotSpec(activeSlot);
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Bass))
+    toneStack->SetParam("bass", GetParam(kToneBass)->Value());
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Mid))
+    toneStack->SetParam("middle", GetParam(kToneMid)->Value());
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Treble))
+    toneStack->SetParam("treble", GetParam(kToneTreble)->Value());
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Presence))
+    toneStack->SetParam("presence", GetParam(kTonePresence)->Value());
+  if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Depth))
+    toneStack->SetParam("depth", GetParam(kToneDepth)->Value());
 }
 
 void NeuralAmpModeler::_ApplyAmpSlotState(int slotIndex)
@@ -7842,9 +7972,11 @@ size_t NeuralAmpModeler::_GetBufferNumFrames() const
 
 void NeuralAmpModeler::_InitToneStack()
 {
-  // If you want to customize the tone stack, then put it here!
-  for (auto& toneStack : mToneStacks)
-    toneStack = std::make_unique<dsp::tone_stack::BasicNamToneStack>();
+  for (size_t slotIndex = 0; slotIndex < mToneStacks.size(); ++slotIndex)
+  {
+    const auto slotSpec = _ResolveAmpSlotSpec(static_cast<int>(slotIndex));
+    mToneStacks[slotIndex] = _CreateToneStack(slotSpec.behavior.toneStackKind);
+  }
 }
 bool NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t numFrames, const bool allowGrowth)
 {
