@@ -91,35 +91,64 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
   const double targetAmount = doubleActive ? activeAmount : 0.0;
   constexpr double kDoubleAmountSmoothingMs = 35.0;
   constexpr double kDoubleWetGain = 0.80;
-  constexpr std::array<double, 2> kBaseDelayMs = {13.5, 33.0};
-  constexpr std::array<double, 2> kDelayJitterMs = {4.25, 7.0};
-  constexpr std::array<double, 2> kToneCutoffHz = {2500.0, 7000.0};
-  constexpr std::array<double, 2> kLevelSkew = {0.78, 1.20};
-  constexpr std::array<double, 2> kCrossDelayMs = {4.5, 11.5};
-  constexpr double kDoubleCrossMix = 0.015;
-  constexpr std::array<double, 2> kTransientWeight = {0.58, -0.20};
-  constexpr std::array<double, 2> kAttackSkew = {0.25, -0.15};
-  constexpr std::array<double, 2> kTakeDirectKeep = {0.60, 0.45};
+  // Keep the fake take forward and reduce sustain smear while retaining take separation.
+  constexpr std::array<double, 2> kToneCutoffHz = {1650.0, 6800.0};
+  constexpr std::array<double, 2> kLevelSkewBase = {0.76, 1.23};
+  constexpr std::array<double, 2> kTransientWeightBase = {0.66, -0.28};
+  constexpr std::array<double, 2> kAttackSkewBase = {0.31, -0.21};
+  constexpr std::array<double, 2> kTakeDirectKeepBase = {0.73, 0.47};
   constexpr std::array<double, 2> kTakeOppositeDryBleed = {0.0, 0.0};
-  constexpr std::array<double, 2> kTakePrimaryShadowBlend = {1.10, 1.18};
+  constexpr std::array<double, 2> kTakePrimaryShadowBlendBase = {0.90, 1.14};
   constexpr std::array<double, 2> kTakeSecondaryShadowBlend = {0.0, 0.0};
-  constexpr std::array<double, 2> kTakeDirectAttackScale = {0.14, -0.06};
-  constexpr std::array<double, 2> kTakeShadowAttackScale = {0.04, 0.12};
-  constexpr double kTakeBSoftClipDrive = 1.09;
+  constexpr std::array<double, 2> kTakeDirectAttackScaleBase = {0.18, -0.11};
+  constexpr std::array<double, 2> kTakeShadowAttackScaleBase = {0.02, 0.18};
+  constexpr double kTakeBSoftClipDrive = 1.16;
   constexpr double kOtherPlayerMaxBlend = 0.45;
   constexpr double kFastEnvelopeAttackMs = 0.8;
   constexpr double kFastEnvelopeReleaseMs = 18.0;
   constexpr double kSlowEnvelopeAttackMs = 12.0;
   constexpr double kSlowEnvelopeReleaseMs = 150.0;
-  constexpr double kDoubleOutputCompensationDB = + 2.0;
-  constexpr double kDoubleRightBalanceTrimDB = -4.2;
-  constexpr double kDoubleSideWidthBoost = 1.10;
-  constexpr double kDoubleMidTrim = 0.92;
+  constexpr double kDoubleOutputCompensationDB = -1.5;
   constexpr double kLowActivityThreshold = 0.010;
   constexpr double kOnsetThreshold = 0.0065;
   constexpr double kAttackThreshold = 0.018;
   constexpr double kRetargetLowActivitySeconds = 0.030;
   constexpr double kRetargetCooldownSeconds = 0.080;
+  constexpr double kSpreadMaxMs = 14.0;
+  constexpr double kJitterScale = 2.4;
+  constexpr double kShadowScale = 1.2;
+  constexpr double kAsymmetry = 1.71;
+  constexpr double kDirectScale = 1.46;
+  constexpr double kRightTrimMaxDB = -3.5;
+  constexpr double kSideWidthMax = 1.15;
+  constexpr double kMidTrim = 0.96;
+  constexpr double kKnobMinSpreadMs = 6.0;
+  constexpr double kKnobMinSideWidth = 1.05;
+  constexpr double kKnobMinRightTrimDB = -1.2;
+  const double knobSpreadMs = kKnobMinSpreadMs + (kSpreadMaxMs - kKnobMinSpreadMs) * doubleKnobAmount;
+  const double knobSideWidth = kKnobMinSideWidth + (kSideWidthMax - kKnobMinSideWidth) * doubleKnobAmount;
+  const double knobRightTrimDB = kKnobMinRightTrimDB + (kRightTrimMaxDB - kKnobMinRightTrimDB) * doubleKnobAmount;
+  const std::array<double, 2> baseDelayMs = {15.5, 15.5 + knobSpreadMs};
+  const std::array<double, 2> delayJitterMs = {2.75 * kJitterScale, 4.5 * kJitterScale};
+  auto scalePairAroundCenter = [kAsymmetry](const std::array<double, 2>& values, const double minValue,
+                                            const double maxValue) {
+    const double center = 0.5 * (values[0] + values[1]);
+    return std::array<double, 2>{
+      std::clamp(center + (values[0] - center) * kAsymmetry, minValue, maxValue),
+      std::clamp(center + (values[1] - center) * kAsymmetry, minValue, maxValue)
+    };
+  };
+  const std::array<double, 2> levelSkew = scalePairAroundCenter(kLevelSkewBase, 0.2, 2.0);
+  const std::array<double, 2> transientWeight = scalePairAroundCenter(kTransientWeightBase, -1.0, 1.0);
+  const std::array<double, 2> attackSkew = scalePairAroundCenter(kAttackSkewBase, -1.0, 1.0);
+  std::array<double, 2> takeDirectKeep = scalePairAroundCenter(kTakeDirectKeepBase, 0.0, 1.2);
+  std::array<double, 2> takePrimaryShadowBlend = scalePairAroundCenter(kTakePrimaryShadowBlendBase, 0.0, 2.0);
+  const std::array<double, 2> takeDirectAttackScale = scalePairAroundCenter(kTakeDirectAttackScaleBase, -1.0, 1.0);
+  const std::array<double, 2> takeShadowAttackScale = scalePairAroundCenter(kTakeShadowAttackScaleBase, -1.0, 1.0);
+  for (auto& value : takeDirectKeep)
+    value = std::clamp(value * kDirectScale, 0.0, 1.2);
+  for (auto& value : takePrimaryShadowBlend)
+    value = std::clamp(value * kShadowScale, 0.0, 2.5);
 
   double smoothedAmount = mVirtualDoubleSmoothedAmount;
   size_t writeIndex = mVirtualDoubleWriteIndex;
@@ -153,7 +182,7 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
     const double outputCompensation =
       std::pow(10.0, (kDoubleOutputCompensationDB * takePreviewMix) / 20.0);
     const double rightBalanceCompensation =
-      std::pow(10.0, (kDoubleRightBalanceTrimDB * takePreviewMix) / 20.0);
+      std::pow(10.0, (knobRightTrimDB * takePreviewMix) / 20.0);
 
     const double dryLeft = static_cast<double>(ioPointers[0][s]);
     const double dryRight = static_cast<double>(ioPointers[1][s]);
@@ -186,8 +215,8 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
       const double separationScale = 0.50 + 0.58 * smoothedAmount;
       for (size_t c = 0; c < 2; ++c)
       {
-        const double jitter = (2.0 * NextVirtualDoubleRandom(randomSeed[c]) - 1.0) * kDelayJitterMs[c] * separationScale;
-        delayMs[c] = kBaseDelayMs[c] + jitter;
+        const double jitter = (2.0 * NextVirtualDoubleRandom(randomSeed[c]) - 1.0) * delayJitterMs[c] * separationScale;
+        delayMs[c] = baseDelayMs[c] + jitter;
       }
       if (delayMs[1] - delayMs[0] < 12.0)
         delayMs[1] = delayMs[0] + 12.0;
@@ -206,29 +235,26 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
         const double delaySamples =
           std::clamp(delayMs[c] * 0.001 * sampleRate, 1.0, static_cast<double>(mVirtualDoubleBufferSamples - 2));
         const double selfDelayed = ReadInterpolatedCircularSample(mVirtualDoubleBuffer[c], writeIndex, delaySamples);
-        const double crossDelaySamples = std::min(static_cast<double>(mVirtualDoubleBufferSamples - 2),
-                                                  delaySamples + kCrossDelayMs[c] * 0.001 * sampleRate);
-        const double crossDelayed = ReadInterpolatedCircularSample(mVirtualDoubleBuffer[1 - c], writeIndex, crossDelaySamples);
-        double wetVoice = ((1.0 - kDoubleCrossMix) * selfDelayed + kDoubleCrossMix * crossDelayed) * kLevelSkew[c];
+        double wetVoice = selfDelayed * levelSkew[c];
         const double toneAlpha = 1.0 - std::exp(-2.0 * kPi * kToneCutoffHz[c] / sampleRate);
         toneState[c] += toneAlpha * (wetVoice - toneState[c]);
         const double transientComponent = wetVoice - toneState[c];
-        wet[c] = toneState[c] + transientComponent * (kTransientWeight[c] + kAttackSkew[c] * attackAccent);
+        wet[c] = toneState[c] + transientComponent * (transientWeight[c] + attackSkew[c] * attackAccent);
       }
 
       const double otherPlayerBlend = kOtherPlayerMaxBlend * takePreviewMix;
-      const double takeADirect = dryTrim * (kTakeDirectKeep[0] * dryLeft + kTakeOppositeDryBleed[0] * dryRight) *
-                                 (1.0 + kTakeDirectAttackScale[0] * attackAccent * otherPlayerBlend);
-      const double takeBDirectBase = dryTrim * (kTakeDirectKeep[1] * dryRight + kTakeOppositeDryBleed[1] * dryLeft);
+      const double takeADirect = dryTrim * (takeDirectKeep[0] * dryLeft + kTakeOppositeDryBleed[0] * dryRight) *
+                                 (1.0 + takeDirectAttackScale[0] * attackAccent * otherPlayerBlend);
+      const double takeBDirectBase = dryTrim * (takeDirectKeep[1] * dryRight + kTakeOppositeDryBleed[1] * dryLeft);
       const double takeBDirect = takeBDirectBase * (1.0 - 0.05 * otherPlayerBlend) *
-                                 (1.0 + kTakeDirectAttackScale[1] * attackAccent * otherPlayerBlend);
+                                 (1.0 + takeDirectAttackScale[1] * attackAccent * otherPlayerBlend);
       const double takeAShadow = attackFocusedWet *
-                                 (kTakePrimaryShadowBlend[0] * wet[0] + kTakeSecondaryShadowBlend[0] * wet[1]) *
-                                 (1.0 + kTakeShadowAttackScale[0] * attackAccent * otherPlayerBlend);
+                                 (takePrimaryShadowBlend[0] * wet[0] + kTakeSecondaryShadowBlend[0] * wet[1]) *
+                                 (1.0 + takeShadowAttackScale[0] * attackAccent * otherPlayerBlend);
       const double takeBShadowBase =
-        attackFocusedWet * (kTakeSecondaryShadowBlend[1] * wet[0] + kTakePrimaryShadowBlend[1] * wet[1]);
+        attackFocusedWet * (kTakeSecondaryShadowBlend[1] * wet[0] + takePrimaryShadowBlend[1] * wet[1]);
       const double takeBShadow = takeBShadowBase * (1.0 + 0.08 * otherPlayerBlend) *
-                                 (1.0 + kTakeShadowAttackScale[1] * attackAccent * otherPlayerBlend);
+                                 (1.0 + takeShadowAttackScale[1] * attackAccent * otherPlayerBlend);
       const double takeA = takeADirect + takeAShadow;
       const double takeBRaw = takeBDirect + takeBShadow;
       const double takeBSoftClipDriveBlended = 1.0 + (kTakeBSoftClipDrive - 1.0) * otherPlayerBlend;
@@ -238,8 +264,8 @@ void NeuralAmpModeler::_ProcessVirtualDoubleStage(sample** ioPointers, const siz
       const double renderedRight =
         ((1.0 - takePreviewMix) * (0.62 * dryRight) + takePreviewMix * takeB) * outputCompensation *
         rightBalanceCompensation;
-      const double widthAmount = 1.0 + (kDoubleSideWidthBoost - 1.0) * takePreviewMix;
-      const double midTrim = 1.0 + (kDoubleMidTrim - 1.0) * takePreviewMix;
+      const double widthAmount = 1.0 + (knobSideWidth - 1.0) * takePreviewMix;
+      const double midTrim = 1.0 + (kMidTrim - 1.0) * takePreviewMix;
       const double mid = 0.5 * (renderedLeft + renderedRight) * midTrim;
       const double side = 0.5 * (renderedLeft - renderedRight) * widthAmount;
       double outputLeft = mid + side;

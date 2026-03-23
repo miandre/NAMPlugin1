@@ -3559,7 +3559,12 @@ void NeuralAmpModeler::OnReset()
   const double virtualDoubleKnobAmount = std::clamp(GetParam(kVirtualDoubleAmount)->Value() * 0.01, 0.0, 1.0);
   mVirtualDoubleSmoothedAmount =
     GetParam(kVirtualDoubleActive)->Bool() ? (0.30 + 0.65 * virtualDoubleKnobAmount) : 0.0;
-  mVirtualDoubleDelayMs = {16.0, 28.0};
+  constexpr double kVirtualDoubleKnobMinSpreadMs = 6.0;
+  constexpr double kVirtualDoubleKnobMaxSpreadMs = 14.0;
+  const double virtualDoubleSpreadMs =
+    kVirtualDoubleKnobMinSpreadMs +
+    (kVirtualDoubleKnobMaxSpreadMs - kVirtualDoubleKnobMinSpreadMs) * virtualDoubleKnobAmount;
+  mVirtualDoubleDelayMs = {15.5, 15.5 + virtualDoubleSpreadMs};
   mVirtualDoubleRandomSeed = {0x13579BDFu, 0x2468ACE1u};
   mVirtualDoubleToneState = {0.0, 0.0};
   mVirtualDoubleFastEnvelope = 0.0;
