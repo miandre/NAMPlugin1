@@ -416,13 +416,6 @@ private:
     Count
   };
 
-  enum class ReleaseIRAssetId : int
-  {
-    None = 0,
-    Cab1,
-    Count
-  };
-
   struct ReleaseAssetManifest
   {
     bool valid = false;
@@ -435,8 +428,6 @@ private:
       ReleaseAmpAssetId::Amp3B
     };
     ReleaseStompAssetId stomp = ReleaseStompAssetId::BoostA;
-    ReleaseIRAssetId irLeft = ReleaseIRAssetId::Cab1;
-    ReleaseIRAssetId irRight = ReleaseIRAssetId::None;
     WDL_String rootPath;
   };
 
@@ -536,8 +527,8 @@ private:
   WDL_String _ResolveReleaseAmpAssetPath(ReleaseAmpAssetId assetId) const;
   WDL_String _ResolveReleaseAmpAssetPathFromToken(const WDL_String& token) const;
   WDL_String _ResolveReleaseStompAssetPath(ReleaseStompAssetId assetId) const;
-  WDL_String _ResolveReleaseIRAssetPath(ReleaseIRAssetId assetId) const;
   WDL_String _ResolveCuratedCabIRPath(int sourceChoice, int captureIndex) const;
+  bool _ApplyDefaultCuratedCabState(bool notifyUI = false);
   void _ApplyCabSlotSource(int slotIndex, bool forceReload = false);
   void _RefreshCabControls();
   void _RefreshCabSlotControls(int slotIndex);
@@ -674,7 +665,6 @@ private:
   ReleaseAssetManifest mReleaseAssetManifest;
   std::array<WDL_String, static_cast<size_t>(ReleaseAmpAssetId::Count)> mReleaseAmpAssetPaths;
   std::array<WDL_String, static_cast<size_t>(ReleaseStompAssetId::Count)> mReleaseStompAssetPaths;
-  std::array<WDL_String, static_cast<size_t>(ReleaseIRAssetId::Count)> mReleaseIRAssetPaths;
   TopNavSection mTopNavActiveSection = TopNavSection::Amp;
   std::array<bool, static_cast<size_t>(TopNavSection::Count)> mTopNavBypassed = {false, false, false, false, false, false};
   int mAmpSelectorIndex = 1;
