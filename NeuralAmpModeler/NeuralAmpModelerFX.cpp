@@ -307,6 +307,7 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
   const bool stereoFXBusActive = (numChannelsInternal == 2);
   const bool monoSourceAtFX = (numChannelsMonoCore == 1);
   const bool pingPongMode = stereoFXBusActive && GetParam(kFXDelayPingPong)->Bool();
+  constexpr double kFXDelayPingPongMonoFeedbackSkew = 1.70;
   constexpr double kFXDelayFeedbackCrossStereo = 0.22;
   constexpr double kFXDelayWetCrossStereo = 0.16;
   constexpr double kFXDelayWetWidthStereo = 1.28;
@@ -453,7 +454,13 @@ void NeuralAmpModeler::_ProcessFXDelayStage(sample** ioPointers, const size_t nu
         // Seed only one side for mono->stereo ping-pong, so repeats alternate L/R.
         dryForWrite = (c == 0) ? 0.5 * (drySamples[0] + drySamples[1]) : 0.0;
       }
-      const double writeValue = dryForWrite + smoothedFeedback * feedbackForWrite;
+      double feedbackGain = smoothedFeedback;
+      if (pingPongMode && monoSourceAtFX && stereoFXBusActive)
+      {
+        // Bias the handoff so repeat 2 holds up more, then repeat 3 drops back in line.
+        feedbackGain *= (c == 0) ? (1.0 / kFXDelayPingPongMonoFeedbackSkew) : kFXDelayPingPongMonoFeedbackSkew;
+      }
+      const double writeValue = dryForWrite + feedbackGain * feedbackForWrite;
       delayBuffer[writeIndex] = static_cast<sample>(writeValue);
 
       if (fxDelayActive)
