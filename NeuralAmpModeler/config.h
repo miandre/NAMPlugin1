@@ -153,6 +153,8 @@
 #define VERTICALSWITCH_DOWN_FN "Hardware/VerticalSwitch_DOWN.png"
 #define VERTICALTOGGLE_UP_FN "Hardware/VerticalToggle_UPP.png"
 #define VERTICALTOGGLE_DOWN_FN "Hardware/VerticalToggle_DOWN.png"
+#define PUSHBUTTONRED_OFF_FN "Hardware/PushButtonRed_OFF.png"
+#define PUSHBUTTONRED_ON_FN "Hardware/PushButtonRed_ON.png"
 #define AP_KNOP_OFFSET 23.0f
 #define AMP1SWITCH_OFF_FN "Hardware/Amp1Switch_OFF.png"
 #define AMP1SWITCH_OFF2X_FN "Hardware/Amp1Switch_OFF@2x.png"

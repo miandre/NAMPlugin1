@@ -266,7 +266,12 @@ constexpr std::array<AmpFaceLayout, 3> kAmpFaceLayouts = {{
   {152.0f, -55.0f, 88.0f, 1.0f, AP_KNOP_OFFSET-3, 400.0f, 206.0f, 0.7f, -2.9f, -2.0f},
   {156.0f, +70.0f, 100.0f, 1.0f, AP_KNOP_OFFSET, 370.0f, 213.0f, 0.60f, -3.0f, 0.0f},
 }};
+constexpr int kAmp2SlotIndex = 1;
 constexpr int kAmp3SlotIndex = 2;
+constexpr float kAmpAuxButtonScale = 0.65f;
+constexpr float kAmp2DepthButtonCenterYOffset = -19.0f;
+constexpr float kAmp2ScoopButtonCenterYOffset = 17.0f;
+constexpr float kAmp2AuxButtonLabelYOffset = 6.0f;
 constexpr double kAmp3DepthSwitchOffValue = 1.0;
 constexpr double kAmp3DepthSwitchOnValue = 8.0;
 constexpr double kAmp3PresenceBaseValue = 5.0;
@@ -313,7 +318,7 @@ IRECT MakeAmpFaceVariantSwitchArea(const IRECT& ampFaceArea, const AmpFaceLayout
     ampFaceArea, layout, switchWidth, switchHeight, layout.variantSwitchColumnOffset, layout.variantSwitchCenterYOffset);
 }
 
-IRECT MakeAmpFaceVariantSwitchLabelArea(const IRECT& switchArea, const bool upperLabel)
+IRECT MakeAmpFaceVariantSwitchLabelArea(const IRECT& switchArea, const bool upperLabel, const float extraYOffset = 0.0f)
 {
   constexpr float kLabelWidth = 84.0f;
   constexpr float kLabelHeight = 10.0f;
@@ -322,9 +327,9 @@ IRECT MakeAmpFaceVariantSwitchLabelArea(const IRECT& switchArea, const bool uppe
   const float centerY = upperLabel ? (switchArea.T - kLabelGap - 0.5f * kLabelHeight)
                                    : (switchArea.B + kLabelGap + 0.5f * kLabelHeight);
   return IRECT(centerX - 0.5f * kLabelWidth,
-               centerY - 0.5f * kLabelHeight,
+               centerY + extraYOffset - 0.5f * kLabelHeight,
                centerX + 0.5f * kLabelWidth,
-               centerY + 0.5f * kLabelHeight);
+               centerY + extraYOffset + 0.5f * kLabelHeight);
 }
 
 constexpr float kAmpVariantSwitchScale = 0.5f;
@@ -339,6 +344,11 @@ double QuantizeAmp3DepthSwitchValue(const double depthValue)
 bool GetAmp3DepthSwitchState(const double depthValue)
 {
   return QuantizeAmp3DepthSwitchValue(depthValue) <= (kAmp3DepthSwitchOffValue + 0.5);
+}
+
+bool GetAmpAuxButtonState(const double buttonValue)
+{
+  return buttonValue >= 0.5;
 }
 
 bool IsAmp3BrightVariantSelected(const int slotIndex, const int variantIndex)
@@ -1264,6 +1274,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto verticalSwitchDownBitmap = pGraphics->LoadBitmap(VERTICALSWITCH_DOWN_FN);
     const auto verticalToggleUpBitmap = pGraphics->LoadBitmap(VERTICALTOGGLE_UP_FN);
     const auto verticalToggleDownBitmap = pGraphics->LoadBitmap(VERTICALTOGGLE_DOWN_FN);
+    const auto pushButtonRedOffBitmap = pGraphics->LoadBitmap(PUSHBUTTONRED_OFF_FN);
+    const auto pushButtonRedOnBitmap = pGraphics->LoadBitmap(PUSHBUTTONRED_ON_FN);
 
     // Top/section icons are SVG-only now.
 
@@ -1422,6 +1434,22 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                    ampDepthSwitchHeight,
                                    activeAmpSlotSpec.presentation.depthSwitchColumnOffset,
                                    ampFaceLayout.variantSwitchCenterYOffset);
+    const float ampAuxButtonWidth = pushButtonRedOffBitmap.W() * kAmpAuxButtonScale;
+    const float ampAuxButtonHeight = pushButtonRedOffBitmap.H() * kAmpAuxButtonScale;
+    const auto ampAuxButton1Area =
+      MakeAmpFaceVariantSwitchArea(ampFaceArea,
+                                   ampFaceLayout,
+                                   ampAuxButtonWidth,
+                                   ampAuxButtonHeight,
+                                   activeAmpSlotSpec.presentation.auxButton1ColumnOffset,
+                                   activeAmpSlotSpec.presentation.auxButton1CenterYOffset);
+    const auto ampAuxButton2Area =
+      MakeAmpFaceVariantSwitchArea(ampFaceArea,
+                                   ampFaceLayout,
+                                   ampAuxButtonWidth,
+                                   ampAuxButtonHeight,
+                                   activeAmpSlotSpec.presentation.auxButton2ColumnOffset,
+                                   activeAmpSlotSpec.presentation.auxButton2CenterYOffset);
 
     // Stomp section coordinates come from the user's 3x design canvas.
     constexpr float kDesignW = 3117.0f; // 3 * 1039
@@ -2148,6 +2176,60 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                        ampVariantLabelText,
                        COLOR_TRANSPARENT),
       kCtrlTagAmpDepthLabel)
+      ->SetIgnoreMouse(true);
+    auto toggleAmpAuxButton1 = [this](const bool enabled) {
+      const auto activeAmpSlotSpec = _ResolveAmpSlotSpec(mAmpSelectorIndex);
+      if (!_AmpSlotSpecShowsControl(activeAmpSlotSpec, AmpControlId::AuxButton1))
+        return;
+
+      mAmpSlotStates[mAmpSelectorIndex].auxButton1 = enabled ? 1.0 : 0.0;
+      _ApplyCurrentAmpParamsToActiveToneStack();
+      _MarkStandalonePresetDirty();
+    };
+    pGraphics->AttachControl(
+      new NAMRotatedBitmapToggleControl(
+        ampAuxButton1Area,
+        GetAmpAuxButtonState(mAmpSlotStates[mAmpSelectorIndex].auxButton1),
+        pushButtonRedOffBitmap,
+        pushButtonRedOnBitmap,
+        0.0f,
+        toggleAmpAuxButton1),
+      kCtrlTagAmpAuxButton1)
+      ->SetTooltip("Amp 2 depth boost.");
+    pGraphics->AttachControl(
+      new ITextControl(MakeAmpFaceVariantSwitchLabelArea(
+                         ampAuxButton1Area, true, activeAmpSlotSpec.presentation.auxButton1LabelYOffset),
+                       activeAmpSlotSpec.presentation.auxButton1Label,
+                       ampVariantLabelText,
+                       COLOR_TRANSPARENT),
+      kCtrlTagAmpAuxButton1Label)
+      ->SetIgnoreMouse(true);
+    auto toggleAmpAuxButton2 = [this](const bool enabled) {
+      const auto activeAmpSlotSpec = _ResolveAmpSlotSpec(mAmpSelectorIndex);
+      if (!_AmpSlotSpecShowsControl(activeAmpSlotSpec, AmpControlId::AuxButton2))
+        return;
+
+      mAmpSlotStates[mAmpSelectorIndex].auxButton2 = enabled ? 1.0 : 0.0;
+      _ApplyCurrentAmpParamsToActiveToneStack();
+      _MarkStandalonePresetDirty();
+    };
+    pGraphics->AttachControl(
+      new NAMRotatedBitmapToggleControl(
+        ampAuxButton2Area,
+        GetAmpAuxButtonState(mAmpSlotStates[mAmpSelectorIndex].auxButton2),
+        pushButtonRedOffBitmap,
+        pushButtonRedOnBitmap,
+        0.0f,
+        toggleAmpAuxButton2),
+      kCtrlTagAmpAuxButton2)
+      ->SetTooltip("Amp 2 scoop filter.");
+    pGraphics->AttachControl(
+      new ITextControl(MakeAmpFaceVariantSwitchLabelArea(
+                         ampAuxButton2Area, true, activeAmpSlotSpec.presentation.auxButton2LabelYOffset),
+                       activeAmpSlotSpec.presentation.auxButton2Label,
+                       ampVariantLabelText,
+                       COLOR_TRANSPARENT),
+      kCtrlTagAmpAuxButton2Label)
       ->SetIgnoreMouse(true);
     pGraphics->AttachControl(
       new NAMHoverPopSVGSwitchControl(inputModeSwitchArea, {inputMonoSVG, inputStereoSVG}, kInputStereoMode))
@@ -4082,7 +4164,7 @@ void NeuralAmpModeler::_ApplyInputStereoAutoDefaultIfNeeded()
 
 bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 {
-  constexpr int32_t kStateSchemaVersion = 7;
+  constexpr int32_t kStateSchemaVersion = 8;
 
   // If this isn't here when unserializing, then we know we're dealing with something before v0.8.0.
   WDL_String header("###NeuralAmpModeler###"); // Don't change this!
@@ -4137,6 +4219,8 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
     chunk.Put(&slotState.presence);
     chunk.Put(&slotState.depth);
     chunk.Put(&slotState.master);
+    chunk.Put(&slotState.auxButton1);
+    chunk.Put(&slotState.auxButton2);
   }
 
   if (!SerializeParams(chunk))
@@ -4153,7 +4237,8 @@ bool NeuralAmpModeler::SerializeState(IByteChunk& chunk) const
 
 int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 {
-  constexpr int32_t kStateSchemaVersion = 7;
+  constexpr int32_t kStateSchemaVersion = 8;
+  constexpr int32_t kAmpSlotVariantStateSchemaVersion = 7;
   constexpr int32_t kPreviousStateSchemaVersion = 6;
   constexpr int32_t kLegacyStateSchemaVersion = 5;
   constexpr int32_t kOlderLegacyStateSchemaVersion = 4;
@@ -4241,7 +4326,8 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
   int32_t schemaVersion = 0;
   const int schemaPos = chunk.Get(&schemaVersion, versionPos);
   if (schemaPos >= 0
-      && (schemaVersion == kStateSchemaVersion || schemaVersion == kPreviousStateSchemaVersion
+      && (schemaVersion == kStateSchemaVersion || schemaVersion == kAmpSlotVariantStateSchemaVersion
+          || schemaVersion == kPreviousStateSchemaVersion
           || schemaVersion == kLegacyStateSchemaVersion || schemaVersion == kOlderLegacyStateSchemaVersion
           || schemaVersion == kOldestLegacyStateSchemaVersion))
   {
@@ -4254,7 +4340,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 
     std::array<WDL_String, 3 * kAmpModelVariantCount> ampPathsByVariant;
     std::array<int32_t, 3> selectedVariants = {0, 0, 0};
-    if (schemaVersion >= kStateSchemaVersion)
+    if (schemaVersion >= kAmpSlotVariantStateSchemaVersion)
     {
       for (auto& slotPath : ampPathsByVariant)
       {
@@ -4290,7 +4376,7 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     statePos = chunk.GetStr(stompPath, statePos);
     if (statePos < 0)
       return startPos;
-    if (schemaVersion >= kStateSchemaVersion)
+    if (schemaVersion >= kAmpSlotVariantStateSchemaVersion)
     {
       statePos = chunk.GetStr(stompPathB, statePos);
       if (statePos < 0)
@@ -4365,6 +4451,15 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       statePos = chunk.Get(&slotState.master, statePos);
       if (statePos < 0)
         return startPos;
+      if (schemaVersion >= kStateSchemaVersion)
+      {
+        statePos = chunk.Get(&slotState.auxButton1, statePos);
+        if (statePos < 0)
+          return startPos;
+        statePos = chunk.Get(&slotState.auxButton2, statePos);
+        if (statePos < 0)
+          return startPos;
+      }
       slotState.modelToggleTouched = (modelToggleTouched != 0);
     }
 
@@ -6684,6 +6779,8 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     const auto verticalSwitchDownBitmap = pGraphics->LoadBitmap(VERTICALSWITCH_DOWN_FN);
     const auto verticalToggleUpBitmap = pGraphics->LoadBitmap(VERTICALTOGGLE_UP_FN);
     const auto verticalToggleDownBitmap = pGraphics->LoadBitmap(VERTICALTOGGLE_DOWN_FN);
+    const auto pushButtonRedOffBitmap = pGraphics->LoadBitmap(PUSHBUTTONRED_OFF_FN);
+    const auto pushButtonRedOnBitmap = pGraphics->LoadBitmap(PUSHBUTTONRED_ON_FN);
     const auto tunerIdx = static_cast<size_t>(TopNavSection::Tuner);
     const bool tunerActive = !mTopNavBypassed[tunerIdx];
     const bool showAmpSection = (mTopNavActiveSection == TopNavSection::Amp);
@@ -6886,6 +6983,78 @@ void NeuralAmpModeler::_RefreshTopNavControls()
           pDepthLabel,
           MakeAmpFaceVariantSwitchLabelArea(pGraphics->GetControlWithTag(kCtrlTagAmpDepthSwitch)->GetRECT(), false));
     }
+    if (auto* pAuxButton1 = pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton1))
+    {
+      const bool showAuxButton1 = showAmpSection && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::AuxButton1);
+      pAuxButton1->Hide(!showAuxButton1);
+      if (showAuxButton1)
+      {
+        if (auto* pAmpAuxButton1 = dynamic_cast<NAMRotatedBitmapToggleControl*>(pAuxButton1))
+        {
+          pAmpAuxButton1->SetBitmaps(pushButtonRedOffBitmap, pushButtonRedOnBitmap);
+          pAmpAuxButton1->SetState(GetAmpAuxButtonState(mAmpSlotStates[mAmpSelectorIndex].auxButton1));
+        }
+        pGraphics->SetControlBounds(
+          pAuxButton1,
+          MakeAmpFaceVariantSwitchArea(
+            ampFaceArea,
+            ampFaceLayout,
+            pushButtonRedOffBitmap.W() * kAmpAuxButtonScale,
+            pushButtonRedOffBitmap.H() * kAmpAuxButtonScale,
+            ampSlotSpec.presentation.auxButton1ColumnOffset,
+            ampSlotSpec.presentation.auxButton1CenterYOffset));
+      }
+    }
+    if (auto* pAuxButton1Label = pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton1Label))
+    {
+      if (auto* pAuxButton1LabelText = dynamic_cast<ITextControl*>(pAuxButton1Label))
+        pAuxButton1LabelText->SetStr(ampSlotSpec.presentation.auxButton1Label);
+      const bool showAuxButton1 = showAmpSection && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::AuxButton1);
+      pAuxButton1Label->Hide(!showAuxButton1);
+      if (showAuxButton1 && pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton1) != nullptr)
+        pGraphics->SetControlBounds(
+          pAuxButton1Label,
+          MakeAmpFaceVariantSwitchLabelArea(
+            pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton1)->GetRECT(),
+            true,
+            ampSlotSpec.presentation.auxButton1LabelYOffset));
+    }
+    if (auto* pAuxButton2 = pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton2))
+    {
+      const bool showAuxButton2 = showAmpSection && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::AuxButton2);
+      pAuxButton2->Hide(!showAuxButton2);
+      if (showAuxButton2)
+      {
+        if (auto* pAmpAuxButton2 = dynamic_cast<NAMRotatedBitmapToggleControl*>(pAuxButton2))
+        {
+          pAmpAuxButton2->SetBitmaps(pushButtonRedOffBitmap, pushButtonRedOnBitmap);
+          pAmpAuxButton2->SetState(GetAmpAuxButtonState(mAmpSlotStates[mAmpSelectorIndex].auxButton2));
+        }
+        pGraphics->SetControlBounds(
+          pAuxButton2,
+          MakeAmpFaceVariantSwitchArea(
+            ampFaceArea,
+            ampFaceLayout,
+            pushButtonRedOffBitmap.W() * kAmpAuxButtonScale,
+            pushButtonRedOffBitmap.H() * kAmpAuxButtonScale,
+            ampSlotSpec.presentation.auxButton2ColumnOffset,
+            ampSlotSpec.presentation.auxButton2CenterYOffset));
+      }
+    }
+    if (auto* pAuxButton2Label = pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton2Label))
+    {
+      if (auto* pAuxButton2LabelText = dynamic_cast<ITextControl*>(pAuxButton2Label))
+        pAuxButton2LabelText->SetStr(ampSlotSpec.presentation.auxButton2Label);
+      const bool showAuxButton2 = showAmpSection && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::AuxButton2);
+      pAuxButton2Label->Hide(!showAuxButton2);
+      if (showAuxButton2 && pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton2) != nullptr)
+        pGraphics->SetControlBounds(
+          pAuxButton2Label,
+          MakeAmpFaceVariantSwitchLabelArea(
+            pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton2)->GetRECT(),
+            true,
+            ampSlotSpec.presentation.auxButton2LabelYOffset));
+    }
 
     const bool showTunerReadout = tunerActive;
     if (auto* pTunerReadout = pGraphics->GetControlWithTag(kCtrlTagTunerReadout))
@@ -6940,6 +7109,14 @@ void NeuralAmpModeler::_RefreshTopNavControls()
       pDepthSwitch->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::DepthSwitch));
     if (auto* pDepthLabel = pGraphics->GetControlWithTag(kCtrlTagAmpDepthLabel))
       pDepthLabel->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::DepthSwitch));
+    if (auto* pAuxButton1 = pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton1))
+      pAuxButton1->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::AuxButton1));
+    if (auto* pAuxButton1Label = pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton1Label))
+      pAuxButton1Label->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::AuxButton1));
+    if (auto* pAuxButton2 = pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton2))
+      pAuxButton2->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::AuxButton2));
+    if (auto* pAuxButton2Label = pGraphics->GetControlWithTag(kCtrlTagAmpAuxButton2Label))
+      pAuxButton2Label->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::AuxButton2));
 
     const auto updateAmpSlot = [&](const int tag, const int slotIndex) {
       if (auto* pAmpSlot = dynamic_cast<NAMTopIconControl*>(pGraphics->GetControlWithTag(tag)))
@@ -7019,11 +7196,28 @@ NeuralAmpModeler::AmpSlotPresentationSpec NeuralAmpModeler::_GetAmpSlotPresentat
   spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Depth)] = kAmpFaceKnobColumnOffsets[5];
   spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Master)] = kAmpFaceKnobColumnOffsets[6];
 
-  spec.hasVariantSwitch = (clampedSlot == 1);
+  spec.hasVariantSwitch = (clampedSlot == kAmp2SlotIndex);
   spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)] = spec.hasVariantSwitch;
 
+  if (clampedSlot == kAmp2SlotIndex)
+  {
+    spec.hasAuxButton1 = true;
+    spec.hasAuxButton2 = true;
+    spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::Depth)] = false;
+    spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::AuxButton1)] = true;
+    spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::AuxButton2)] = true;
+    spec.auxButton1ColumnOffset = spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Depth)];
+    spec.auxButton2ColumnOffset = spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Depth)];
+    spec.auxButton1CenterYOffset = kAmp2DepthButtonCenterYOffset;
+    spec.auxButton2CenterYOffset = kAmp2ScoopButtonCenterYOffset;
+    spec.auxButton1LabelYOffset = kAmp2AuxButtonLabelYOffset;
+    spec.auxButton2LabelYOffset = kAmp2AuxButtonLabelYOffset;
+    spec.auxButton1Label = "DEPTH";
+    spec.auxButton2Label = "SCOOP";
+  }
+
   // Amp 3 Layout
-  if (clampedSlot == 2)
+  if (clampedSlot == kAmp3SlotIndex)
   {
     spec.hasVariantSwitch = true;
     spec.hasDepthSwitch = true;
@@ -7054,6 +7248,7 @@ NeuralAmpModeler::AmpSlotBehaviorSpec NeuralAmpModeler::_GetAmpSlotBehaviorSpec(
 {
   const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotStates.size()) - 1);
   AmpSlotBehaviorSpec spec;
+  spec.toneStackKind = (clampedSlot == kAmp2SlotIndex) ? ToneStackKind::Amp2 : ToneStackKind::BasicNam;
   spec.supportedControls.fill(false);
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::PreModelGain)] = true;
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Bass)] = true;
@@ -7063,10 +7258,15 @@ NeuralAmpModeler::AmpSlotBehaviorSpec NeuralAmpModeler::_GetAmpSlotBehaviorSpec(
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Depth)] = true;
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Master)] = true;
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::ModelToggle)] = true;
-  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)] = (clampedSlot == 1);
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)] = (clampedSlot == kAmp2SlotIndex);
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::DepthSwitch)] = false;
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::AuxButton1)] = (clampedSlot == kAmp2SlotIndex);
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::AuxButton2)] = (clampedSlot == kAmp2SlotIndex);
 
-  if (clampedSlot == 2)
+  if (clampedSlot == kAmp2SlotIndex)
+    spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Depth)] = false;
+
+  if (clampedSlot == kAmp3SlotIndex)
   {
     spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)] = true;
     spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::DepthSwitch)] = true;
@@ -7087,6 +7287,10 @@ NeuralAmpModeler::AmpSlotResolvedSpec NeuralAmpModeler::_ResolveAmpSlotSpec(int 
                                        && spec.behavior.supportedControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)];
   spec.presentation.hasDepthSwitch = spec.presentation.hasDepthSwitch
                                      && spec.behavior.supportedControls[_GetAmpControlSpecIndex(AmpControlId::DepthSwitch)];
+  spec.presentation.hasAuxButton1 = spec.presentation.hasAuxButton1
+                                    && spec.behavior.supportedControls[_GetAmpControlSpecIndex(AmpControlId::AuxButton1)];
+  spec.presentation.hasAuxButton2 = spec.presentation.hasAuxButton2
+                                    && spec.behavior.supportedControls[_GetAmpControlSpecIndex(AmpControlId::AuxButton2)];
   return spec;
 }
 
@@ -7104,6 +7308,7 @@ std::unique_ptr<dsp::tone_stack::AbstractToneStack> NeuralAmpModeler::_CreateTon
 {
   switch (kind)
   {
+    case ToneStackKind::Amp2: return std::make_unique<dsp::tone_stack::Amp2ToneStack>();
     case ToneStackKind::BasicNam:
     default: return std::make_unique<dsp::tone_stack::BasicNamToneStack>();
   }
@@ -7167,6 +7372,10 @@ void NeuralAmpModeler::_ApplyAmpSlotStateToToneStack(int slotIndex)
   if (_AmpSlotSpecSupportsControl(slotSpec, AmpControlId::Depth))
     toneStack->SetParam("depth",
                         _AmpSlotSpecShowsControl(slotSpec, AmpControlId::DepthSwitch) ? QuantizeAmp3DepthSwitchValue(state.depth) : state.depth);
+  toneStack->SetParam("amp2_depth_button",
+                      _AmpSlotSpecSupportsControl(slotSpec, AmpControlId::AuxButton1) ? state.auxButton1 : 0.0);
+  toneStack->SetParam("amp2_scoop_button",
+                      _AmpSlotSpecSupportsControl(slotSpec, AmpControlId::AuxButton2) ? state.auxButton2 : 0.0);
 }
 
 void NeuralAmpModeler::_ApplyCurrentAmpParamsToActiveToneStack()
@@ -7194,6 +7403,14 @@ void NeuralAmpModeler::_ApplyCurrentAmpParamsToActiveToneStack()
                         _AmpSlotSpecShowsControl(slotSpec, AmpControlId::DepthSwitch)
                           ? QuantizeAmp3DepthSwitchValue(GetParam(kToneDepth)->Value())
                           : GetParam(kToneDepth)->Value());
+  toneStack->SetParam("amp2_depth_button",
+                      _AmpSlotSpecSupportsControl(slotSpec, AmpControlId::AuxButton1)
+                        ? mAmpSlotStates[activeSlot].auxButton1
+                        : 0.0);
+  toneStack->SetParam("amp2_scoop_button",
+                      _AmpSlotSpecSupportsControl(slotSpec, AmpControlId::AuxButton2)
+                        ? mAmpSlotStates[activeSlot].auxButton2
+                        : 0.0);
 }
 
 void NeuralAmpModeler::_ApplyAmpSlotState(int slotIndex)

@@ -179,6 +179,10 @@ enum ECtrlTags
   kCtrlTagAmpModelVariantLabelBottom,
   kCtrlTagAmpDepthSwitch,
   kCtrlTagAmpDepthLabel,
+  kCtrlTagAmpAuxButton1,
+  kCtrlTagAmpAuxButton1Label,
+  kCtrlTagAmpAuxButton2,
+  kCtrlTagAmpAuxButton2Label,
   kCtrlTagAmpModelToggleLabelTop,
   kCtrlTagAmpModelToggleLabelBottom,
   kCtrlTagFXEQOnLED,
@@ -357,6 +361,8 @@ private:
     double presence = 5.0;
     double depth = 5.0;
     double master = 5.0;
+    double auxButton1 = 0.0;
+    double auxButton2 = 0.0;
   };
 
   enum class AmpControlId : int
@@ -371,6 +377,8 @@ private:
     ModelToggle,
     VariantSwitch,
     DepthSwitch,
+    AuxButton1,
+    AuxButton2,
     Count
   };
 
@@ -378,7 +386,8 @@ private:
 
   enum class ToneStackKind : int
   {
-    BasicNam = 0
+    BasicNam = 0,
+    Amp2
   };
 
   struct AmpSlotPresentationSpec
@@ -386,14 +395,24 @@ private:
     int layoutSlotIndex = 0;
     bool hasVariantSwitch = false;
     bool hasDepthSwitch = false;
+    bool hasAuxButton1 = false;
+    bool hasAuxButton2 = false;
     bool showModelToggleLabels = false;
     std::array<bool, kAmpControlCount> visibleControls = {};
     std::array<float, kAmpControlCount> knobColumnOffsets = {};
     float variantSwitchColumnOffset = 0.0f;
     float depthSwitchColumnOffset = 0.0f;
+    float auxButton1ColumnOffset = 0.0f;
+    float auxButton2ColumnOffset = 0.0f;
+    float auxButton1CenterYOffset = 0.0f;
+    float auxButton2CenterYOffset = 0.0f;
+    float auxButton1LabelYOffset = 0.0f;
+    float auxButton2LabelYOffset = 0.0f;
     std::array<const char*, 2> variantLabels = {"LEAD", "CRUNCH"};
     std::array<const char*, 2> modelToggleLabels = {"", ""};
     const char* depthSwitchLabel = "";
+    const char* auxButton1Label = "";
+    const char* auxButton2Label = "";
     bool useAlternateVariantSwitchBitmaps = false;
   };
 

@@ -63,5 +63,26 @@ protected:
   double mPresenceVal = 5.0;
   double mDepthVal = 5.0;
 };
+
+class Amp2ToneStack : public BasicNamToneStack
+{
+public:
+  Amp2ToneStack()
+  {
+    SetParam("amp2_depth_button", 0.0);
+    SetParam("amp2_scoop_button", 0.0);
+  }
+
+  DSP_SAMPLE** Process(DSP_SAMPLE** inputs, const int numChannels, const int numFrames) override;
+  void Reset(const double sampleRate, const int maxBlockSize) override;
+  void SetParam(const std::string name, const double val) override;
+
+private:
+  recursive_linear_filter::LowShelf mAmp2DepthBoost;
+  recursive_linear_filter::Peaking mAmp2Scoop;
+  recursive_linear_filter::Level mAmp2ScoopMakeup;
+  double mAmp2DepthButtonVal = 0.0;
+  double mAmp2ScoopButtonVal = 0.0;
+};
 }; // namespace tone_stack
 }; // namespace dsp

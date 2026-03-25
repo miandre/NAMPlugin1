@@ -1,5 +1,7 @@
 #include "ToneStack.h"
 
+#include <cmath>
+
 DSP_SAMPLE** dsp::tone_stack::BasicNamToneStack::Process(DSP_SAMPLE** inputs, const int numChannels,
                                                          const int numFrames)
 {
@@ -84,5 +86,57 @@ void dsp::tone_stack::BasicNamToneStack::SetParam(const std::string name, const 
     const double depthQuality = 0.9;
     recursive_linear_filter::BiquadParams depthParams(sampleRate, depthFrequency, depthQuality, depthGainDB);
     mToneDepth.SetParams(depthParams);
+  }
+}
+
+DSP_SAMPLE** dsp::tone_stack::Amp2ToneStack::Process(DSP_SAMPLE** inputs, const int numChannels, const int numFrames)
+{
+  DSP_SAMPLE** depthPointers = BasicNamToneStack::Process(inputs, numChannels, numFrames);
+  DSP_SAMPLE** amp2DepthPointers = mAmp2DepthBoost.Process(depthPointers, numChannels, numFrames);
+  DSP_SAMPLE** amp2ScoopPointers = mAmp2Scoop.Process(amp2DepthPointers, numChannels, numFrames);
+  DSP_SAMPLE** amp2MakeupPointers = mAmp2ScoopMakeup.Process(amp2ScoopPointers, numChannels, numFrames);
+  return amp2MakeupPointers;
+}
+
+void dsp::tone_stack::Amp2ToneStack::Reset(const double sampleRate, const int maxBlockSize)
+{
+  BasicNamToneStack::Reset(sampleRate, maxBlockSize);
+  SetParam("amp2_depth_button", mAmp2DepthButtonVal);
+  SetParam("amp2_scoop_button", mAmp2ScoopButtonVal);
+}
+
+void dsp::tone_stack::Amp2ToneStack::SetParam(const std::string name, const double val)
+{
+  if (name == "amp2_depth_button")
+  {
+    mAmp2DepthButtonVal = val;
+    const double sampleRate = GetSampleRate();
+    const bool enabled = val >= 0.5;
+    const double depthBoostGainDB = enabled ? 6.0 : 0.0;
+    const double depthBoostFrequency = 80.0;
+    const double depthBoostQuality = 0.707;
+    recursive_linear_filter::BiquadParams depthBoostParams(
+      sampleRate, depthBoostFrequency, depthBoostQuality, depthBoostGainDB);
+    mAmp2DepthBoost.SetParams(depthBoostParams);
+  }
+  else if (name == "amp2_scoop_button")
+  {
+    mAmp2ScoopButtonVal = val;
+    const double sampleRate = GetSampleRate();
+    const bool enabled = val >= 0.5;
+    const double scoopGainDB = enabled ? -3.5 : 0.0;
+    const double scoopFrequency = 600.0;
+    const double scoopQuality = 0.55;
+    recursive_linear_filter::BiquadParams scoopParams(sampleRate, scoopFrequency, scoopQuality, scoopGainDB);
+    mAmp2Scoop.SetParams(scoopParams);
+
+    const double makeupGainDB = enabled ? 0.6 : 0.0;
+    const double makeupGainLinear = std::pow(10.0, makeupGainDB / 20.0);
+    recursive_linear_filter::LevelParams makeupParams(makeupGainLinear);
+    mAmp2ScoopMakeup.SetParams(makeupParams);
+  }
+  else
+  {
+    BasicNamToneStack::SetParam(name, val);
   }
 }
