@@ -177,6 +177,10 @@ enum ECtrlTags
   kCtrlTagAmpModelVariantSwitch,
   kCtrlTagAmpModelVariantLabelTop,
   kCtrlTagAmpModelVariantLabelBottom,
+  kCtrlTagAmpDepthSwitch,
+  kCtrlTagAmpDepthLabel,
+  kCtrlTagAmpModelToggleLabelTop,
+  kCtrlTagAmpModelToggleLabelBottom,
   kCtrlTagFXEQOnLED,
   kCtrlTagFXDelayOnLED,
   kCtrlTagFXReverbOnLED,
@@ -366,6 +370,7 @@ private:
     Master,
     ModelToggle,
     VariantSwitch,
+    DepthSwitch,
     Count
   };
 
@@ -380,9 +385,16 @@ private:
   {
     int layoutSlotIndex = 0;
     bool hasVariantSwitch = false;
+    bool hasDepthSwitch = false;
+    bool showModelToggleLabels = false;
     std::array<bool, kAmpControlCount> visibleControls = {};
     std::array<float, kAmpControlCount> knobColumnOffsets = {};
+    float variantSwitchColumnOffset = 0.0f;
+    float depthSwitchColumnOffset = 0.0f;
     std::array<const char*, 2> variantLabels = {"LEAD", "CRUNCH"};
+    std::array<const char*, 2> modelToggleLabels = {"", ""};
+    const char* depthSwitchLabel = "";
+    bool useAlternateVariantSwitchBitmaps = false;
   };
 
   struct AmpSlotBehaviorSpec

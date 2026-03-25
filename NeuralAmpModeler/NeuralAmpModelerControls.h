@@ -297,6 +297,21 @@ public:
     SetDirty(false);
   }
 
+  void SetBitmaps(IBitmap offBitmap, IBitmap onBitmap)
+  {
+    if (GetUI() != nullptr)
+    {
+      mOffBitmap = GetUI()->GetScaledBitmap(offBitmap);
+      mOnBitmap = GetUI()->GetScaledBitmap(onBitmap);
+    }
+    else
+    {
+      mOffBitmap = offBitmap;
+      mOnBitmap = onBitmap;
+    }
+    SetDirty(false);
+  }
+
   void Draw(IGraphics& g) override
   {
     const IBitmap& bitmap = mState ? mOnBitmap : mOffBitmap;
@@ -393,12 +408,10 @@ public:
                             int paramIdx,
                             const std::array<IBitmap, 3>& offBitmaps,
                             const std::array<IBitmap, 3>& onBitmaps,
-                            const std::array<float, 3>& drawScales,
                             int initialAmpIndex)
   : IControl(bounds, paramIdx)
   , mOffBitmaps(offBitmaps)
   , mOnBitmaps(onBitmaps)
-  , mDrawScales(drawScales)
   , mAmpIndex(std::clamp(initialAmpIndex, 0, 2))
   {
   }
@@ -417,9 +430,7 @@ public:
   {
     const size_t bitmapIndex = static_cast<size_t>(mAmpIndex);
     const IBitmap& bitmap = (GetValue() > 0.5) ? mOnBitmaps[bitmapIndex] : mOffBitmaps[bitmapIndex];
-    const float maxDrawScale = std::max({mDrawScales[0], mDrawScales[1], mDrawScales[2]});
-    const float drawScale = std::clamp(mDrawScales[bitmapIndex] / std::max(0.1f, maxDrawScale), 0.1f, 4.0f);
-    g.DrawFittedBitmap(bitmap, mRECT.GetScaledAboutCentre(drawScale));
+    g.DrawFittedBitmap(bitmap, mRECT);
   }
 
   void OnMouseDown(float, float, const IMouseMod&) override
@@ -431,16 +442,16 @@ public:
 
   void OnRescale() override
   {
+    const int targetScale = std::max(2, GetUI()->GetRoundedScreenScale());
     for (auto& bitmap : mOffBitmaps)
-      bitmap = GetUI()->GetScaledBitmap(bitmap);
+      bitmap = GetUI()->LoadBitmap(bitmap.GetResourceName().Get(), bitmap.N(), bitmap.GetFramesAreHorizontal(), targetScale);
     for (auto& bitmap : mOnBitmaps)
-      bitmap = GetUI()->GetScaledBitmap(bitmap);
+      bitmap = GetUI()->LoadBitmap(bitmap.GetResourceName().Get(), bitmap.N(), bitmap.GetFramesAreHorizontal(), targetScale);
   }
 
 private:
   std::array<IBitmap, 3> mOffBitmaps;
   std::array<IBitmap, 3> mOnBitmaps;
-  std::array<float, 3> mDrawScales;
   int mAmpIndex = 0;
 };
 
@@ -926,12 +937,13 @@ public:
 
   void OnRescale() override
   {
+    const int targetScale = std::max(2, GetUI()->GetRoundedScreenScale());
     for (auto& bitmap : mKnobBitmaps)
       if (bitmap.IsValid())
-        bitmap = GetUI()->GetScaledBitmap(bitmap);
+        bitmap = GetUI()->LoadBitmap(bitmap.GetResourceName().Get(), bitmap.N(), bitmap.GetFramesAreHorizontal(), targetScale);
     for (auto& bitmap : mBackgroundBitmaps)
       if (bitmap.IsValid())
-        bitmap = GetUI()->GetScaledBitmap(bitmap);
+        bitmap = GetUI()->LoadBitmap(bitmap.GetResourceName().Get(), bitmap.N(), bitmap.GetFramesAreHorizontal(), targetScale);
   }
 
   void OnResize() override
@@ -964,10 +976,14 @@ public:
       return;
 
     const double angle = -130.0 + GetValue() * 260.0;
-    g.StartLayer(this, knobBounds);
-    g.DrawFittedBitmap(knobBitmap, knobBounds, &bitmapBlend);
-    auto layer = g.EndLayer();
-    g.DrawRotatedLayer(layer, angle);
+    const float bitmapW = knobBitmap.W() / knobBitmap.GetDrawScale();
+    const float bitmapH = knobBitmap.H() / knobBitmap.GetDrawScale();
+    g.PathTransformSave();
+    g.PathTransformTranslate(knobBounds.MW(), knobBounds.MH());
+    g.PathTransformRotate(static_cast<float>(angle));
+    g.PathTransformScale(knobBounds.W() / bitmapW, knobBounds.H() / bitmapH);
+    g.DrawBitmap(knobBitmap, IRECT(-0.5f * bitmapW, -0.5f * bitmapH, 0.5f * bitmapW, 0.5f * bitmapH), 0, 0, &bitmapBlend);
+    g.PathTransformRestore();
   }
 
 private:
