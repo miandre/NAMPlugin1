@@ -1,4 +1,4 @@
-Last updated: 2026-03-22
+Last updated: 2026-03-25
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -16,7 +16,7 @@ This file is mandatory onboarding context for every new agent.
 - Delay time sync mode implemented
 
 ### Done: Delay upgrades
-- Ping-pong behavior implemented and corrected for mono/stereo input behavior
+- Ping-pong behavior implemented and then retuned for more balanced mono ping-pong repeats
 - Delay ducker implemented with extended usable range
 - Delay digital readout implemented and polished
 
@@ -35,13 +35,24 @@ Outcome:
 Outcome:
 - `NAM_RELEASE_MODE=1` behaves like a first "release-feel" runtime path without full packaging yet
 
+### Done: Milestone C - Cab system v1
+Outcome:
+- Interactive dual-cab workflow is now the main cab architecture
+
+### Done: Release-mode curated cab embedding v1
+Outcome:
+- Curated cab IRs for the current mic set are embedded in release builds
+
 ### Done: Milestone E - gate UX reshape
 Outcome:
 - Gate now behaves as a one-knob macro instead of a raw threshold-only feel
 
-### Done: Milestone G - doubler v1
+### Done: Milestone G - doubler improvement pass
 Outcome:
-- Doubler works as a double-track preview rather than a simple widener
+- Doubler now works as a convincing double-track preview baseline for jamming / tone evaluation
+
+Important landed detail:
+- The right-side soft clip experiment was ultimately removed because it caused audible crackle with some curated IR combinations
 
 ### Done: Milestone H - proper stereo/mono input and output metering
 Outcome:
@@ -50,14 +61,6 @@ Outcome:
 ### Done: Preset/session restore stabilization follow-up
 Outcome:
 - Preset context now survives restart/session reopen much more clearly
-
-### Done: Milestone C - Cab system v1
-Outcome:
-- Interactive dual-cab workflow is now the main cab architecture
-
-### Done: Release-mode curated cab embedding v1
-Outcome:
-- Curated cab IRs for the current mic set are embedded in release builds
 
 ### Done: Milestone I - Compressor stomp pedal v1
 Outcome:
@@ -69,27 +72,28 @@ Outcome:
 
 ### Done: Milestone J - Amp model variants v1
 Outcome:
-- Each amp slot now supports `A/B` model variants with shared per-slot controls
+- Each amp slot supports `A/B` model variants with shared per-slot controls
+
+### Done: Default asset baseline refresh
+Outcome:
+- Startup and the `Default` preset now use the current `Amp1A/B ... Amp3A/B`, `BoostA/B`, and curated stereo cab baseline
+
+### Done: Amp-face scaffolding + release amp UI v1
+Outcome:
+- Amp presentation and behavior can now diverge per slot without rewriting the whole editor
 
 Landed work:
-- Per-slot `A/B` amp model storage/loading/persistence
-- Selected variant restored per amp slot
-- Amp 2 front-panel variant switch
-- Amp 1 and Amp 3 backend-ready but no front-panel switch yet
-- Release mode preload updated to `Amp1A/B`, `Amp2A/B`, `Amp3A/B`
+- Slot presentation / behavior / resolved-spec scaffolding
+- Spec-driven tone-stack creation
+- Slot 1 `CHARACTER` variant switch
+- Slot 2 `DEPTH` / `SCOOP` buttons with `Amp2ToneStack`
+- Slot 3 `BRIGHT` / `DEPTH` switch-driven face
+- High-resolution amp knob/switch resource loading
+- Direct bitmap rotation for amp knobs to avoid wobble
 
 ### Done: Tuner improvement pass
 Outcome:
 - The tuner is much more usable and the major center-jump bug is fixed
-
-Landed work:
-- Faster analyzer updates
-- Improved high-string acquisition
-- Correct semitone-boundary rollover behavior
-- Numeric signed cents readout
-- Dual accidental note labels such as `A#/Bb`
-- Narrower, steadier tuner UI
-- Tuner monitor default set to `MUTE`
 
 Important note:
 - The key tuner fix was removing the forced cents reset to `0` on committed note changes
@@ -97,51 +101,35 @@ Important note:
 
 ## Active milestones
 
-### Milestone K: Doubler improvement pass
+### Milestone K: Amp variant switch click suppression
 Goal:
-- Improve the virtual/fake doubler so it feels more predictable and more musical in real use
-
-Current implementation shape:
-- Main insertion is post-cab and pre-delay/reverb
-- Main DSP lives in:
-  - `NeuralAmpModeler/NeuralAmpModelerFX.cpp`
-- Main state/plumbing lives in:
-  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
-  - `NeuralAmpModeler/NeuralAmpModeler.h`
-- Mono-source-only availability
-- Short-delay-based "other take" synthesis
-- Onset-driven retargeting/jitter
-- Asymmetric left/right voicing
-- Tone shaping, width processing, and output compensation
-- Only one exposed user control: amount
-
-Current concerns:
-- Too much hidden behavior behind one control
-- Hard for the user to build a simple mental model of what the doubler is doing
-- Likely to sound good in some cases and phasey or synthetic in others without an obvious fix
-- Changes here will likely be more subjective and iterative than tuner changes
-
-Recommended first step:
-- Do a focused read/review pass and summarize the current algorithm before changing DSP
-- Identify the smallest change that improves predictability without adding much architecture churn
-
-Risk:
-- Medium-high
-
-RT safety watch-outs:
-- Keep all processing allocation-free in the callback
-- No random heap use, locks, file access, or dynamic graph changes
-
-### Milestone F: Transpose decision path
-Goal:
-- Decide whether transpose should stay, be simplified, or be removed based on latency and quality tradeoffs
+- Remove or materially reduce the audible click when changing amp variants
 
 Current state:
-- Feature is hidden
-- App-side "transpose seems on" behavior appears to have been old standalone-state restore rather than a changed default
+- Variant switching works functionally and the slot-specific UI is now in place
+- The current concern is the audible artifact during the handoff itself
+- The most likely first inspection points are in:
+  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
+  - `NeuralAmpModeler/NeuralAmpModeler.h`
+- Start by reading:
+  - `_SelectAmpSlotModelVariant()`
+  - the model load/swap path
+  - any reset / state-apply behavior triggered by the switch
+
+Recommended first step:
+- Do a narrow root-cause analysis before changing behavior
+- Find out whether the click is caused by:
+  - abrupt audio-state discontinuity
+  - model swap timing
+  - abrupt parameter/state changes applied at the same moment
+- Keep the first fix minimal and reviewable
 
 Risk:
 - Medium
+
+RT safety watch-outs:
+- No allocations, locks, file access, or UI work in the audio callback
+- If a fade/crossfade is introduced, keep it deterministic and allocation-free
 
 ### Milestone B: Release asset packaging and final variant strategy
 Goal:
@@ -167,6 +155,17 @@ Risk:
 RT safety watch-outs:
 - No decrypt/decompress/file I/O on audio thread
 
+### Milestone F: Transpose decision path
+Goal:
+- Decide whether transpose should stay, be simplified, or be removed based on latency and quality tradeoffs
+
+Current state:
+- Feature is hidden
+- App-side "transpose seems on" behavior appears to have been old standalone-state restore rather than a changed default
+
+Risk:
+- Medium
+
 ### Milestone D: Cab system v2
 Goal:
 - Add distance axis and more advanced routing after Cab v1 proves stable
@@ -184,19 +183,19 @@ RT safety watch-outs:
 - Keep interpolation and routing deterministic and allocation-free in the callback
 
 ## Low-priority polish lane
-- Continue cab/amp UI polish only if the user explicitly wants it
+- Continue amp/cab UI polish only if the user explicitly wants it
 - Keep those changes UI-only and isolated from DSP/state work where possible
 
 Examples:
 - per-slot art tweaks
+- label alignment/padding cleanup
 - hover-state tuning
 - off-state visual language
-- cab control alignment/padding cleanup
 
 ## Recommended execution order from now
-1. Milestone K: doubler improvement pass
-2. Milestone F: transpose decision path only if the user returns to it
-3. Resume Milestone B when final release asset set is clearer
+1. Milestone K: amp variant switch click suppression
+2. Resume Milestone B when final release asset set is clearer
+3. Milestone F: transpose decision path only if the user returns to it
 4. Milestone D only after Cab v1 remains stable in regular use
 5. Treat additional UI polish as a low-risk side lane, not the main roadmap
 
@@ -217,21 +216,15 @@ Then confirm repo/submodule state:
 - `git -C iPlug2 remote -v`
 
 Current direction:
-1. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, boost v2, amp variants v1, and tuner improvements are already landed
+1. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, boost v2, amp variants v1, doubler improvements, startup/default asset refresh, and slot-specific amp UI work are already landed
 2. Do not reopen tuner work unless the user explicitly asks
 3. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
 4. Prefer small, reviewable follow-ups from the current stable baseline
 
 Suggested next task unless the user redirects:
-1. Inspect the current doubler implementation and summarize what it is doing today
-2. Focus files:
+1. Investigate and reduce the click sound when changing amp variants
+2. Focus first on:
   - `NeuralAmpModeler/NeuralAmpModeler.cpp`
-  - `NeuralAmpModeler/NeuralAmpModelerFX.cpp`
   - `NeuralAmpModeler/NeuralAmpModeler.h`
-3. Identify the smallest RT-safe first improvement that makes the doubler feel more predictable or controllable
-
-Constraints:
-- Keep diffs minimal
-- Keep audio thread RT-safe
-- Do not run builds/tests unless explicitly requested
-- Dev mode: breaking changes are allowed when they improve architecture and iteration speed
+3. Inspect `_SelectAmpSlotModelVariant()` and the associated model handoff/reset path before proposing changes
+4. Keep the first fix minimal, reviewable, and RT-safe
