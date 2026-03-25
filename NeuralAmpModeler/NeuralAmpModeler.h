@@ -175,6 +175,7 @@ enum ECtrlTags
   kCtrlTagBoostOnLED,
   kCtrlTagCompressorOnLED,
   kCtrlTagAmpModelVariantSwitch,
+  kCtrlTagAmpModelVariantCaption,
   kCtrlTagAmpModelVariantLabelTop,
   kCtrlTagAmpModelVariantLabelBottom,
   kCtrlTagAmpDepthSwitch,
@@ -398,6 +399,7 @@ private:
     bool hasAuxButton1 = false;
     bool hasAuxButton2 = false;
     bool showModelToggleLabels = false;
+    bool showVariantSwitchLabels = true;
     std::array<bool, kAmpControlCount> visibleControls = {};
     std::array<float, kAmpControlCount> knobColumnOffsets = {};
     float variantSwitchColumnOffset = 0.0f;
@@ -409,6 +411,7 @@ private:
     float auxButton1LabelYOffset = 0.0f;
     float auxButton2LabelYOffset = 0.0f;
     std::array<const char*, 2> variantLabels = {"LEAD", "CRUNCH"};
+    const char* variantSwitchCaption = "";
     std::array<const char*, 2> modelToggleLabels = {"", ""};
     const char* depthSwitchLabel = "";
     const char* auxButton1Label = "";

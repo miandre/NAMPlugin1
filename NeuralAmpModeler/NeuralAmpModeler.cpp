@@ -262,10 +262,11 @@ struct AmpFaceLayout
 
 constexpr std::array<float, 7> kAmpFaceKnobColumnOffsets = {-2.0f, -1.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
 constexpr std::array<AmpFaceLayout, 3> kAmpFaceLayouts = {{
-  {151.0f, -75.0f, 90.0f, 1.0f, AP_KNOP_OFFSET+2, 370.0f, 205.0f, 0.8f, -3.0f, 0.0f},
+  {151.0f, -55.0f, 85.0f, 1.0f, AP_KNOP_OFFSET+2, 370.0f, 205.0f, 0.8f, -2.8f, 0.0f},
   {152.0f, -55.0f, 88.0f, 1.0f, AP_KNOP_OFFSET-3, 400.0f, 206.0f, 0.7f, -2.9f, -2.0f},
   {156.0f, +70.0f, 100.0f, 1.0f, AP_KNOP_OFFSET, 370.0f, 213.0f, 0.60f, -3.0f, 0.0f},
 }};
+constexpr int kAmp1SlotIndex = 0;
 constexpr int kAmp2SlotIndex = 1;
 constexpr int kAmp3SlotIndex = 2;
 constexpr float kAmpAuxButtonScale = 0.65f;
@@ -2085,6 +2086,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const std::array<IBitmap, 3> ampModelSwitchOffBitmaps = {amp1SwitchOffBitmap, amp2SwitchOffBitmap, amp3SwitchOffBitmap};
     const std::array<IBitmap, 3> ampModelSwitchOnBitmaps = {amp1SwitchOnBitmap, amp2SwitchOnBitmap, amp3SwitchOnBitmap};
     const IText ampVariantLabelText(10.0f, COLOR_BLACK.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle);
+    const IText ampVariantCaptionTextWhite(
+      10.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle);
     pGraphics->AttachControl(
       new NAMAmpBitmapToggleControl(modelToggleArea, kModelToggle, ampModelSwitchOffBitmaps, ampModelSwitchOnBitmaps, mAmpSelectorIndex))
       ->SetTooltip("Model On/Off");
@@ -2131,6 +2134,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         toggleAmpVariant),
       kCtrlTagAmpModelVariantSwitch)
       ->SetTooltip("Amp voice: A / B.");
+    pGraphics->AttachControl(
+      new ITextControl(MakeAmpFaceVariantSwitchLabelArea(ampVariantSwitchArea, true),
+                       activeAmpSlotSpec.presentation.variantSwitchCaption,
+                       activeAmpSlotSpec.presentation.showVariantSwitchLabels ? ampVariantLabelText : ampVariantCaptionTextWhite,
+                       COLOR_TRANSPARENT),
+      kCtrlTagAmpModelVariantCaption)
+      ->SetIgnoreMouse(true);
     pGraphics->AttachControl(
       new ITextControl(MakeAmpFaceVariantSwitchLabelArea(ampVariantSwitchArea, true),
                        activeAmpSlotSpec.presentation.variantLabels[0],
@@ -2616,7 +2626,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->SetTooltip("Delay DUCKER amount (0% = off)");
     pGraphics->AttachControl(new NAMAmpBitmapKnobControl(preModelGainArea,
                                                          kPreModelGain,
-                                                         "PRE GAIN",
+                                                         "GAIN",
                                                          ampKnobStyle,
                                                          ampFaceKnobBitmaps,
                                                          ampFaceKnobBackgroundBitmaps,
@@ -6919,9 +6929,11 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     {
       if (auto* pVariantLabelText = dynamic_cast<ITextControl*>(pVariantLabelTop))
         pVariantLabelText->SetStr(ampSlotSpec.presentation.variantLabels[0]);
-      const bool showVariantSwitch = showAmpSection && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch);
-      pVariantLabelTop->Hide(!showVariantSwitch);
-      if (showVariantSwitch)
+      const bool showVariantLabels = showAmpSection
+                                     && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch)
+                                     && ampSlotSpec.presentation.showVariantSwitchLabels;
+      pVariantLabelTop->Hide(!showVariantLabels);
+      if (showVariantLabels)
         pGraphics->SetControlBounds(
           pVariantLabelTop,
           MakeAmpFaceVariantSwitchLabelArea(
@@ -6938,9 +6950,11 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     {
       if (auto* pVariantLabelText = dynamic_cast<ITextControl*>(pVariantLabelBottom))
         pVariantLabelText->SetStr(ampSlotSpec.presentation.variantLabels[1]);
-      const bool showVariantSwitch = showAmpSection && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch);
-      pVariantLabelBottom->Hide(!showVariantSwitch);
-      if (showVariantSwitch)
+      const bool showVariantLabels = showAmpSection
+                                     && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch)
+                                     && ampSlotSpec.presentation.showVariantSwitchLabels;
+      pVariantLabelBottom->Hide(!showVariantLabels);
+      if (showVariantLabels)
         pGraphics->SetControlBounds(
           pVariantLabelBottom,
           MakeAmpFaceVariantSwitchLabelArea(
@@ -6952,6 +6966,34 @@ void NeuralAmpModeler::_RefreshTopNavControls()
               ampSlotSpec.presentation.variantSwitchColumnOffset,
               ampFaceLayout.variantSwitchCenterYOffset),
             false));
+    }
+    if (auto* pVariantCaption = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantCaption))
+    {
+      if (auto* pVariantCaptionText = dynamic_cast<ITextControl*>(pVariantCaption))
+      {
+        pVariantCaptionText->SetStr(ampSlotSpec.presentation.variantSwitchCaption);
+        const IText captionText = (mAmpSelectorIndex == kAmp1SlotIndex)
+                                    ? IText(10.0f, COLOR_WHITE.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle)
+                                    : IText(10.0f, COLOR_BLACK.WithOpacity(0.92f), "ArialNarrow-Bold", EAlign::Center, EVAlign::Middle);
+        pVariantCaptionText->SetText(captionText);
+      }
+      const bool showVariantCaption = showAmpSection
+                                      && _AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch)
+                                      && !ampSlotSpec.presentation.showVariantSwitchLabels
+                                      && ampSlotSpec.presentation.variantSwitchCaption[0] != '\0';
+      pVariantCaption->Hide(!showVariantCaption);
+      if (showVariantCaption && pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch) != nullptr)
+        pGraphics->SetControlBounds(
+          pVariantCaption,
+          MakeAmpFaceVariantSwitchLabelArea(
+            MakeAmpFaceVariantSwitchArea(
+              ampFaceArea,
+              ampFaceLayout,
+              static_cast<float>(pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch)->GetRECT().W()),
+              static_cast<float>(pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch)->GetRECT().H()),
+              ampSlotSpec.presentation.variantSwitchColumnOffset,
+              ampFaceLayout.variantSwitchCenterYOffset),
+            true));
     }
     if (auto* pDepthSwitch = pGraphics->GetControlWithTag(kCtrlTagAmpDepthSwitch))
     {
@@ -7101,10 +7143,16 @@ void NeuralAmpModeler::_RefreshTopNavControls()
     hideAmpParamControl(kMasterVolume, AmpControlId::Master);
     if (auto* pVariantSwitch = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantSwitch))
       pVariantSwitch->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch));
+    if (auto* pVariantCaption = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantCaption))
+      pVariantCaption->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch)
+                            || ampSlotSpec.presentation.showVariantSwitchLabels
+                            || ampSlotSpec.presentation.variantSwitchCaption[0] == '\0');
     if (auto* pVariantLabelTop = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelTop))
-      pVariantLabelTop->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch));
+      pVariantLabelTop->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch)
+                             || !ampSlotSpec.presentation.showVariantSwitchLabels);
     if (auto* pVariantLabelBottom = pGraphics->GetControlWithTag(kCtrlTagAmpModelVariantLabelBottom))
-      pVariantLabelBottom->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch));
+      pVariantLabelBottom->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::VariantSwitch)
+                                || !ampSlotSpec.presentation.showVariantSwitchLabels);
     if (auto* pDepthSwitch = pGraphics->GetControlWithTag(kCtrlTagAmpDepthSwitch))
       pDepthSwitch->Hide(!showAmpSection || !_AmpSlotSpecShowsControl(ampSlotSpec, AmpControlId::DepthSwitch));
     if (auto* pDepthLabel = pGraphics->GetControlWithTag(kCtrlTagAmpDepthLabel))
@@ -7196,10 +7244,15 @@ NeuralAmpModeler::AmpSlotPresentationSpec NeuralAmpModeler::_GetAmpSlotPresentat
   spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Depth)] = kAmpFaceKnobColumnOffsets[5];
   spec.knobColumnOffsets[_GetAmpControlSpecIndex(AmpControlId::Master)] = kAmpFaceKnobColumnOffsets[6];
 
-  spec.hasVariantSwitch = (clampedSlot == kAmp2SlotIndex);
+  spec.hasVariantSwitch = (clampedSlot == kAmp1SlotIndex || clampedSlot == kAmp2SlotIndex);
   spec.visibleControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)] = spec.hasVariantSwitch;
 
-  if (clampedSlot == kAmp2SlotIndex)
+  if (clampedSlot == kAmp1SlotIndex)
+  {
+    spec.showVariantSwitchLabels = false;
+    spec.variantSwitchCaption = "CHARACTER";
+  }
+  else if (clampedSlot == kAmp2SlotIndex)
   {
     spec.hasAuxButton1 = true;
     spec.hasAuxButton2 = true;
@@ -7258,7 +7311,8 @@ NeuralAmpModeler::AmpSlotBehaviorSpec NeuralAmpModeler::_GetAmpSlotBehaviorSpec(
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Depth)] = true;
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Master)] = true;
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::ModelToggle)] = true;
-  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)] = (clampedSlot == kAmp2SlotIndex);
+  spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::VariantSwitch)] =
+    (clampedSlot == kAmp1SlotIndex || clampedSlot == kAmp2SlotIndex);
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::DepthSwitch)] = false;
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::AuxButton1)] = (clampedSlot == kAmp2SlotIndex);
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::AuxButton2)] = (clampedSlot == kAmp2SlotIndex);
