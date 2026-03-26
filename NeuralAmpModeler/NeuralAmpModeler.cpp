@@ -39,7 +39,16 @@ constexpr double kPi = 3.14159265358979323846;
 
 namespace
 {
-constexpr int kAmpSlotSwitchDeClickSamples = 192;
+constexpr int kAmpSlotSwitchDeClickSamples = 512;
+constexpr int kAmpModelVariantCrossfadeSamples = 512;
+constexpr int kPathToggleTransitionSamples = 512;
+constexpr int kPathToggleTransitionStateIdle = 0;
+constexpr int kPathToggleTransitionStateFadeOut = 1;
+constexpr int kPathToggleTransitionStateFadeIn = 2;
+constexpr int kAmpSlotTransitionSamples = 3072;
+constexpr int kAmpSlotTransitionStateIdle = 0;
+constexpr int kAmpSlotTransitionStateFadeOut = 1;
+constexpr int kAmpSlotTransitionStateFadeIn = 2;
 constexpr int kAmpSlotModelStateEmpty = 0;
 constexpr int kAmpSlotModelStateLoading = 1;
 constexpr int kAmpSlotModelStateReady = 2;
@@ -3012,29 +3021,78 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   _ProcessInput(processInputs, numFrames, processNumChannelsExternalIn, numChannelsMonoCore);
   _UpdateMeters(mInputPointers, nullptr, numFrames, numChannelsMonoCore, 0);
   _ApplyDSPStaging();
-  const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
+  const int selectedSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mToneStacks.size()) - 1);
+  const int activeSlot = std::clamp(mCurrentModelSlot, 0, static_cast<int>(mToneStacks.size()) - 1);
+  if (activeSlot == selectedSlot)
+  {
+    mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+    mActiveAmpMasterGain = mMasterGain;
+  }
   auto* activeToneStack = mToneStacks[activeSlot].get();
-  const bool ampBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
-  const bool stompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
+  const bool requestedAmpBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
+  const bool requestedStompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
+  const bool requestedAmpToneStackEnabled = GetParam(kEQActive)->Bool();
+  const bool requestedAmpModelEnabled = GetParam(kModelToggle)->Bool();
+  const bool requestedStompCompressorEnabled = GetParam(kStompCompressorActive)->Bool();
+  const bool requestedStompBoostEnabled = GetParam(kStompBoostActive)->Bool();
+  if (mPathToggleTransitionState == kPathToggleTransitionStateFadeOut && mPathToggleTransitionSamplesRemaining <= 0)
+  {
+    mActiveAmpBypassed = requestedAmpBypassed;
+    mActiveStompBypassed = requestedStompBypassed;
+    mActiveAmpToneStackEnabled = requestedAmpToneStackEnabled;
+    mActiveAmpModelEnabled = requestedAmpModelEnabled;
+    mActiveStompCompressorEnabled = requestedStompCompressorEnabled;
+    mActiveStompBoostEnabled = requestedStompBoostEnabled;
+    mPathToggleTransitionState = kPathToggleTransitionStateFadeIn;
+    mPathToggleTransitionSamplesRemaining = kPathToggleTransitionSamples;
+  }
+  else if (mPathToggleTransitionState == kPathToggleTransitionStateFadeIn
+           && mPathToggleTransitionSamplesRemaining <= 0)
+  {
+    mPathToggleTransitionState = kPathToggleTransitionStateIdle;
+  }
+
+  const bool requestedPathStateChange =
+    (requestedAmpBypassed != mActiveAmpBypassed) || (requestedStompBypassed != mActiveStompBypassed)
+    || (requestedAmpToneStackEnabled != mActiveAmpToneStackEnabled)
+    || (requestedAmpModelEnabled != mActiveAmpModelEnabled)
+    || (requestedStompCompressorEnabled != mActiveStompCompressorEnabled)
+    || (requestedStompBoostEnabled != mActiveStompBoostEnabled);
+  if (requestedPathStateChange)
+  {
+    if (mPathToggleTransitionState != kPathToggleTransitionStateFadeOut)
+    {
+      mPathToggleTransitionState = kPathToggleTransitionStateFadeOut;
+      mPathToggleTransitionSamplesRemaining = kPathToggleTransitionSamples;
+    }
+  }
+  else if (mPathToggleTransitionState == kPathToggleTransitionStateFadeOut)
+  {
+    mPathToggleTransitionState = kPathToggleTransitionStateFadeIn;
+    mPathToggleTransitionSamplesRemaining = kPathToggleTransitionSamples;
+  }
+
+  const bool ampBypassed = mActiveAmpBypassed;
+  const bool stompBypassed = mActiveStompBypassed;
   const bool cabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
   const bool useBoostB = GetParam(kStompBoostType)->Bool();
   ResamplingNAM* const activeStompModel = useBoostB ? mStompModelB.get() : mStompModel.get();
   ResamplingNAM* const activeStompModelRight = useBoostB ? mStompModelRightB.get() : mStompModelRight.get();
   const bool haveStereoStomp = (activeStompModel != nullptr) && (activeStompModelRight != nullptr);
-  const bool compressorEnabled = GetParam(kStompCompressorActive)->Bool() && !stompBypassed;
-  const bool boostEnabled = GetParam(kStompBoostActive)->Bool() && !stompBypassed
+  const bool compressorEnabled = mActiveStompCompressorEnabled && !stompBypassed;
+  const bool boostEnabled = mActiveStompBoostEnabled && !stompBypassed
                             && ((numChannelsMonoCore == 1) ? (activeStompModel != nullptr) : haveStereoStomp);
   const double boostDriveTargetGain = DBToAmp(GetParam(kStompBoostDrive)->Value());
-  const bool toneStackActive = GetParam(kEQActive)->Value() && !ampBypassed;
-  const bool modelActive = GetParam(kModelToggle)->Bool() && !ampBypassed;
+  const bool toneStackActive = mActiveAmpToneStackEnabled && !ampBypassed;
+  const bool modelActive = mActiveAmpModelEnabled && !ampBypassed;
   const bool haveStereoModel = (mModel != nullptr) && (mModelRight != nullptr);
   const bool haveModelForCore = (numChannelsMonoCore == 1) ? (mModel != nullptr) : haveStereoModel;
   const bool tunerActive = GetParam(kTunerActive)->Bool();
   const int transposeSemitones = static_cast<int>(std::lround(GetParam(kTransposeSemitones)->Value()));
   const NoiseGateMacroParams gateMacro = GetNoiseGateMacroParams(GetParam(kNoiseGateThreshold)->Value());
   const double boostLevelGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
-  const double preModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+  const double preModelGain = mActiveAmpPreModelGain;
 
   if (tunerActive)
   {
@@ -3214,6 +3272,36 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         modelInputPointers[c][s] *= boostLevelGain;
   }
 
+  const int ampModelCrossfadeTargetSelection = mAmpModelCrossfadeTargetSelection;
+  ResamplingNAM* crossfadeTargetModel = nullptr;
+  ResamplingNAM* crossfadeTargetModelRight = nullptr;
+  if (ampModelCrossfadeTargetSelection >= 0 && (!modelActive || !haveModelForCore))
+  {
+    mAmpModelCrossfadeTargetSelection = -1;
+    mAmpModelCrossfadeSamplesRemaining = 0;
+  }
+  const bool ampModelCrossfadeActive =
+    mAmpModelCrossfadeTargetSelection >= 0 && mAmpModelCrossfadeSamplesRemaining > 0 && modelActive && haveModelForCore;
+  if (ampModelCrossfadeActive)
+  {
+    const int maxSelectionIndex = static_cast<int>(mAmpSlotModelCache.size()) - 1;
+    const int clampedTargetSelection = std::clamp(ampModelCrossfadeTargetSelection, 0, maxSelectionIndex);
+    crossfadeTargetModel = mAmpSlotModelCache[clampedTargetSelection].get();
+    crossfadeTargetModelRight = mAmpSlotModelCacheRight[clampedTargetSelection].get();
+  }
+  const bool haveAmpModelCrossfadeTarget =
+    ampModelCrossfadeActive && crossfadeTargetModel != nullptr
+    && (numChannelsMonoCore == 1 || crossfadeTargetModelRight != nullptr);
+  if (ampModelCrossfadeActive && !haveAmpModelCrossfadeTarget)
+  {
+    mAmpModelCrossfadeTargetSelection = -1;
+    mAmpModelCrossfadeSamplesRemaining = 0;
+  }
+  const double ampModelCrossfadeTargetOutputGainScale =
+    haveAmpModelCrossfadeTarget
+      ? ((std::abs(mOutputGain) > 1.0e-9) ? (_GetOutputGainForModel(crossfadeTargetModel) / mOutputGain) : 1.0)
+      : 1.0;
+
   if (modelActive && haveModelForCore)
   {
     if (preModelGain != 1.0)
@@ -3290,6 +3378,66 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         }
       }
     }
+
+    if (haveAmpModelCrossfadeTarget)
+    {
+      sample* crossfadeTargetPointers[kNumChannelsInternal] = {
+        mAmpModelCrossfadeArray[0].data(),
+        mAmpModelCrossfadeArray[1].data()
+      };
+      if (numChannelsMonoCore == 1)
+      {
+        sample* monoTargetOut[1] = {crossfadeTargetPointers[0]};
+        crossfadeTargetModel->process(modelInputPointers, monoTargetOut, nFrames);
+      }
+      else
+      {
+        if (!bypassHeavySide[0])
+        {
+          sample* leftIn[1] = {modelInputPointers[0]};
+          sample* leftOut[1] = {crossfadeTargetPointers[0]};
+          crossfadeTargetModel->process(leftIn, leftOut, nFrames);
+        }
+        else
+        {
+          std::copy_n(modelInputPointers[0], numFrames, crossfadeTargetPointers[0]);
+        }
+
+        if (!bypassHeavySide[1])
+        {
+          sample* rightIn[1] = {modelInputPointers[1]};
+          sample* rightOut[1] = {crossfadeTargetPointers[1]};
+          crossfadeTargetModelRight->process(rightIn, rightOut, nFrames);
+        }
+        else
+        {
+          std::copy_n(modelInputPointers[1], numFrames, crossfadeTargetPointers[1]);
+        }
+      }
+
+      int crossfadeRemaining = mAmpModelCrossfadeSamplesRemaining;
+      for (size_t s = 0; s < numFrames; ++s)
+      {
+        const double mix =
+          (crossfadeRemaining > 0)
+            ? std::clamp(1.0 - static_cast<double>(crossfadeRemaining - 1)
+                                   / static_cast<double>(kAmpModelVariantCrossfadeSamples),
+                         0.0,
+                         1.0)
+            : 1.0;
+        for (size_t c = 0; c < numChannelsMonoCore; ++c)
+        {
+          const double currentSample = static_cast<double>(modelOutPointers[c][s]);
+          const double targetSample =
+            static_cast<double>(crossfadeTargetPointers[c][s]) * ampModelCrossfadeTargetOutputGainScale;
+          modelOutPointers[c][s] = static_cast<sample>((1.0 - mix) * currentSample + mix * targetSample);
+        }
+        if (crossfadeRemaining > 0)
+          --crossfadeRemaining;
+      }
+      mAmpModelCrossfadeSamplesRemaining = std::max(0, crossfadeRemaining);
+    }
+
     modelInputPointers = modelOutPointers;
   }
   else
@@ -3300,11 +3448,11 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** toneStackOutPointers = (toneStackActive && activeToneStack != nullptr)
                                     ? activeToneStack->Process(modelInputPointers, numChannelsMonoCore, nFrames)
                                     : modelInputPointers;
-  if (!ampBypassed && mMasterGain != 1.0)
+  if (!ampBypassed && mActiveAmpMasterGain != 1.0)
   {
     for (size_t c = 0; c < numChannelsMonoCore; ++c)
       for (size_t s = 0; s < numFrames; ++s)
-        toneStackOutPointers[c][s] *= mMasterGain;
+        toneStackOutPointers[c][s] *= mActiveAmpMasterGain;
   }
 
   auto copyMonoToStereo = [this, numFrames](sample** monoPointers) {
@@ -3490,36 +3638,72 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       std::fill_n(hpfPointers[c], numFrames, 0.0f);
   }
 
-  // Smooth the first samples after an amp slot switch to reduce hard-step clicks.
   if (numFrames > 0)
   {
-    int declickRemaining = mAmpSwitchDeClickSamplesRemaining.load(std::memory_order_relaxed);
-    if (declickRemaining > 0)
+    const bool slotTransitionActive =
+      (mAmpSlotTransitionState != kAmpSlotTransitionStateIdle) && (mAmpSlotTransitionSamplesRemaining > 0);
+    const bool pathToggleTransitionActive =
+      (mPathToggleTransitionState != kPathToggleTransitionStateIdle) && (mPathToggleTransitionSamplesRemaining > 0);
+    if (slotTransitionActive || pathToggleTransitionActive)
     {
-      const int framesToSmooth = static_cast<int>(std::min(numFrames, static_cast<size_t>(declickRemaining)));
-      for (size_t c = 0; c < numChannelsInternal; ++c)
+      int& transitionRemainingRef =
+        slotTransitionActive ? mAmpSlotTransitionSamplesRemaining : mPathToggleTransitionSamplesRemaining;
+      int transitionRemaining = transitionRemainingRef;
+      const int framesToFade = static_cast<int>(std::min(numFrames, static_cast<size_t>(transitionRemaining)));
+      const bool fadingOut =
+        slotTransitionActive ? (mAmpSlotTransitionState == kAmpSlotTransitionStateFadeOut)
+                             : (mPathToggleTransitionState == kPathToggleTransitionStateFadeOut);
+      const int totalTransitionSamples =
+        slotTransitionActive ? kAmpSlotTransitionSamples : kPathToggleTransitionSamples;
+      for (int s = 0; s < framesToFade; ++s)
       {
-        double prev = mAmpSwitchDeClickPrevSample[c];
-        int channelRemaining = declickRemaining;
-        for (int s = 0; s < framesToSmooth; ++s)
-        {
-          const double t = 1.0 - static_cast<double>(channelRemaining - 1) / static_cast<double>(kAmpSlotSwitchDeClickSamples);
-          const double blended = (1.0 - t) * prev + t * static_cast<double>(hpfPointers[c][s]);
-          hpfPointers[c][s] = static_cast<sample>(blended);
-          prev = blended;
-          --channelRemaining;
-        }
-        if (numFrames > static_cast<size_t>(framesToSmooth))
-          prev = static_cast<double>(hpfPointers[c][numFrames - 1]);
-        mAmpSwitchDeClickPrevSample[c] = prev;
+        const double progress =
+          1.0 - static_cast<double>(transitionRemaining) / static_cast<double>(totalTransitionSamples);
+        const double gain = fadingOut ? (1.0 - progress) : progress;
+        for (size_t c = 0; c < numChannelsInternal; ++c)
+          hpfPointers[c][s] = static_cast<sample>(static_cast<double>(hpfPointers[c][s]) * std::clamp(gain, 0.0, 1.0));
+        --transitionRemaining;
       }
-      declickRemaining -= framesToSmooth;
-      mAmpSwitchDeClickSamplesRemaining.store(std::max(0, declickRemaining), std::memory_order_relaxed);
+      if (fadingOut && numFrames > static_cast<size_t>(framesToFade))
+      {
+        for (size_t c = 0; c < numChannelsInternal; ++c)
+          std::fill_n(hpfPointers[c] + framesToFade, numFrames - static_cast<size_t>(framesToFade), 0.0f);
+      }
+      transitionRemainingRef = std::max(0, transitionRemaining);
+      for (size_t c = 0; c < numChannelsInternal; ++c)
+        mAmpSwitchDeClickPrevSample[c] = static_cast<double>(hpfPointers[c][numFrames - 1]);
     }
     else
     {
-      for (size_t c = 0; c < numChannelsInternal; ++c)
-        mAmpSwitchDeClickPrevSample[c] = static_cast<double>(hpfPointers[c][numFrames - 1]);
+      int declickRemaining = mAmpSwitchDeClickSamplesRemaining.load(std::memory_order_relaxed);
+      if (declickRemaining > 0)
+      {
+        const int framesToSmooth = static_cast<int>(std::min(numFrames, static_cast<size_t>(declickRemaining)));
+        for (size_t c = 0; c < numChannelsInternal; ++c)
+        {
+          double prev = mAmpSwitchDeClickPrevSample[c];
+          int channelRemaining = declickRemaining;
+          for (int s = 0; s < framesToSmooth; ++s)
+          {
+            const double t = 1.0 - static_cast<double>(channelRemaining - 1)
+                                       / static_cast<double>(kAmpSlotSwitchDeClickSamples);
+            const double blended = (1.0 - t) * prev + t * static_cast<double>(hpfPointers[c][s]);
+            hpfPointers[c][s] = static_cast<sample>(blended);
+            prev = blended;
+            --channelRemaining;
+          }
+          if (numFrames > static_cast<size_t>(framesToSmooth))
+            prev = static_cast<double>(hpfPointers[c][numFrames - 1]);
+          mAmpSwitchDeClickPrevSample[c] = prev;
+        }
+        declickRemaining -= framesToSmooth;
+        mAmpSwitchDeClickSamplesRemaining.store(std::max(0, declickRemaining), std::memory_order_relaxed);
+      }
+      else
+      {
+        for (size_t c = 0; c < numChannelsInternal; ++c)
+          mAmpSwitchDeClickPrevSample[c] = static_cast<double>(hpfPointers[c][numFrames - 1]);
+      }
     }
   }
 
@@ -3748,6 +3932,27 @@ void NeuralAmpModeler::OnReset()
   _ResetModelAndIR(sampleRate, GetBlockSize());
   mTransposeShifter.Reset(sampleRate, maxBlockSize);
   mTransposeShifterRight.Reset(sampleRate, maxBlockSize);
+  mPathToggleTransitionState = kPathToggleTransitionStateIdle;
+  mPathToggleTransitionSamplesRemaining = 0;
+  mAmpSlotTransitionState = kAmpSlotTransitionStateIdle;
+  mAmpSlotTransitionSamplesRemaining = 0;
+  mAmpSlotTransitionTargetSelection = -1;
+  mAmpSwitchDeClickSamplesRemaining.store(0, std::memory_order_relaxed);
+  mAmpSwitchDeClickPrevSample.fill(0.0);
+  mActiveAmpBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
+  mActiveStompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
+  mActiveAmpToneStackEnabled = GetParam(kEQActive)->Bool();
+  mActiveAmpModelEnabled = GetParam(kModelToggle)->Bool();
+  mActiveStompCompressorEnabled = GetParam(kStompCompressorActive)->Bool();
+  mActiveStompBoostEnabled = GetParam(kStompBoostActive)->Bool();
+  mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+  mActiveAmpMasterGain = mMasterGain;
+  mAmpModelCrossfadeTargetSelection = -1;
+  mAmpModelCrossfadeSamplesRemaining = 0;
+  const double outputGainSmoothSampleRate = std::max(1.0, sampleRate);
+  constexpr double kOutputGainSmoothTimeSeconds = 0.02;
+  mOutputGainSmoothCoeff = std::exp(-1.0 / (outputGainSmoothSampleRate * kOutputGainSmoothTimeSeconds));
+  mSmoothedOutputGain = mOutputGain;
   const double boostDriveSmoothSampleRate = std::max(1.0, sampleRate);
   constexpr double kBoostDriveSmoothTimeSeconds = 0.02;
   mStompBoostDriveSmoothCoeff = std::exp(-1.0 / (boostDriveSmoothSampleRate * kBoostDriveSmoothTimeSeconds));
@@ -7530,6 +7735,92 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     _SetInputGain();
     _SetOutputGain();
   };
+  auto getCurrentAmpSelection = [this]() {
+    return _GetAmpSlotModelStorageIndex(
+      std::clamp(mCurrentModelSlot, 0, static_cast<int>(mAmpNAMPaths.size()) - 1), mCurrentModelVariant);
+  };
+  auto haveReadyAmpSelectionInCache = [this, inputStereoMode](const int requestedSelection) {
+    if (requestedSelection < 0)
+      return false;
+
+    const int maxSelectionIndex = static_cast<int>(mAmpSlotModelCache.size()) - 1;
+    const int targetSelection = std::clamp(requestedSelection, 0, maxSelectionIndex);
+    const int targetState = mAmpSlotModelState[targetSelection].load(std::memory_order_acquire);
+    return (targetState == kAmpSlotModelStateReady) && (mAmpSlotModelCache[targetSelection] != nullptr)
+           && (!inputStereoMode || mAmpSlotModelCacheRight[targetSelection] != nullptr);
+  };
+  auto selectionWouldWaitForLoad = [this, inputStereoMode](const int requestedSelection) {
+    if (requestedSelection < 0)
+      return false;
+
+    const int maxSelectionIndex = static_cast<int>(mAmpSlotModelCache.size()) - 1;
+    const int targetSelection = std::clamp(requestedSelection, 0, maxSelectionIndex);
+    const bool targetHasPath = (mAmpNAMPathsByVariant[targetSelection].GetLength() > 0);
+    const int targetState = mAmpSlotModelState[targetSelection].load(std::memory_order_acquire);
+    const bool haveReadyTargetModel =
+      (targetState == kAmpSlotModelStateReady) && (mAmpSlotModelCache[targetSelection] != nullptr)
+      && (!inputStereoMode || mAmpSlotModelCacheRight[targetSelection] != nullptr);
+    return targetHasPath && !haveReadyTargetModel && (targetState == kAmpSlotModelStateLoading);
+  };
+  auto tryCommitAmpSelection =
+    [this, inputStereoMode, &selectionWouldWaitForLoad, &triggerOutputDeClick, &updateActiveModelGainsAndLatency](
+      const int requestedSelection,
+      const bool applyOutputDeClick) {
+    if (requestedSelection < 0)
+      return true;
+
+    const int maxSelectionIndex = static_cast<int>(mAmpSlotModelCache.size()) - 1;
+    const int targetSelection = std::clamp(requestedSelection, 0, maxSelectionIndex);
+    const int targetSlot = targetSelection / kAmpModelVariantCount;
+    const int targetVariant = targetSelection % kAmpModelVariantCount;
+    if (targetSlot == mCurrentModelSlot && targetVariant == mCurrentModelVariant)
+      return true;
+
+    const int targetState = mAmpSlotModelState[targetSelection].load(std::memory_order_acquire);
+    const bool haveReadyTargetModel =
+      (targetState == kAmpSlotModelStateReady) && (mAmpSlotModelCache[targetSelection] != nullptr)
+      && (!inputStereoMode || mAmpSlotModelCacheRight[targetSelection] != nullptr);
+    if (selectionWouldWaitForLoad(targetSelection))
+      return false;
+
+    const int previousSlot = mCurrentModelSlot;
+    const int previousVariant = mCurrentModelVariant;
+    if (previousSlot >= 0 && previousSlot < static_cast<int>(mAmpNAMPaths.size()))
+    {
+      const int previousSelection = _GetAmpSlotModelStorageIndex(previousSlot, previousVariant);
+      mAmpSlotModelCache[previousSelection] = std::move(mModel);
+      mAmpSlotModelCacheRight[previousSelection] = std::move(mModelRight);
+      const int prevState =
+        (mAmpSlotModelCache[previousSelection] != nullptr) ? kAmpSlotModelStateReady : kAmpSlotModelStateEmpty;
+      mAmpSlotModelState[previousSelection].store(prevState, std::memory_order_relaxed);
+    }
+
+    mCurrentModelSlot = targetSlot;
+    mCurrentModelVariant = targetVariant;
+    if (haveReadyTargetModel)
+    {
+      mModel = std::move(mAmpSlotModelCache[targetSelection]);
+      mModelRight = std::move(mAmpSlotModelCacheRight[targetSelection]);
+      mAmpSlotModelState[targetSelection].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
+      mNewModelLoadedInDSP = true;
+    }
+    else
+    {
+      _ClearAmpSlotCapabilityState(targetSlot);
+      mModel = nullptr;
+      mModelRight = nullptr;
+      if (mAmpSlotModelState[targetSelection].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
+        mAmpSlotModelState[targetSelection].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
+      mModelCleared = true;
+    }
+
+    if (applyOutputDeClick)
+      triggerOutputDeClick = true;
+    mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+    mActiveAmpMasterGain = mMasterGain;
+    updateActiveModelGainsAndLatency();
+    return true;
+  };
 
   // Slot-targeted model removals (requested from non-audio threads).
   for (int storageIndex = 0; storageIndex < static_cast<int>(mShouldRemoveModelSlot.size()); ++storageIndex)
@@ -7610,63 +7901,76 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     }
   }
 
+  if (mAmpModelCrossfadeTargetSelection >= 0 && mAmpModelCrossfadeSamplesRemaining <= 0)
+  {
+    (void) tryCommitAmpSelection(mAmpModelCrossfadeTargetSelection, true);
+    mAmpModelCrossfadeTargetSelection = -1;
+  }
+
+  if (mAmpSlotTransitionState == kAmpSlotTransitionStateFadeOut && mAmpSlotTransitionSamplesRemaining <= 0)
+  {
+    if (tryCommitAmpSelection(mAmpSlotTransitionTargetSelection, false))
+    {
+      mAmpSlotTransitionState = kAmpSlotTransitionStateFadeIn;
+      mAmpSlotTransitionSamplesRemaining = kAmpSlotTransitionSamples;
+      mAmpSlotTransitionTargetSelection = -1;
+    }
+    else
+    {
+      mAmpSlotTransitionState = kAmpSlotTransitionStateIdle;
+      mAmpSlotTransitionSamplesRemaining = 0;
+    }
+  }
+  else if (mAmpSlotTransitionState == kAmpSlotTransitionStateFadeIn
+           && mAmpSlotTransitionSamplesRemaining <= 0)
+  {
+    mAmpSlotTransitionState = kAmpSlotTransitionStateIdle;
+  }
+
   // Slot switching is resolved on audio thread by swapping active model ownership.
   const int requestedSelection = mPendingAmpModelSelection.exchange(-1, std::memory_order_acquire);
   if (requestedSelection >= 0)
   {
-    const int maxSelectionIndex = static_cast<int>(mAmpSlotModelCache.size()) - 1;
-    const int targetSelection = std::clamp(requestedSelection, 0, maxSelectionIndex);
-    const int targetSlot = targetSelection / kAmpModelVariantCount;
-    const int targetVariant = targetSelection % kAmpModelVariantCount;
-    if (targetSlot != mCurrentModelSlot || targetVariant != mCurrentModelVariant)
+    if (mAmpModelCrossfadeTargetSelection >= 0)
     {
-      const bool targetHasPath = (mAmpNAMPathsByVariant[targetSelection].GetLength() > 0);
-      const int targetState = mAmpSlotModelState[targetSelection].load(std::memory_order_acquire);
-      const bool haveReadyTargetModel =
-        (targetState == kAmpSlotModelStateReady) && (mAmpSlotModelCache[targetSelection] != nullptr)
-        && (!inputStereoMode || mAmpSlotModelCacheRight[targetSelection] != nullptr);
-      const bool waitForTargetLoad = targetHasPath && !haveReadyTargetModel
-                                     && (targetState == kAmpSlotModelStateLoading);
-      if (waitForTargetLoad)
+      mPendingAmpModelSelection.store(requestedSelection, std::memory_order_release);
+    }
+    else
+    {
+      const int maxSelectionIndex = static_cast<int>(mAmpSlotModelCache.size()) - 1;
+      const int targetSelection = std::clamp(requestedSelection, 0, maxSelectionIndex);
+      const int currentSelection = getCurrentAmpSelection();
+      const int targetSlot = targetSelection / kAmpModelVariantCount;
+      const int targetVariant = targetSelection % kAmpModelVariantCount;
+      const bool canCrossfadeVariant =
+        targetSelection != currentSelection && targetSlot == mCurrentModelSlot && targetVariant != mCurrentModelVariant
+        && mModel != nullptr && (!inputStereoMode || mModelRight != nullptr) && haveReadyAmpSelectionInCache(targetSelection);
+      const bool isSlotChange = targetSlot != mCurrentModelSlot;
+      if (canCrossfadeVariant)
       {
-        // Keep current slot live until the target slot model has actually arrived.
-        mPendingAmpModelSelection.store(targetSelection, std::memory_order_release);
+        mAmpModelCrossfadeTargetSelection = targetSelection;
+        mAmpModelCrossfadeSamplesRemaining = kAmpModelVariantCrossfadeSamples;
       }
-      else
+      else if (isSlotChange)
       {
-        const int previousSlot = mCurrentModelSlot;
-        const int previousVariant = mCurrentModelVariant;
-        if (previousSlot >= 0 && previousSlot < static_cast<int>(mAmpNAMPaths.size()))
+        if (selectionWouldWaitForLoad(targetSelection))
         {
-          const int previousSelection = _GetAmpSlotModelStorageIndex(previousSlot, previousVariant);
-          mAmpSlotModelCache[previousSelection] = std::move(mModel);
-          mAmpSlotModelCacheRight[previousSelection] = std::move(mModelRight);
-          const int prevState =
-            (mAmpSlotModelCache[previousSelection] != nullptr) ? kAmpSlotModelStateReady : kAmpSlotModelStateEmpty;
-          mAmpSlotModelState[previousSelection].store(prevState, std::memory_order_relaxed);
-        }
-
-        mCurrentModelSlot = targetSlot;
-        mCurrentModelVariant = targetVariant;
-        if (haveReadyTargetModel)
-        {
-          mModel = std::move(mAmpSlotModelCache[targetSelection]);
-          mModelRight = std::move(mAmpSlotModelCacheRight[targetSelection]);
-          mAmpSlotModelState[targetSelection].store(kAmpSlotModelStateReady, std::memory_order_relaxed);
-          mNewModelLoadedInDSP = true;
+          mPendingAmpModelSelection.store(targetSelection, std::memory_order_release);
         }
         else
         {
-          _ClearAmpSlotCapabilityState(targetSlot);
-          mModel = nullptr;
-          mModelRight = nullptr;
-          if (mAmpSlotModelState[targetSelection].load(std::memory_order_acquire) != kAmpSlotModelStateLoading)
-            mAmpSlotModelState[targetSelection].store(kAmpSlotModelStateEmpty, std::memory_order_relaxed);
-          mModelCleared = true;
+          mAmpSlotTransitionTargetSelection = targetSelection;
+          if (mAmpSlotTransitionState == kAmpSlotTransitionStateIdle)
+          {
+            mAmpSlotTransitionState = kAmpSlotTransitionStateFadeOut;
+            mAmpSlotTransitionSamplesRemaining = kAmpSlotTransitionSamples;
+          }
         }
-
-        triggerOutputDeClick = true;
-        updateActiveModelGainsAndLatency();
+      }
+      else if (!tryCommitAmpSelection(targetSelection, true))
+      {
+        // Keep current slot live until the target slot model has actually arrived.
+        mPendingAmpModelSelection.store(targetSelection, std::memory_order_release);
       }
     }
   }
@@ -7781,6 +8085,8 @@ void NeuralAmpModeler::_ApplyDSPStaging()
       .store(kAmpSlotModelStateReady, std::memory_order_relaxed);
     _SetAmpSlotCapabilityState(mCurrentModelSlot, mModel->HasLoudness(), mModel->HasOutputLevel());
     mNewModelLoadedInDSP = true;
+    mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+    mActiveAmpMasterGain = mMasterGain;
     updateActiveModelGainsAndLatency();
   }
   if (mStagedStompModel != nullptr && (!inputStereoMode || mStagedStompModelRight != nullptr))
@@ -8100,36 +8406,35 @@ void NeuralAmpModeler::_ResetModelAndIR(const double sampleRate, const int maxBl
 
 void NeuralAmpModeler::_SetInputGain()
 {
-  iplug::sample inputGainDB = GetParam(kInputLevel)->Value();
-  // Input calibration
-  if ((mModel != nullptr) && (mModel->HasInputLevel()) && GetParam(kCalibrateInput)->Bool())
+  double inputGainDB = GetParam(kInputLevel)->Value();
+  if ((mModel != nullptr) && mModel->HasInputLevel() && GetParam(kCalibrateInput)->Bool())
   {
     inputGainDB += GetParam(kInputCalibrationLevel)->Value() - mModel->GetInputLevel();
   }
   mInputGain = DBToAmp(inputGainDB);
 }
 
-void NeuralAmpModeler::_SetOutputGain()
+double NeuralAmpModeler::_GetOutputGainForModel(ResamplingNAM* model) const
 {
   double gainDB = GetParam(kOutputLevel)->Value();
-  if (mModel != nullptr)
+  if (model != nullptr)
   {
     const int outputMode = GetParam(kOutputMode)->Int();
     switch (outputMode)
     {
       case 1: // Normalized
-        if (mModel->HasLoudness())
+        if (model->HasLoudness())
         {
-          const double loudness = mModel->GetLoudness();
+          const double loudness = model->GetLoudness();
           const double targetLoudness = -18.0;
           gainDB += (targetLoudness - loudness);
         }
         break;
       case 2: // Calibrated
-        if (mModel->HasOutputLevel())
+        if (model->HasOutputLevel())
         {
           const double inputLevel = GetParam(kInputCalibrationLevel)->Value();
-          const double outputLevel = mModel->GetOutputLevel();
+          const double outputLevel = model->GetOutputLevel();
           gainDB += (outputLevel - inputLevel);
         }
         break;
@@ -8137,7 +8442,12 @@ void NeuralAmpModeler::_SetOutputGain()
       default: break;
     }
   }
-  mOutputGain = DBToAmp(gainDB);
+  return DBToAmp(gainDB);
+}
+
+void NeuralAmpModeler::_SetOutputGain()
+{
+  mOutputGain = _GetOutputGainForModel(mModel.get());
 }
 
 void NeuralAmpModeler::_SetMasterGain()
@@ -8557,12 +8867,17 @@ bool NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t nu
       mInputArray[c].resize(numFrames);
     for (auto c = 0; c < mOutputArray.size(); c++)
       mOutputArray[c].resize(numFrames);
+    for (auto& crossfadeChannel : mAmpModelCrossfadeArray)
+      crossfadeChannel.resize(numFrames);
+    mOutputGainRampArray.resize(numFrames);
   }
   // Always clear only the active frame range for this block.
   for (auto c = 0; c < mInputArray.size(); c++)
     std::fill_n(mInputArray[c].begin(), numFrames, 0.0);
   for (auto c = 0; c < mOutputArray.size(); c++)
     std::fill_n(mOutputArray[c].begin(), numFrames, 0.0);
+  for (auto& crossfadeChannel : mAmpModelCrossfadeArray)
+    std::fill_n(crossfadeChannel.begin(), numFrames, 0.0);
 
   // Would these ever get changed by something?
   for (auto c = 0; c < mInputArray.size(); c++)
@@ -8643,10 +8958,18 @@ void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** ou
 {
   if (outputs == nullptr)
     return;
-  const double gain = mOutputGain;
+  double gain = mSmoothedOutputGain;
+  const double targetGain = mOutputGain;
+  const double gainSmoothCoeff = mOutputGainSmoothCoeff;
+  for (size_t s = 0; s < nFrames; ++s)
+  {
+    gain = targetGain + gainSmoothCoeff * (gain - targetGain);
+    mOutputGainRampArray[s] = gain;
+  }
+  mSmoothedOutputGain = gain;
 
-  auto writeSample = [gain](sample inputSample) {
-    double outputSample = gain * static_cast<double>(inputSample);
+  auto writeSample = [](sample inputSample, const double gainValue) {
+    double outputSample = gainValue * static_cast<double>(inputSample);
     if (!std::isfinite(outputSample))
     {
       outputSample = 0.0;
@@ -8680,7 +9003,7 @@ void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** ou
       if (outputs[cout] == nullptr)
         continue;
       for (size_t s = 0; s < nFrames; ++s)
-        outputs[cout][s] = writeSample(inputs[0][s]);
+        outputs[cout][s] = writeSample(inputs[0][s], mOutputGainRampArray[s]);
     }
     return;
   }
@@ -8703,7 +9026,7 @@ void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** ou
         ++activeChannels;
       }
       const sample monoSample = (activeChannels > 0) ? static_cast<sample>(mix / static_cast<double>(activeChannels)) : 0.0f;
-      outputs[0][s] = writeSample(monoSample);
+      outputs[0][s] = writeSample(monoSample, mOutputGainRampArray[s]);
     }
     return;
   }
@@ -8721,7 +9044,7 @@ void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** ou
       continue;
     }
     for (size_t s = 0; s < nFrames; ++s)
-      outputs[cout][s] = writeSample(inputs[cin][s]);
+      outputs[cout][s] = writeSample(inputs[cin][s], mOutputGainRampArray[s]);
   }
 }
 
