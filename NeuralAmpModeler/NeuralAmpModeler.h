@@ -669,6 +669,7 @@ private:
   // Output from NAM
   std::vector<std::vector<iplug::sample>> mOutputArray;
   std::array<std::vector<iplug::sample>, kNumChannelsInternal> mAmpModelCrossfadeArray;
+  std::vector<iplug::sample> mCabIRCrossfadeBuffer;
   std::vector<double> mOutputGainRampArray;
   // Pointer versions
   iplug::sample** mInputPointers = nullptr;
@@ -829,12 +830,20 @@ private:
   std::atomic<int> mPresetRecallTargetSlot{-1};
   bool mActiveAmpBypassed = false;
   bool mActiveStompBypassed = false;
+  bool mActiveCabBypassed = false;
   bool mActiveAmpToneStackEnabled = true;
   bool mActiveAmpModelEnabled = false;
   bool mActiveStompCompressorEnabled = false;
   bool mActiveStompBoostEnabled = false;
   double mActiveAmpPreModelGain = 1.0;
   double mActiveAmpMasterGain = 1.0;
+  std::array<int, 2> mActiveCabSlotSourceChoice = {};
+  std::array<double, 2> mActiveCabSlotPosition = {};
+  std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabPrimaryIR;
+  std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabSecondaryIR;
+  std::array<int, 2> mPreviousCabSlotSourceChoice = {};
+  std::array<double, 2> mPreviousCabSlotPosition = {};
+  std::array<int, 2> mCabSlotIRCrossfadeSamplesRemaining = {};
   int mPathToggleTransitionState = 0;
   int mPathToggleTransitionSamplesRemaining = 0;
   int mAmpSlotTransitionState = 0;

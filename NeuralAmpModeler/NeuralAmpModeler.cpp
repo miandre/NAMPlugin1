@@ -45,6 +45,8 @@ constexpr int kPathToggleTransitionSamples = 512;
 constexpr int kPathToggleTransitionStateIdle = 0;
 constexpr int kPathToggleTransitionStateFadeOut = 1;
 constexpr int kPathToggleTransitionStateFadeIn = 2;
+// IR swaps need a much longer blend than amp switches because the convolver history changes abruptly.
+constexpr int kIRTransitionSamples = 12288;
 constexpr int kAmpSlotTransitionSamples = 3072;
 constexpr int kAmpSlotTransitionStateIdle = 0;
 constexpr int kAmpSlotTransitionStateFadeOut = 1;
@@ -3031,6 +3033,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   auto* activeToneStack = mToneStacks[activeSlot].get();
   const bool requestedAmpBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
   const bool requestedStompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
+  const bool requestedCabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
   const bool requestedAmpToneStackEnabled = GetParam(kEQActive)->Bool();
   const bool requestedAmpModelEnabled = GetParam(kModelToggle)->Bool();
   const bool requestedStompCompressorEnabled = GetParam(kStompCompressorActive)->Bool();
@@ -3039,6 +3042,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   {
     mActiveAmpBypassed = requestedAmpBypassed;
     mActiveStompBypassed = requestedStompBypassed;
+    mActiveCabBypassed = requestedCabBypassed;
     mActiveAmpToneStackEnabled = requestedAmpToneStackEnabled;
     mActiveAmpModelEnabled = requestedAmpModelEnabled;
     mActiveStompCompressorEnabled = requestedStompCompressorEnabled;
@@ -3054,6 +3058,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
   const bool requestedPathStateChange =
     (requestedAmpBypassed != mActiveAmpBypassed) || (requestedStompBypassed != mActiveStompBypassed)
+    || (requestedCabBypassed != mActiveCabBypassed)
     || (requestedAmpToneStackEnabled != mActiveAmpToneStackEnabled)
     || (requestedAmpModelEnabled != mActiveAmpModelEnabled)
     || (requestedStompCompressorEnabled != mActiveStompCompressorEnabled)
@@ -3074,7 +3079,39 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
   const bool ampBypassed = mActiveAmpBypassed;
   const bool stompBypassed = mActiveStompBypassed;
-  const bool cabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
+  const bool cabBypassed = mActiveCabBypassed;
+  for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
+  {
+    if (mCabSlotIRCrossfadeSamplesRemaining[static_cast<size_t>(slotIndex)] > 0
+        && (cabBypassed || !GetParam(GetCabSlotEnabledParamIdx(slotIndex))->Bool()))
+      mCabSlotIRCrossfadeSamplesRemaining[static_cast<size_t>(slotIndex)] = 0;
+  }
+  auto slotHasPendingIRChange = [this, inputStereoMode](const int slotIndex) {
+    if (slotIndex == 0)
+    {
+      const bool havePendingPrimaryIR = (mStagedIR != nullptr) && (!inputStereoMode || mStagedIRChannel2 != nullptr);
+      const bool havePendingSecondaryIR =
+        (mStagedIRRight != nullptr) && (!inputStereoMode || mStagedIRRightChannel2 != nullptr);
+      return mShouldRemoveIRLeft.load(std::memory_order_acquire)
+             || mShouldRemoveIRRight.load(std::memory_order_acquire) || havePendingPrimaryIR || havePendingSecondaryIR;
+    }
+
+    const bool havePendingPrimaryIR =
+      (mStagedCabBIR != nullptr) && (!inputStereoMode || mStagedCabBIRChannel2 != nullptr);
+    const bool havePendingSecondaryIR =
+      (mStagedCabBIRSecondary != nullptr) && (!inputStereoMode || mStagedCabBIRSecondaryChannel2 != nullptr);
+    return mShouldRemoveCabBIRPrimary.load(std::memory_order_acquire)
+           || mShouldRemoveCabBIRSecondary.load(std::memory_order_acquire) || havePendingPrimaryIR
+           || havePendingSecondaryIR;
+  };
+  for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
+  {
+    if (mCabSlotIRCrossfadeSamplesRemaining[static_cast<size_t>(slotIndex)] <= 0 && !slotHasPendingIRChange(slotIndex))
+    {
+      mActiveCabSlotSourceChoice[static_cast<size_t>(slotIndex)] = GetParam(GetCabSlotSourceParamIdx(slotIndex))->Int();
+      mActiveCabSlotPosition[static_cast<size_t>(slotIndex)] = GetParam(GetCabSlotPositionParamIdx(slotIndex))->Value();
+    }
+  }
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
   const bool useBoostB = GetParam(kStompBoostType)->Bool();
   ResamplingNAM* const activeStompModel = useBoostB ? mStompModelB.get() : mStompModel.get();
@@ -3488,28 +3525,15 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       std::copy_n(irOutPointers[0], numFrames, output);
       return true;
     };
-    auto processCabSlot = [&](const int slotIndex, sample* monoInput, sample* slotOutput) {
+    auto processCabSlot = [&](const int slotIndex, const int sourceChoice, const double position,
+                              dsp::ImpulseResponse* primaryIR, dsp::ImpulseResponse* secondaryIR, sample* monoInput,
+                              sample* slotOutput) {
       if (slotOutput == nullptr)
         return;
 
-      const int sourceChoice = GetParam(GetCabSlotSourceParamIdx(slotIndex))->Int();
-      dsp::ImpulseResponse* primaryIR = nullptr;
-      dsp::ImpulseResponse* secondaryIR = nullptr;
-      if (slotIndex == 0)
-      {
-        primaryIR = mIR.get();
-        secondaryIR = mIRRight.get();
-      }
-      else
-      {
-        primaryIR = mCabBIR.get();
-        secondaryIR = mCabBIRSecondary.get();
-      }
-
       if (sourceChoice > 0 && primaryIR != nullptr && secondaryIR != nullptr)
       {
-        const CuratedCabSegment segment =
-          GetCuratedCabSegment(GetCabSlotCuratedPosition(slotIndex, GetParam(GetCabSlotPositionParamIdx(slotIndex))->Value()));
+        const CuratedCabSegment segment = GetCuratedCabSegment(GetCabSlotCuratedPosition(slotIndex, position));
         sample* primaryInput = monoInput;
         sample** primaryPtrs = primaryIR->Process(&primaryInput, 1, numFrames);
         sample** secondaryPtrs = secondaryIR->Process(&primaryInput, 1, numFrames);
@@ -3544,7 +3568,31 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
       auto mixCabSlot = [&](const int slotIndex, const bool stereoMix) {
         sample* slotOutput = mInputArray[1].data();
-        processCabSlot(slotIndex, monoCabInput, slotOutput);
+        const size_t slotArrayIndex = static_cast<size_t>(slotIndex);
+        const int sourceChoice = mActiveCabSlotSourceChoice[slotArrayIndex];
+        const double position = mActiveCabSlotPosition[slotArrayIndex];
+        dsp::ImpulseResponse* primaryIR = (slotIndex == 0) ? mIR.get() : mCabBIR.get();
+        dsp::ImpulseResponse* secondaryIR = (slotIndex == 0) ? mIRRight.get() : mCabBIRSecondary.get();
+        processCabSlot(slotIndex, sourceChoice, position, primaryIR, secondaryIR, monoCabInput, slotOutput);
+
+        int slotCrossfadeRemaining = mCabSlotIRCrossfadeSamplesRemaining[slotArrayIndex];
+        if (slotCrossfadeRemaining > 0)
+        {
+          sample* previousSlotOutput = mCabIRCrossfadeBuffer.data();
+          processCabSlot(slotIndex, mPreviousCabSlotSourceChoice[slotArrayIndex], mPreviousCabSlotPosition[slotArrayIndex],
+                         mPreviousCabPrimaryIR[slotArrayIndex].get(), mPreviousCabSecondaryIR[slotArrayIndex].get(),
+                         monoCabInput, previousSlotOutput);
+          for (size_t s = 0; s < numFrames; ++s)
+          {
+            const double progress =
+              1.0 - static_cast<double>(slotCrossfadeRemaining) / static_cast<double>(kIRTransitionSamples);
+            slotOutput[s] = static_cast<sample>(
+              (1.0 - progress) * static_cast<double>(previousSlotOutput[s]) + progress * static_cast<double>(slotOutput[s]));
+            if (slotCrossfadeRemaining > 0)
+              --slotCrossfadeRemaining;
+          }
+          mCabSlotIRCrossfadeSamplesRemaining[slotArrayIndex] = std::max(0, slotCrossfadeRemaining);
+        }
 
         if (!stereoMix)
         {
@@ -3650,9 +3698,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
         slotTransitionActive ? mAmpSlotTransitionSamplesRemaining : mPathToggleTransitionSamplesRemaining;
       int transitionRemaining = transitionRemainingRef;
       const int framesToFade = static_cast<int>(std::min(numFrames, static_cast<size_t>(transitionRemaining)));
-      const bool fadingOut =
-        slotTransitionActive ? (mAmpSlotTransitionState == kAmpSlotTransitionStateFadeOut)
-                             : (mPathToggleTransitionState == kPathToggleTransitionStateFadeOut);
+      const bool fadingOut = slotTransitionActive ? (mAmpSlotTransitionState == kAmpSlotTransitionStateFadeOut)
+                                                  : (mPathToggleTransitionState == kPathToggleTransitionStateFadeOut);
       const int totalTransitionSamples =
         slotTransitionActive ? kAmpSlotTransitionSamples : kPathToggleTransitionSamples;
       for (int s = 0; s < framesToFade; ++s)
@@ -3941,12 +3988,23 @@ void NeuralAmpModeler::OnReset()
   mAmpSwitchDeClickPrevSample.fill(0.0);
   mActiveAmpBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
   mActiveStompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
+  mActiveCabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
   mActiveAmpToneStackEnabled = GetParam(kEQActive)->Bool();
   mActiveAmpModelEnabled = GetParam(kModelToggle)->Bool();
   mActiveStompCompressorEnabled = GetParam(kStompCompressorActive)->Bool();
   mActiveStompBoostEnabled = GetParam(kStompBoostActive)->Bool();
   mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
   mActiveAmpMasterGain = mMasterGain;
+  for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
+  {
+    mActiveCabSlotSourceChoice[static_cast<size_t>(slotIndex)] = GetParam(GetCabSlotSourceParamIdx(slotIndex))->Int();
+    mActiveCabSlotPosition[static_cast<size_t>(slotIndex)] = GetParam(GetCabSlotPositionParamIdx(slotIndex))->Value();
+    mPreviousCabSlotSourceChoice[static_cast<size_t>(slotIndex)] = mActiveCabSlotSourceChoice[static_cast<size_t>(slotIndex)];
+    mPreviousCabSlotPosition[static_cast<size_t>(slotIndex)] = mActiveCabSlotPosition[static_cast<size_t>(slotIndex)];
+    mCabSlotIRCrossfadeSamplesRemaining[static_cast<size_t>(slotIndex)] = 0;
+    mPreviousCabPrimaryIR[static_cast<size_t>(slotIndex)] = nullptr;
+    mPreviousCabSecondaryIR[static_cast<size_t>(slotIndex)] = nullptr;
+  }
   mAmpModelCrossfadeTargetSelection = -1;
   mAmpModelCrossfadeSamplesRemaining = 0;
   const double outputGainSmoothSampleRate = std::max(1.0, sampleRate);
@@ -6596,10 +6654,16 @@ void NeuralAmpModeler::_ApplyCabSlotSource(const int slotIndex, const bool force
   const WDL_String secondaryPath =
     useEmbeddedCuratedAssets ? MakeEmbeddedCuratedCabIRPath(sourceChoice, segment.rightIndex)
                              : _ResolveCuratedCabIRPath(sourceChoice, segment.rightIndex);
+  const bool primaryNeedsReload =
+    forceReload || primaryMissing() || std::strcmp(getPrimaryPath().Get(), primaryPath.Get()) != 0;
+  const bool secondaryNeedsReload =
+    forceReload || secondaryMissing() || std::strcmp(getSecondaryPath().Get(), secondaryPath.Get()) != 0;
+  // Keep curated pairs in lockstep so the old and new cab branches each have a complete IR pair during the blend.
+  const bool reloadCuratedPair = primaryNeedsReload || secondaryNeedsReload;
 
   if (primaryPath.GetLength() > 0)
   {
-    if (forceReload || primaryMissing() || std::strcmp(getPrimaryPath().Get(), primaryPath.Get()) != 0)
+    if (reloadCuratedPair)
     {
       clearRemovePrimary();
       stagePrimary(primaryPath);
@@ -6610,7 +6674,7 @@ void NeuralAmpModeler::_ApplyCabSlotSource(const int slotIndex, const bool force
 
   if (secondaryPath.GetLength() > 0)
   {
-    if (forceReload || secondaryMissing() || std::strcmp(getSecondaryPath().Get(), secondaryPath.Get()) != 0)
+    if (reloadCuratedPair)
     {
       clearRemoveSecondary();
       stageSecondary(secondaryPath);
@@ -7821,6 +7885,147 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     updateActiveModelGainsAndLatency();
     return true;
   };
+  struct CabSlotIRRefs
+  {
+    std::unique_ptr<dsp::ImpulseResponse>& livePrimary;
+    std::unique_ptr<dsp::ImpulseResponse>& livePrimaryChannel2;
+    std::unique_ptr<dsp::ImpulseResponse>& liveSecondary;
+    std::unique_ptr<dsp::ImpulseResponse>& liveSecondaryChannel2;
+    std::unique_ptr<dsp::ImpulseResponse>& stagedPrimary;
+    std::unique_ptr<dsp::ImpulseResponse>& stagedPrimaryChannel2;
+    std::unique_ptr<dsp::ImpulseResponse>& stagedSecondary;
+    std::unique_ptr<dsp::ImpulseResponse>& stagedSecondaryChannel2;
+    std::atomic<bool>& removePrimary;
+    std::atomic<bool>& removeSecondary;
+    WDL_String& livePrimaryPath;
+    WDL_String& liveSecondaryPath;
+    WDL_String& stagedPrimaryPath;
+    WDL_String& stagedSecondaryPath;
+  };
+  auto getCabSlotIRRefs = [this](const int slotIndex) -> CabSlotIRRefs {
+    if (slotIndex == 0)
+    {
+      return {
+        mIR,
+        mIRChannel2,
+        mIRRight,
+        mIRRightChannel2,
+        mStagedIR,
+        mStagedIRChannel2,
+        mStagedIRRight,
+        mStagedIRRightChannel2,
+        mShouldRemoveIRLeft,
+        mShouldRemoveIRRight,
+        mIRPath,
+        mIRPathRight,
+        mStagedIRPath,
+        mStagedIRPathRight};
+    }
+
+    return {
+      mCabBIR,
+      mCabBIRChannel2,
+      mCabBIRSecondary,
+      mCabBIRSecondaryChannel2,
+      mStagedCabBIR,
+      mStagedCabBIRChannel2,
+      mStagedCabBIRSecondary,
+      mStagedCabBIRSecondaryChannel2,
+      mShouldRemoveCabBIRPrimary,
+      mShouldRemoveCabBIRSecondary,
+      mCabBIRPath,
+      mCabBIRSecondaryPath,
+      mStagedCabBIRPath,
+      mStagedCabBIRSecondaryPath};
+  };
+  auto slotHasPendingIRChange = [this, inputStereoMode](const int slotIndex) {
+    if (slotIndex == 0)
+    {
+      const bool havePendingPrimaryIR = (mStagedIR != nullptr) && (!inputStereoMode || mStagedIRChannel2 != nullptr);
+      const bool havePendingSecondaryIR =
+        (mStagedIRRight != nullptr) && (!inputStereoMode || mStagedIRRightChannel2 != nullptr);
+      return mShouldRemoveIRLeft.load(std::memory_order_acquire)
+             || mShouldRemoveIRRight.load(std::memory_order_acquire) || havePendingPrimaryIR || havePendingSecondaryIR;
+    }
+
+    const bool havePendingPrimaryIR =
+      (mStagedCabBIR != nullptr) && (!inputStereoMode || mStagedCabBIRChannel2 != nullptr);
+    const bool havePendingSecondaryIR =
+      (mStagedCabBIRSecondary != nullptr) && (!inputStereoMode || mStagedCabBIRSecondaryChannel2 != nullptr);
+    return mShouldRemoveCabBIRPrimary.load(std::memory_order_acquire)
+           || mShouldRemoveCabBIRSecondary.load(std::memory_order_acquire) || havePendingPrimaryIR
+           || havePendingSecondaryIR;
+  };
+  auto clearPreviousCabSlotIR = [this](const int slotIndex) {
+    const size_t slotArrayIndex = static_cast<size_t>(slotIndex);
+    mPreviousCabPrimaryIR[slotArrayIndex] = nullptr;
+    mPreviousCabSecondaryIR[slotArrayIndex] = nullptr;
+  };
+  auto applyPendingCabSlotIRChanges = [this, inputStereoMode, &getCabSlotIRRefs, &clearPreviousCabSlotIR](
+                                        const int slotIndex) {
+    auto refs = getCabSlotIRRefs(slotIndex);
+    const bool stagePrimaryReady =
+      (refs.stagedPrimary != nullptr) && (!inputStereoMode || refs.stagedPrimaryChannel2 != nullptr);
+    const bool stageSecondaryReady =
+      (refs.stagedSecondary != nullptr) && (!inputStereoMode || refs.stagedSecondaryChannel2 != nullptr);
+    const bool removePrimary = refs.removePrimary.exchange(false, std::memory_order_acq_rel);
+    const bool removeSecondary = refs.removeSecondary.exchange(false, std::memory_order_acq_rel);
+    if (!stagePrimaryReady && !stageSecondaryReady && !removePrimary && !removeSecondary)
+      return false;
+
+    const size_t slotArrayIndex = static_cast<size_t>(slotIndex);
+    mPreviousCabSlotSourceChoice[slotArrayIndex] = mActiveCabSlotSourceChoice[slotArrayIndex];
+    mPreviousCabSlotPosition[slotArrayIndex] = mActiveCabSlotPosition[slotArrayIndex];
+    clearPreviousCabSlotIR(slotIndex);
+
+    if (stagePrimaryReady || removePrimary)
+    {
+      mPreviousCabPrimaryIR[slotArrayIndex] = std::move(refs.livePrimary);
+      if (stagePrimaryReady)
+      {
+        refs.livePrimary = std::move(refs.stagedPrimary);
+        refs.livePrimaryChannel2 = std::move(refs.stagedPrimaryChannel2);
+        refs.livePrimaryPath = refs.stagedPrimaryPath;
+        refs.stagedPrimaryPath.Set("");
+      }
+      else
+      {
+        refs.livePrimary = nullptr;
+        refs.livePrimaryChannel2 = nullptr;
+        refs.livePrimaryPath.Set("");
+      }
+    }
+
+    if (stageSecondaryReady || removeSecondary)
+    {
+      mPreviousCabSecondaryIR[slotArrayIndex] = std::move(refs.liveSecondary);
+      if (stageSecondaryReady)
+      {
+        refs.liveSecondary = std::move(refs.stagedSecondary);
+        refs.liveSecondaryChannel2 = std::move(refs.stagedSecondaryChannel2);
+        refs.liveSecondaryPath = refs.stagedSecondaryPath;
+        refs.stagedSecondaryPath.Set("");
+      }
+      else
+      {
+        refs.liveSecondary = nullptr;
+        refs.liveSecondaryChannel2 = nullptr;
+        refs.liveSecondaryPath.Set("");
+      }
+    }
+
+    mActiveCabSlotSourceChoice[slotArrayIndex] = GetParam(GetCabSlotSourceParamIdx(slotIndex))->Int();
+    mActiveCabSlotPosition[slotArrayIndex] = GetParam(GetCabSlotPositionParamIdx(slotIndex))->Value();
+    const bool slotEnabled = GetParam(GetCabSlotEnabledParamIdx(slotIndex))->Bool();
+    mCabSlotIRCrossfadeSamplesRemaining[slotArrayIndex] =
+      (!mActiveCabBypassed && slotEnabled) ? kIRTransitionSamples : 0;
+    return true;
+  };
+  for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
+  {
+    if (mCabSlotIRCrossfadeSamplesRemaining[static_cast<size_t>(slotIndex)] <= 0)
+      clearPreviousCabSlotIR(slotIndex);
+  }
 
   // Slot-targeted model removals (requested from non-audio threads).
   for (int storageIndex = 0; storageIndex < static_cast<int>(mShouldRemoveModelSlot.size()); ++storageIndex)
@@ -8008,69 +8213,10 @@ void NeuralAmpModeler::_ApplyDSPStaging()
       _ClearStompCapabilityState();
     _UpdateLatency();
   }
-  if (mShouldRemoveIRLeft.exchange(false, std::memory_order_acq_rel))
+  for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
   {
-    const bool preserveStagedIR = (mStagedIR != nullptr) || (mStagedIRChannel2 != nullptr);
-    if (!preserveStagedIR)
-    {
-      mStagedIR = nullptr;
-      mStagedIRChannel2 = nullptr;
-      mStagedIRPath.Set("");
-      mIRPath.Set("");
-    }
-    mIR = nullptr;
-    mIRChannel2 = nullptr;
-    if (preserveStagedIR && mStagedIRPath.GetLength() > 0)
-      mIRPath = mStagedIRPath;
-    triggerOutputDeClick = true;
-  }
-  if (mShouldRemoveIRRight.exchange(false, std::memory_order_acq_rel))
-  {
-    const bool preserveStagedIR = (mStagedIRRight != nullptr) || (mStagedIRRightChannel2 != nullptr);
-    if (!preserveStagedIR)
-    {
-      mStagedIRRight = nullptr;
-      mStagedIRRightChannel2 = nullptr;
-      mStagedIRPathRight.Set("");
-      mIRPathRight.Set("");
-    }
-    mIRRight = nullptr;
-    mIRRightChannel2 = nullptr;
-    if (preserveStagedIR && mStagedIRPathRight.GetLength() > 0)
-      mIRPathRight = mStagedIRPathRight;
-    triggerOutputDeClick = true;
-  }
-  if (mShouldRemoveCabBIRPrimary.exchange(false, std::memory_order_acq_rel))
-  {
-    const bool preserveStagedIR = (mStagedCabBIR != nullptr) || (mStagedCabBIRChannel2 != nullptr);
-    if (!preserveStagedIR)
-    {
-      mStagedCabBIR = nullptr;
-      mStagedCabBIRChannel2 = nullptr;
-      mStagedCabBIRPath.Set("");
-      mCabBIRPath.Set("");
-    }
-    mCabBIR = nullptr;
-    mCabBIRChannel2 = nullptr;
-    if (preserveStagedIR && mStagedCabBIRPath.GetLength() > 0)
-      mCabBIRPath = mStagedCabBIRPath;
-    triggerOutputDeClick = true;
-  }
-  if (mShouldRemoveCabBIRSecondary.exchange(false, std::memory_order_acq_rel))
-  {
-    const bool preserveStagedIR = (mStagedCabBIRSecondary != nullptr) || (mStagedCabBIRSecondaryChannel2 != nullptr);
-    if (!preserveStagedIR)
-    {
-      mStagedCabBIRSecondary = nullptr;
-      mStagedCabBIRSecondaryChannel2 = nullptr;
-      mStagedCabBIRSecondaryPath.Set("");
-      mCabBIRSecondaryPath.Set("");
-    }
-    mCabBIRSecondary = nullptr;
-    mCabBIRSecondaryChannel2 = nullptr;
-    if (preserveStagedIR && mStagedCabBIRSecondaryPath.GetLength() > 0)
-      mCabBIRSecondaryPath = mStagedCabBIRSecondaryPath;
-    triggerOutputDeClick = true;
+    if (mCabSlotIRCrossfadeSamplesRemaining[static_cast<size_t>(slotIndex)] <= 0 && slotHasPendingIRChange(slotIndex))
+      (void) applyPendingCabSlotIRChanges(slotIndex);
   }
   // Move things from staged to live
   if (mStagedModel != nullptr && (!inputStereoMode || mStagedModelRight != nullptr))
@@ -8109,47 +8255,6 @@ void NeuralAmpModeler::_ApplyDSPStaging()
       _SetStompCapabilityState(mStompModelB->HasLoudness(), mStompModelB->HasOutputLevel());
     _UpdateLatency();
   }
-  if (mStagedIR != nullptr && (!inputStereoMode || mStagedIRChannel2 != nullptr))
-  {
-    mIR = std::move(mStagedIR);
-    mStagedIR = nullptr;
-    mIRChannel2 = std::move(mStagedIRChannel2);
-    mStagedIRChannel2 = nullptr;
-    mIRPath = mStagedIRPath;
-    mStagedIRPath.Set("");
-    triggerOutputDeClick = true;
-  }
-  if (mStagedIRRight != nullptr && (!inputStereoMode || mStagedIRRightChannel2 != nullptr))
-  {
-    mIRRight = std::move(mStagedIRRight);
-    mStagedIRRight = nullptr;
-    mIRRightChannel2 = std::move(mStagedIRRightChannel2);
-    mStagedIRRightChannel2 = nullptr;
-    mIRPathRight = mStagedIRPathRight;
-    mStagedIRPathRight.Set("");
-    triggerOutputDeClick = true;
-  }
-  if (mStagedCabBIR != nullptr && (!inputStereoMode || mStagedCabBIRChannel2 != nullptr))
-  {
-    mCabBIR = std::move(mStagedCabBIR);
-    mStagedCabBIR = nullptr;
-    mCabBIRChannel2 = std::move(mStagedCabBIRChannel2);
-    mStagedCabBIRChannel2 = nullptr;
-    mCabBIRPath = mStagedCabBIRPath;
-    mStagedCabBIRPath.Set("");
-    triggerOutputDeClick = true;
-  }
-  if (mStagedCabBIRSecondary != nullptr && (!inputStereoMode || mStagedCabBIRSecondaryChannel2 != nullptr))
-  {
-    mCabBIRSecondary = std::move(mStagedCabBIRSecondary);
-    mStagedCabBIRSecondary = nullptr;
-    mCabBIRSecondaryChannel2 = std::move(mStagedCabBIRSecondaryChannel2);
-    mStagedCabBIRSecondaryChannel2 = nullptr;
-    mCabBIRSecondaryPath = mStagedCabBIRSecondaryPath;
-    mStagedCabBIRSecondaryPath.Set("");
-    triggerOutputDeClick = true;
-  }
-
   if (mPresetRecallMuteActive.load(std::memory_order_acquire))
   {
     const int targetSlot =
@@ -8869,6 +8974,7 @@ bool NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t nu
       mOutputArray[c].resize(numFrames);
     for (auto& crossfadeChannel : mAmpModelCrossfadeArray)
       crossfadeChannel.resize(numFrames);
+    mCabIRCrossfadeBuffer.resize(numFrames);
     mOutputGainRampArray.resize(numFrames);
   }
   // Always clear only the active frame range for this block.
@@ -8878,6 +8984,7 @@ bool NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t nu
     std::fill_n(mOutputArray[c].begin(), numFrames, 0.0);
   for (auto& crossfadeChannel : mAmpModelCrossfadeArray)
     std::fill_n(crossfadeChannel.begin(), numFrames, 0.0);
+  std::fill_n(mCabIRCrossfadeBuffer.begin(), numFrames, 0.0f);
 
   // Would these ever get changed by something?
   for (auto c = 0; c < mInputArray.size(); c++)
