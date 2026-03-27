@@ -570,6 +570,7 @@ private:
   // Resetting for models and IRs, called by OnReset
   void _ResetModelAndIR(const double sampleRate, const int maxBlockSize);
 
+  double _GetOutputGainForModel(ResamplingNAM* model) const;
   void _SetInputGain();
   void _SetOutputGain();
   void _SetMasterGain();
@@ -667,6 +668,9 @@ private:
   std::vector<std::vector<iplug::sample>> mInputArray;
   // Output from NAM
   std::vector<std::vector<iplug::sample>> mOutputArray;
+  std::array<std::vector<iplug::sample>, kNumChannelsInternal> mAmpModelCrossfadeArray;
+  std::vector<iplug::sample> mCabIRCrossfadeBuffer;
+  std::vector<double> mOutputGainRampArray;
   // Pointer versions
   iplug::sample** mInputPointers = nullptr;
   iplug::sample** mOutputPointers = nullptr;
@@ -674,6 +678,8 @@ private:
   // Input and output gain
   double mInputGain = 1.0;
   double mOutputGain = 1.0;
+  double mSmoothedOutputGain = 1.0;
+  double mOutputGainSmoothCoeff = 0.0;
   double mMasterGain = 1.0;
   double mStompBoostDriveSmoothCoeff = 0.0;
   double mStompBoostSmoothedDriveGain = 1.0;
@@ -822,6 +828,29 @@ private:
   bool mModelLoadWorkerExit = false;
   std::atomic<bool> mPresetRecallMuteActive{false};
   std::atomic<int> mPresetRecallTargetSlot{-1};
+  bool mActiveAmpBypassed = false;
+  bool mActiveStompBypassed = false;
+  bool mActiveCabBypassed = false;
+  bool mActiveAmpToneStackEnabled = true;
+  bool mActiveAmpModelEnabled = false;
+  bool mActiveStompCompressorEnabled = false;
+  bool mActiveStompBoostEnabled = false;
+  double mActiveAmpPreModelGain = 1.0;
+  double mActiveAmpMasterGain = 1.0;
+  std::array<int, 2> mActiveCabSlotSourceChoice = {};
+  std::array<double, 2> mActiveCabSlotPosition = {};
+  std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabPrimaryIR;
+  std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabSecondaryIR;
+  std::array<int, 2> mPreviousCabSlotSourceChoice = {};
+  std::array<double, 2> mPreviousCabSlotPosition = {};
+  std::array<int, 2> mCabSlotIRCrossfadeSamplesRemaining = {};
+  int mPathToggleTransitionState = 0;
+  int mPathToggleTransitionSamplesRemaining = 0;
+  int mAmpSlotTransitionState = 0;
+  int mAmpSlotTransitionSamplesRemaining = 0;
+  int mAmpSlotTransitionTargetSelection = -1;
+  int mAmpModelCrossfadeTargetSelection = -1;
+  int mAmpModelCrossfadeSamplesRemaining = 0;
   std::atomic<int> mAmpSwitchDeClickSamplesRemaining = 0;
   std::array<double, kNumChannelsInternal> mAmpSwitchDeClickPrevSample = {};
   TunerAnalyzer mTunerAnalyzer;
