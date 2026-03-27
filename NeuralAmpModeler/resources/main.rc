@@ -1,6 +1,7 @@
 // Microsoft Visual C++ generated resource script.
 //
 #include "resource.h"
+#include "..\config.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
@@ -65,7 +66,7 @@ END
 
 IDD_DIALOG_MAIN DIALOG 0, 0, 500, 300
 STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "NeuralAmpModeler"
+CAPTION PLUG_NAME
 MENU IDR_MENU1
 FONT 8, "MS Sans Serif"
 BEGIN
@@ -291,7 +292,7 @@ END
 
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
-IDI_ICON1               ICON                    "NeuralAmpModeler.ico"
+IDI_ICON1               ICON                    "RE-AMP.ico"
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -333,11 +334,11 @@ BEGIN
         BEGIN
             VALUE "FileVersion", "0.0.1"
             VALUE "ProductVersion", "0.0.1"
-            VALUE "FileDescription", "NeuralAmpModeler"
-            VALUE "InternalName", "NeuralAmpModeler"
-            VALUE "ProductName", "NeuralAmpModeler"
-            VALUE "CompanyName", "StevenAtkinson"
-            VALUE "LegalCopyright", "Copyright 2020 Acme Inc"
+            VALUE "FileDescription", PLUG_NAME
+            VALUE "InternalName", PLUG_NAME
+            VALUE "ProductName", PLUG_NAME
+            VALUE "CompanyName", PLUG_MFR
+            VALUE "LegalCopyright", PLUG_COPYRIGHT_STR
             VALUE "LegalTrademarks", "VST is a trademark of Steinberg Media Technologies GmbH, Audio Unit is a trademark of Apple, Inc."
         END
     END
@@ -357,7 +358,6 @@ END
 //
 // Generated from the TEXTINCLUDE 3 resource.
 //
-#include "..\config.h"
 ROBOTO_FN TTF ROBOTO_FN
 MICHROMA_FN TTF MICHROMA_FN
 FILE_FN SVG FILE_FN

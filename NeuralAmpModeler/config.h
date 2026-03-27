@@ -1,21 +1,21 @@
-#define PLUG_NAME "MND-AMP"
-#define PLUG_MFR "MND-AMPS"
+#define PLUG_NAME "RE-AMP"
+#define PLUG_MFR "A.N.D"
 #define PLUG_VERSION_HEX 0x00000001
 #define PLUG_VERSION_STR "0.0.1"
-#define PLUG_UNIQUE_ID 'MND1'
-#define PLUG_MFR_ID 'MND1'
+#define PLUG_UNIQUE_ID 'REA1'
+#define PLUG_MFR_ID 'AND1'
 #define PLUG_URL_STR "https://github.com/sdatkinson/NeuralAmpModelerPlugin"
 #define PLUG_EMAIL_STR "spam@me.com"
-#define PLUG_COPYRIGHT_STR "Copyright 2022 Steven Atkinson"
+#define PLUG_COPYRIGHT_STR "Copyright 2026 Mikael André"
 #define PLUG_CLASS_NAME NeuralAmpModeler
-#define BUNDLE_NAME "MND-AMPS"
-#define BUNDLE_MFR "MND-AMPS"
+#define BUNDLE_NAME "RE-AMP"
+#define BUNDLE_MFR "RE-AMP"
 #define BUNDLE_DOMAIN "com"
 #define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
 // Amp workflow profile: 0 = Rig Mode (editable slot model pickers), 1 = Release Mode (slot model edits locked).
 #define NAM_RELEASE_MODE 0
 
-#define SHARED_RESOURCES_SUBPATH "MND-AMPS"
+#define SHARED_RESOURCES_SUBPATH "RE-AMP"
 
 #ifdef APP_API
   // Standalone host opens max channel count from this list.
@@ -51,7 +51,7 @@
 #define AAX_TYPE_IDS 'ITP1'
 #define AAX_TYPE_IDS_AUDIOSUITE 'ITA1'
 #define AAX_PLUG_MFR_STR "Acme"
-#define AAX_PLUG_NAME_STR "NeuralAmpModeler\nIPEF"
+#define AAX_PLUG_NAME_STR "RE-AMP\nIPEF"
 #define AAX_PLUG_CATEGORY_STR "Effect"
 #define AAX_DOES_AUDIOSUITE 1
 

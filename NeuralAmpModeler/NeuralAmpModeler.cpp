@@ -25,6 +25,10 @@
 #include "EmbeddedCabIRAssets.h"
 #include "NeuralAmpModelerControls.h"
 #include "IPopupMenuControl.h"
+#if defined(APP_API) && defined(OS_WIN)
+#include "resources/resource.h"
+#include <windows.h>
+#endif
 
 #if __has_include("third_party/rubberband/single/RubberBandSingle.cpp")
 // Build Rubber Band as a single translation unit without modifying project files.
@@ -4942,6 +4946,36 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
 void NeuralAmpModeler::OnUIOpen()
 {
   Plugin::OnUIOpen();
+
+#if defined(APP_API) && defined(OS_WIN)
+  if (auto* pGraphics = GetUI())
+  {
+    if (auto* childHwnd = static_cast<HWND>(pGraphics->GetWindow()))
+    {
+      HWND hwnd = GetAncestor(childHwnd, GA_ROOT);
+      if (hwnd == nullptr)
+        hwnd = childHwnd;
+
+      const HICON hSmallIcon = static_cast<HICON>(LoadImage(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_ICON1),
+                                                            IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                                            GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+      const HICON hLargeIcon = static_cast<HICON>(LoadImage(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_ICON1),
+                                                            IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+                                                            GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+
+      if (hSmallIcon != nullptr)
+      {
+        SendMessage(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(hSmallIcon));
+        SetClassLongPtr(hwnd, GCLP_HICONSM, reinterpret_cast<LONG_PTR>(hSmallIcon));
+      }
+      if (hLargeIcon != nullptr)
+      {
+        SendMessage(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(hLargeIcon));
+        SetClassLongPtr(hwnd, GCLP_HICON, reinterpret_cast<LONG_PTR>(hLargeIcon));
+      }
+    }
+  }
+#endif
 
   for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
   {
