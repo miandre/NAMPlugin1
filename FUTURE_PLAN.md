@@ -219,12 +219,7 @@ Current direction:
 1. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, boost v2, amp variants v1, doubler improvements, startup/default asset refresh, and slot-specific amp UI work are already landed
 2. Do not reopen tuner work unless the user explicitly asks
 3. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
-4. Current branch also contains:
-  - `e2fed53` `Reduce amp switching artifacts`
-  - `9d378e6` `Reduce IR switching artifacts`
-5. Prefer small, reviewable follow-ups from the current stable baseline
+4. Prefer small, reviewable follow-ups from the current stable baseline
 
 Suggested next task unless the user redirects:
-1. Verify the current branch in `Release | x64` if that has not already been done locally
-2. If the user is satisfied, prepare merge/cherry-pick of `e2fed53` and `9d378e6`
-3. Otherwise continue from this branch baseline rather than restarting the old click investigation
+1. Look into minor polishing. Change name and Icon for the app. "RE-AMP" is the new name
