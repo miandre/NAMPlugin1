@@ -21,8 +21,8 @@ SCRIPTS=$IPLUG2_ROOT/Scripts
 CODESIGN=0
 
 # macOS codesigning/notarization
-NOTARIZE_BUNDLE_ID=com.StevenAtkinson.NeuralAmpModeler
-NOTARIZE_BUNDLE_ID_DEMO=com.StevenAtkinson.NeuralAmpModeler.DEMO
+NOTARIZE_BUNDLE_ID=com.and.reamp
+NOTARIZE_BUNDLE_ID_DEMO=com.and.reamp.demo
 APP_SPECIFIC_ID=TODO
 APP_SPECIFIC_PWD=TODO
 
@@ -55,6 +55,7 @@ FULL_VERSION=$MAJOR_VERSION"."$MINOR_VERSION"."$BUG_FIX
 PLUGIN_NAME=`echo | grep BUNDLE_NAME config.h`
 PLUGIN_NAME=${PLUGIN_NAME//\#define BUNDLE_NAME }
 PLUGIN_NAME=${PLUGIN_NAME//\"}
+PROJECT_STEM=NeuralAmpModeler
 
 ARCHIVE_NAME=$PLUGIN_NAME-v$FULL_VERSION-mac
 
@@ -147,7 +148,7 @@ fi
 #---------------------------------------------------------------------------------------------------------
 # build xcode project. Change target to build individual formats, or add to All target in the xcode project
 
-xcodebuild -project ./projects/$PLUGIN_NAME-macOS.xcodeproj -xcconfig ./config/$PLUGIN_NAME-mac.xcconfig DEMO_VERSION=$DEMO -target "All" -UseModernBuildSystem=NO -configuration Release | tee build-mac.log | xcpretty #&& exit ${PIPESTATUS[0]}
+xcodebuild -project ./projects/$PROJECT_STEM-macOS.xcodeproj -xcconfig ./config/$PROJECT_STEM-mac.xcconfig DEMO_VERSION=$DEMO -target "All" -UseModernBuildSystem=NO -configuration Release | tee build-mac.log | xcpretty #&& exit ${PIPESTATUS[0]}
 
 if [ "${PIPESTATUS[0]}" -ne "0" ]; then
   echo "ERROR: build failed, aborting"

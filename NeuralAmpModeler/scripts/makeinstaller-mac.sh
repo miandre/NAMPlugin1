@@ -26,7 +26,8 @@ if [ "$VERSION" == "" ]; then
   exit 1
 fi
 
-PRODUCT_NAME=NeuralAmpModeler
+PRODUCT_NAME=RE-AMP
+PRODUCT_ID_BASE=com.and.reamp
 
 # locations
 PRODUCTS="build-mac"
@@ -72,27 +73,27 @@ build_flavor()
 
 # try to build VST2 package
 if [[ -d $PRODUCTS/$VST2 ]]; then
-  build_flavor "VST2" $VST2 "com.StevenAtkinson.vst2.pkg.${PRODUCT_NAME}" "/Library/Audio/Plug-Ins/VST"
+  build_flavor "VST2" $VST2 "${PRODUCT_ID_BASE}.pkg.vst2" "/Library/Audio/Plug-Ins/VST"
 fi
 
 # # try to build VST3 package
 if [[ -d $PRODUCTS/$VST3 ]]; then
-  build_flavor "VST3" $VST3 "com.StevenAtkinson.vst3.pkg.${PRODUCT_NAME}" "/Library/Audio/Plug-Ins/VST3"
+  build_flavor "VST3" $VST3 "${PRODUCT_ID_BASE}.pkg.vst3" "/Library/Audio/Plug-Ins/VST3"
 fi
 
 # # try to build AU package
 if [[ -d $PRODUCTS/$AU ]]; then
-  build_flavor "AU" $AU "com.StevenAtkinson.au.pkg.${PRODUCT_NAME}" "/Library/Audio/Plug-Ins/Components"
+  build_flavor "AU" $AU "${PRODUCT_ID_BASE}.pkg.au" "/Library/Audio/Plug-Ins/Components"
 fi
 
 # # try to build AAX package
 if [[ -d $PRODUCTS/$AAX ]]; then
-  build_flavor "AAX" $AAX "com.StevenAtkinson.aax.pkg.${PRODUCT_NAME}" ""/Library/Application Support/Avid/Audio/Plug-Ins""
+  build_flavor "AAX" $AAX "${PRODUCT_ID_BASE}.pkg.aax" ""/Library/Application Support/Avid/Audio/Plug-Ins""
 fi
 
 # try to build App package
 if [[ -d $PRODUCTS/$APP ]]; then
-  build_flavor "APP" $APP "com.StevenAtkinson.app.pkg.${PRODUCT_NAME}" "/Applications"
+  build_flavor "APP" $APP "${PRODUCT_ID_BASE}.pkg.app" "/Applications"
 fi
 
 # write build info to resources folder
@@ -112,29 +113,29 @@ fi
 # create distribution.xml
 
 if [[ -d $PRODUCTS/$VST2 ]]; then
-	VST2_PKG_REF="<pkg-ref id=\"com.StevenAtkinson.vst2.pkg.${PRODUCT_NAME}\"/>"
-	VST2_CHOICE="<line choice=\"com.StevenAtkinson.vst2.pkg.${PRODUCT_NAME}\"/>"
-	VST2_CHOICE_DEF="<choice id=\"com.StevenAtkinson.vst2.pkg.${PRODUCT_NAME}\" visible=\"true\" start_selected=\"true\" title=\"VST2 Plug-in\"><pkg-ref id=\"com.StevenAtkinson.vst2.pkg.${PRODUCT_NAME}\"/></choice><pkg-ref id=\"com.StevenAtkinson.vst2.pkg.${PRODUCT_NAME}\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_VST2.pkg</pkg-ref>"
+	VST2_PKG_REF="<pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.vst2\"/>"
+	VST2_CHOICE="<line choice=\"${PRODUCT_ID_BASE}.pkg.vst2\"/>"
+	VST2_CHOICE_DEF="<choice id=\"${PRODUCT_ID_BASE}.pkg.vst2\" visible=\"true\" start_selected=\"true\" title=\"VST2 Plug-in\"><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.vst2\"/></choice><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.vst2\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_VST2.pkg</pkg-ref>"
 fi
 if [[ -d $PRODUCTS/$VST3 ]]; then
-	VST3_PKG_REF="<pkg-ref id=\"com.StevenAtkinson.vst3.pkg.${PRODUCT_NAME}\"/>"
-	VST3_CHOICE="<line choice=\"com.StevenAtkinson.vst3.pkg.${PRODUCT_NAME}\"/>"
-	VST3_CHOICE_DEF="<choice id=\"com.StevenAtkinson.vst3.pkg.${PRODUCT_NAME}\" visible=\"true\" start_selected=\"true\" title=\"VST3 Plug-in\"><pkg-ref id=\"com.StevenAtkinson.vst3.pkg.${PRODUCT_NAME}\"/></choice><pkg-ref id=\"com.StevenAtkinson.vst3.pkg.${PRODUCT_NAME}\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_VST3.pkg</pkg-ref>"
+	VST3_PKG_REF="<pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.vst3\"/>"
+	VST3_CHOICE="<line choice=\"${PRODUCT_ID_BASE}.pkg.vst3\"/>"
+	VST3_CHOICE_DEF="<choice id=\"${PRODUCT_ID_BASE}.pkg.vst3\" visible=\"true\" start_selected=\"true\" title=\"VST3 Plug-in\"><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.vst3\"/></choice><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.vst3\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_VST3.pkg</pkg-ref>"
 fi
 if [[ -d $PRODUCTS/$AU ]]; then
-	AU_PKG_REF="<pkg-ref id=\"com.StevenAtkinson.au.pkg.${PRODUCT_NAME}\"/>"
-	AU_CHOICE="<line choice=\"com.StevenAtkinson.au.pkg.${PRODUCT_NAME}\"/>"
-	AU_CHOICE_DEF="<choice id=\"com.StevenAtkinson.au.pkg.${PRODUCT_NAME}\" visible=\"true\" start_selected=\"true\" title=\"Audio Unit (v2) Plug-in\"><pkg-ref id=\"com.StevenAtkinson.au.pkg.${PRODUCT_NAME}\"/></choice><pkg-ref id=\"com.StevenAtkinson.au.pkg.${PRODUCT_NAME}\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_AU.pkg</pkg-ref>"
+	AU_PKG_REF="<pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.au\"/>"
+	AU_CHOICE="<line choice=\"${PRODUCT_ID_BASE}.pkg.au\"/>"
+	AU_CHOICE_DEF="<choice id=\"${PRODUCT_ID_BASE}.pkg.au\" visible=\"true\" start_selected=\"true\" title=\"Audio Unit (v2) Plug-in\"><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.au\"/></choice><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.au\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_AU.pkg</pkg-ref>"
 fi
 if [[ -d $PRODUCTS/$AAX ]]; then
-	AAX_PKG_REF="<pkg-ref id=\"com.StevenAtkinson.aax.pkg.${PRODUCT_NAME}\"/>"
-	AAX_CHOICE="<line choice=\"com.StevenAtkinson.aax.pkg.${PRODUCT_NAME}\"/>"
-	AAX_CHOICE_DEF="<choice id=\"com.StevenAtkinson.aax.pkg.${PRODUCT_NAME}\" visible=\"true\" start_selected=\"true\" title=\"AAX Plug-in\"><pkg-ref id=\"com.StevenAtkinson.aax.pkg.${PRODUCT_NAME}\"/></choice><pkg-ref id=\"com.StevenAtkinson.aax.pkg.${PRODUCT_NAME}\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_AAX.pkg</pkg-ref>"
+	AAX_PKG_REF="<pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.aax\"/>"
+	AAX_CHOICE="<line choice=\"${PRODUCT_ID_BASE}.pkg.aax\"/>"
+	AAX_CHOICE_DEF="<choice id=\"${PRODUCT_ID_BASE}.pkg.aax\" visible=\"true\" start_selected=\"true\" title=\"AAX Plug-in\"><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.aax\"/></choice><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.aax\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_AAX.pkg</pkg-ref>"
 fi
 if [[ -d $PRODUCTS/$APP ]]; then
-	APP_PKG_REF="<pkg-ref id=\"com.StevenAtkinson.app.pkg.${PRODUCT_NAME}\"/>"
-	APP_CHOICE="<line choice=\"com.StevenAtkinson.app.pkg.${PRODUCT_NAME}\"/>"
-	APP_CHOICE_DEF="<choice id=\"com.StevenAtkinson.app.pkg.${PRODUCT_NAME}\" visible=\"true\" start_selected=\"true\" title=\"Stand-alone App\"><pkg-ref id=\"com.StevenAtkinson.app.pkg.${PRODUCT_NAME}\"/></choice><pkg-ref id=\"com.StevenAtkinson.app.pkg.${PRODUCT_NAME}\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_APP.pkg</pkg-ref>"
+	APP_PKG_REF="<pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.app\"/>"
+	APP_CHOICE="<line choice=\"${PRODUCT_ID_BASE}.pkg.app\"/>"
+	APP_CHOICE_DEF="<choice id=\"${PRODUCT_ID_BASE}.pkg.app\" visible=\"true\" start_selected=\"true\" title=\"Stand-alone App\"><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.app\"/></choice><pkg-ref id=\"${PRODUCT_ID_BASE}.pkg.app\" version=\"${VERSION}\" onConclusion=\"none\">${PRODUCT_NAME}_APP.pkg</pkg-ref>"
 fi
 
 # if [[ -d $PRODUCTS/$RES ]]; then

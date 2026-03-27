@@ -33,6 +33,7 @@ def main():
         demo = int(sys.argv[1])
 
     config = parse_config(projectpath)
+    product_name = config["BUNDLE_NAME"]
 
     # WIN INSTALLER
     print("Updating Windows Installer version info...")
@@ -44,9 +45,9 @@ def main():
             line = "AppVersion=" + config["FULL_VER_STR"] + "\n"
         if "OutputBaseFilename" in line:
             if demo:
-                line = "OutputBaseFilename=NeuralAmpModeler Demo Installer\n"
+                line = f"OutputBaseFilename={product_name} Demo Installer\n"
             else:
-                line = "OutputBaseFilename=NeuralAmpModeler Installer\n"
+                line = f"OutputBaseFilename={product_name} Installer\n"
 
         if 'Source: "readme' in line:
             if demo:
@@ -56,15 +57,15 @@ def main():
 
         if "WelcomeLabel1" in line:
             if demo:
-                line = "WelcomeLabel1=Welcome to the NeuralAmpModeler Demo installer\n"
+                line = f"WelcomeLabel1=Welcome to the {product_name} Demo installer\n"
             else:
-                line = "WelcomeLabel1=Welcome to the NeuralAmpModeler installer\n"
+                line = f"WelcomeLabel1=Welcome to the {product_name} installer\n"
 
         if "SetupWindowTitle" in line:
             if demo:
-                line = "SetupWindowTitle=NeuralAmpModeler Demo installer\n"
+                line = f"SetupWindowTitle={product_name} Demo installer\n"
             else:
-                line = "SetupWindowTitle=NeuralAmpModeler installer\n"
+                line = f"SetupWindowTitle={product_name} installer\n"
 
         sys.stdout.write(line)
 

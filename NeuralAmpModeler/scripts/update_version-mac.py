@@ -18,6 +18,13 @@ sys.path.insert(0, os.path.join(os.getcwd(), IPLUG2_ROOT + "/Scripts"))
 
 from parse_config import parse_config, parse_xcconfig
 
+RESOURCE_STEM = "NeuralAmpModeler"
+BUNDLE_ID_BASE = "com.and.reamp"
+
+
+def resource_path(projectpath, suffix):
+    return os.path.join(projectpath, "resources", RESOURCE_STEM + suffix)
+
 
 def main():
     config = parse_config(projectpath)
@@ -41,19 +48,12 @@ def main():
 
     # VST3
 
-    plistpath = projectpath + "/resources/" + config["BUNDLE_NAME"] + "-VST3-Info.plist"
+    plistpath = resource_path(projectpath, "-VST3-Info.plist")
     with open(plistpath, "rb") as f:
         vst3 = plistlib.load(f)
         vst3["CFBundleExecutable"] = config["BUNDLE_NAME"]
         vst3["CFBundleGetInfoString"] = CFBundleGetInfoString
-        vst3["CFBundleIdentifier"] = (
-            config["BUNDLE_DOMAIN"]
-            + "."
-            + config["BUNDLE_MFR"]
-            + ".vst3."
-            + config["BUNDLE_NAME"]
-            + ""
-        )
+        vst3["CFBundleIdentifier"] = BUNDLE_ID_BASE + ".vst3"
         vst3["CFBundleName"] = config["BUNDLE_NAME"]
         vst3["CFBundleVersion"] = CFBundleVersion
         vst3["CFBundleShortVersionString"] = CFBundleVersion
@@ -67,19 +67,12 @@ def main():
 
     # VST2
 
-    plistpath = projectpath + "/resources/" + config["BUNDLE_NAME"] + "-VST2-Info.plist"
+    plistpath = resource_path(projectpath, "-VST2-Info.plist")
     with open(plistpath, "rb") as f:
         vst2 = plistlib.load(f)
         vst2["CFBundleExecutable"] = config["BUNDLE_NAME"]
         vst2["CFBundleGetInfoString"] = CFBundleGetInfoString
-        vst2["CFBundleIdentifier"] = (
-            config["BUNDLE_DOMAIN"]
-            + "."
-            + config["BUNDLE_MFR"]
-            + ".vst."
-            + config["BUNDLE_NAME"]
-            + ""
-        )
+        vst2["CFBundleIdentifier"] = BUNDLE_ID_BASE + ".vst"
         vst2["CFBundleName"] = config["BUNDLE_NAME"]
         vst2["CFBundleVersion"] = CFBundleVersion
         vst2["CFBundleShortVersionString"] = CFBundleVersion
@@ -93,19 +86,12 @@ def main():
 
     # AUDIOUNIT v2
 
-    plistpath = projectpath + "/resources/" + config["BUNDLE_NAME"] + "-AU-Info.plist"
+    plistpath = resource_path(projectpath, "-AU-Info.plist")
     with open(plistpath, "rb") as f:
         auv2 = plistlib.load(f)
         auv2["CFBundleExecutable"] = config["BUNDLE_NAME"]
         auv2["CFBundleGetInfoString"] = CFBundleGetInfoString
-        auv2["CFBundleIdentifier"] = (
-            config["BUNDLE_DOMAIN"]
-            + "."
-            + config["BUNDLE_MFR"]
-            + ".audiounit."
-            + config["BUNDLE_NAME"]
-            + ""
-        )
+        auv2["CFBundleIdentifier"] = BUNDLE_ID_BASE + ".audiounit"
         auv2["CFBundleName"] = config["BUNDLE_NAME"]
         auv2["CFBundleVersion"] = CFBundleVersion
         auv2["CFBundleShortVersionString"] = CFBundleVersion
@@ -147,22 +133,13 @@ def main():
     else:
         NSEXTENSIONPOINTIDENTIFIER = "com.apple.AudioUnit"
 
-    plistpath = (
-        projectpath + "/resources/" + config["BUNDLE_NAME"] + "-macOS-AUv3-Info.plist"
-    )
+    plistpath = resource_path(projectpath, "-macOS-AUv3-Info.plist")
 
     with open(plistpath, "rb") as f:
         auv3 = plistlib.load(f)
         auv3["CFBundleExecutable"] = config["BUNDLE_NAME"]
         auv3["CFBundleGetInfoString"] = CFBundleGetInfoString
-        auv3["CFBundleIdentifier"] = (
-            config["BUNDLE_DOMAIN"]
-            + "."
-            + config["BUNDLE_MFR"]
-            + ".app."
-            + config["BUNDLE_NAME"]
-            + ".AUv3"
-        )
+        auv3["CFBundleIdentifier"] = BUNDLE_ID_BASE + ".app.auv3"
         auv3["CFBundleName"] = config["BUNDLE_NAME"]
         auv3["CFBundleVersion"] = CFBundleVersion
         auv3["CFBundleShortVersionString"] = CFBundleVersion
@@ -170,9 +147,7 @@ def main():
         auv3["CFBundlePackageType"] = "XPC!"
         auv3["NSExtension"] = dict(
             NSExtensionAttributes=dict(
-                AudioComponentBundle="com.StevenAtkinson.app."
-                + config["BUNDLE_NAME"]
-                + ".AUv3Framework",
+                AudioComponentBundle=BUNDLE_ID_BASE + ".app.auv3framework",
                 AudioComponents=[{}],
             ),
             #                               NSExtensionServiceRoleType = "NSExtensionServiceRoleTypeEditor",
@@ -219,19 +194,12 @@ def main():
 
     # AAX
 
-    plistpath = projectpath + "/resources/" + config["BUNDLE_NAME"] + "-AAX-Info.plist"
+    plistpath = resource_path(projectpath, "-AAX-Info.plist")
     with open(plistpath, "rb") as f:
         aax = plistlib.load(f)
         aax["CFBundleExecutable"] = config["BUNDLE_NAME"]
         aax["CFBundleGetInfoString"] = CFBundleGetInfoString
-        aax["CFBundleIdentifier"] = (
-            config["BUNDLE_DOMAIN"]
-            + "."
-            + config["BUNDLE_MFR"]
-            + ".aax."
-            + config["BUNDLE_NAME"]
-            + ""
-        )
+        aax["CFBundleIdentifier"] = BUNDLE_ID_BASE + ".aax"
         aax["CFBundleName"] = config["BUNDLE_NAME"]
         aax["CFBundleVersion"] = CFBundleVersion
         aax["CFBundleShortVersionString"] = CFBundleVersion
@@ -243,22 +211,13 @@ def main():
 
     # APP
 
-    plistpath = (
-        projectpath + "/resources/" + config["BUNDLE_NAME"] + "-macOS-Info.plist"
-    )
+    plistpath = resource_path(projectpath, "-macOS-Info.plist")
 
     with open(plistpath, "rb") as f:
         macOSapp = plistlib.load(f)
         macOSapp["CFBundleExecutable"] = config["BUNDLE_NAME"]
         macOSapp["CFBundleGetInfoString"] = CFBundleGetInfoString
-        macOSapp["CFBundleIdentifier"] = (
-            config["BUNDLE_DOMAIN"]
-            + "."
-            + config["BUNDLE_MFR"]
-            + ".app."
-            + config["BUNDLE_NAME"]
-            + ""
-        )
+        macOSapp["CFBundleIdentifier"] = BUNDLE_ID_BASE + ".app"
         macOSapp["CFBundleName"] = config["BUNDLE_NAME"]
         macOSapp["CFBundleVersion"] = CFBundleVersion
         macOSapp["CFBundleShortVersionString"] = CFBundleVersion
@@ -267,7 +226,7 @@ def main():
         macOSapp["CFBundleSignature"] = config["PLUG_UNIQUE_ID"]
         macOSapp["CSResourcesFileMapped"] = CSResourcesFileMapped
         macOSapp["NSPrincipalClass"] = "SWELLApplication"
-        macOSapp["NSMainNibFile"] = config["BUNDLE_NAME"] + "-macOS-MainMenu"
+        macOSapp["NSMainNibFile"] = RESOURCE_STEM + "-macOS-MainMenu"
         macOSapp["LSApplicationCategoryType"] = "public.app-category.music"
         macOSapp[
             "NSMicrophoneUsageDescription"

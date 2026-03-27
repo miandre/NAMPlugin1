@@ -5,13 +5,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>NeuralAmpModeler</string>
+	<string>RE-AMP</string>
 	<key>CFBundleGetInfoString</key>
 	<string>RE-AMP v0.7.13 Copyright 2022 Steven Atkinson</string>
 	<key>CFBundleIconFile</key>
 	<string>RE-AMP.icns</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.StevenAtkinson.app.NeuralAmpModeler</string>
+	<string>com.and.reamp.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>

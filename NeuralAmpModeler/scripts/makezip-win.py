@@ -1,13 +1,18 @@
-import zipfile, os, fileinput, string, sys, shutil
+import glob, zipfile, os, fileinput, string, sys, shutil
 
 scriptpath = os.path.dirname(os.path.realpath(__file__))
 projectpath = os.path.abspath(os.path.join(scriptpath, os.pardir))
 
-IPLUG2_ROOT = "..\..\iPlug2"
+IPLUG2_ROOT = "..\\..\\iPlug2"
 
-sys.path.insert(0, os.path.join(scriptpath, IPLUG2_ROOT + "\Scripts"))
+sys.path.insert(0, os.path.join(scriptpath, IPLUG2_ROOT + "\\Scripts"))
 
 from get_archive_name import get_archive_name
+
+PRODUCT_NAME = "RE-AMP"
+INSTALLER_NAME = PRODUCT_NAME + " Installer.exe"
+DEMO_INSTALLER_NAME = PRODUCT_NAME + " Demo Installer.exe"
+MANUAL_NAME = PRODUCT_NAME + " manual.pdf"
 
 
 def main():
@@ -28,22 +33,26 @@ def main():
     files = []
 
     if not zip:
-        installer = "\\build-win\\installer\\NeuralAmpModeler Installer.exe"
+        installer = "\\build-win\\installer\\" + INSTALLER_NAME
 
         if demo:
-            installer = "\\build-win\\installer\\NeuralAmpModeler Demo Installer.exe"
+            installer = "\\build-win\\installer\\" + DEMO_INSTALLER_NAME
 
         files = [
             projectpath + installer,
             projectpath + "\\installer\\changelog.txt",
             projectpath + "\\installer\\known-issues.txt",
-            projectpath + "\\manual\\NeuralAmpModeler manual.pdf",
+            projectpath + "\\manual\\" + MANUAL_NAME,
         ]
     else:
         files = [
             projectpath
-            + "\\build-win\\NeuralAmpModeler.vst3\\Contents\\x86_64-win\\NeuralAmpModeler.vst3",
-            projectpath + "\\build-win\\NeuralAmpModeler_x64.exe",
+            + "\\build-win\\"
+            + PRODUCT_NAME
+            + ".vst3\\Contents\\x86_64-win\\"
+            + PRODUCT_NAME
+            + ".vst3",
+            projectpath + "\\build-win\\" + PRODUCT_NAME + "_x64.exe",
         ]
 
     zipname = get_archive_name(projectpath, "win", "demo" if demo == 1 else "full")
@@ -63,10 +72,7 @@ def main():
         projectpath + "\\build-win\\out\\" + zipname + "-pdbs.zip", mode="w"
     )
 
-    files = [
-        projectpath + "\\build-win\\pdbs\\NeuralAmpModeler-vst3_x64.pdb",
-        projectpath + "\\build-win\\pdbs\\NeuralAmpModeler-app_x64.pdb",
-    ]
+    files = sorted(glob.glob(projectpath + "\\build-win\\pdbs\\*.pdb"))
 
     for f in files:
         print("adding " + f)

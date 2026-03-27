@@ -10,6 +10,7 @@ REM - two arguments are demo/full and zip/installer
 
 set DEMO_ARG="%1"
 set ZIP_ARG="%2"
+set PRODUCT_NAME=RE-AMP
 
 if [%DEMO_ARG%]==[] goto USAGE
 if [%ZIP_ARG%]==[] goto USAGE
@@ -20,10 +21,10 @@ echo ZIP_ARG %ZIP_ARG%
 echo END SCRIPT VARIABLES -----------------------------------------------------
 
 if %DEMO_ARG% == "demo" (
-  echo Making NeuralAmpModeler Windows DEMO VERSION distribution ...
+  echo Making %PRODUCT_NAME% Windows DEMO VERSION distribution ...
   set DEMO=1
 ) else (
-  echo Making NeuralAmpModeler Windows FULL VERSION distribution ...
+  echo Making %PRODUCT_NAME% Windows FULL VERSION distribution ...
   set DEMO=0
 )
 
@@ -107,17 +108,17 @@ echo Making Installer ...
   REM goto END-is
 
   REM :64-Bit-is
-  "%ProgramFiles(x86)%\Inno Setup 6\iscc" /Q ".\installer\NeuralAmpModeler.iss"
+  "%ProgramFiles(x86)%\Inno Setup 6\iscc" /Q ".\installer\RE-AMP.iss"
   REM goto END-is
 
   REM :END-is
 
   REM - Codesign Installer for Windows 8+
-  REM -"C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Bin\signtool.exe" sign /f "XXXXX.p12" /p XXXXX /d "NeuralAmpModeler Installer" ".\installer\NeuralAmpModeler Installer.exe"
+  REM -"C:\Program Files (x86)\Microsoft SDKs\Windows\v7.1A\Bin\signtool.exe" sign /f "XXXXX.p12" /p XXXXX /d "RE-AMP Installer" ".\installer\RE-AMP Installer.exe"
 
   REM -if %1 == 1 (
-  REM -copy ".\installer\NeuralAmpModeler Installer.exe" ".\installer\NeuralAmpModeler Demo Installer.exe"
-  REM -del ".\installer\NeuralAmpModeler Installer.exe"
+  REM -copy ".\installer\RE-AMP Installer.exe" ".\installer\RE-AMP Demo Installer.exe"
+  REM -del ".\installer\RE-AMP Installer.exe"
   REM -)
 
   echo Making Zip File of Installer ...
