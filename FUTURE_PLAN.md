@@ -1,4 +1,4 @@
-Last updated: 2026-03-25
+Last updated: 2026-03-26
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -99,37 +99,37 @@ Important note:
 - The key tuner fix was removing the forced cents reset to `0` on committed note changes
 - Several attempted simplifications were tested and rejected; do not casually reopen tuner behavior
 
+### Done on branch `reduce-amp-switch-artifacts`: Milestone K - amp variant/slot switch artifact reduction
+Outcome:
+- Amp variant switching is materially cleaner, especially in `Normalized` mode
+- Amp slot switching now trades the old click/clonk for a short acceptable masked handoff
+- Hard amp/stomp section toggles were also cleaned up as part of the same investigation
+
+Settled implementation points:
+- committed audio-side amp slot shadowing for tone stack / pre gain / master
+- normalized output-gain smoothing
+- same-slot amp variant crossfade
+- short masked slot transition
+
+Settled constants:
+- `kAmpSlotSwitchDeClickSamples = 512`
+- `kAmpModelVariantCrossfadeSamples = 512`
+- `kPathToggleTransitionSamples = 512`
+- `kAmpSlotTransitionSamples = 3072`
+- `kOutputGainSmoothTimeSeconds = 0.02`
+
+### Done on branch `reduce-amp-switch-artifacts`: Cab / IR switch artifact reduction
+Outcome:
+- Cab section, curated IR changes, custom IR arrow changes, and curated slider boundary swaps are materially cleaner
+
+Settled implementation points:
+- the failed whole-output IR mute path was replaced with slot-local cab-stage old/new IR crossfades
+- curated IR pairs are staged together so each branch has a complete primary/secondary pair during the blend
+
+Settled constant:
+- `kIRTransitionSamples = 12288`
+
 ## Active milestones
-
-### Milestone K: Amp variant switch click suppression
-Goal:
-- Remove or materially reduce the audible click when changing amp variants
-
-Current state:
-- Variant switching works functionally and the slot-specific UI is now in place
-- The current concern is the audible artifact during the handoff itself
-- The most likely first inspection points are in:
-  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
-  - `NeuralAmpModeler/NeuralAmpModeler.h`
-- Start by reading:
-  - `_SelectAmpSlotModelVariant()`
-  - the model load/swap path
-  - any reset / state-apply behavior triggered by the switch
-
-Recommended first step:
-- Do a narrow root-cause analysis before changing behavior
-- Find out whether the click is caused by:
-  - abrupt audio-state discontinuity
-  - model swap timing
-  - abrupt parameter/state changes applied at the same moment
-- Keep the first fix minimal and reviewable
-
-Risk:
-- Medium
-
-RT safety watch-outs:
-- No allocations, locks, file access, or UI work in the audio callback
-- If a fade/crossfade is introduced, keep it deterministic and allocation-free
 
 ### Milestone B: Release asset packaging and final variant strategy
 Goal:
@@ -193,14 +193,14 @@ Examples:
 - off-state visual language
 
 ## Recommended execution order from now
-1. Milestone K: amp variant switch click suppression
+1. Validate the current `reduce-amp-switch-artifacts` branch in `Release | x64` and merge/cherry-pick it if the user is satisfied
 2. Resume Milestone B when final release asset set is clearer
 3. Milestone F: transpose decision path only if the user returns to it
 4. Milestone D only after Cab v1 remains stable in regular use
 5. Treat additional UI polish as a low-risk side lane, not the main roadmap
 
 ## Next-agent prompt
-You are continuing work in `D:\Dev\NAMPlugin` on branch `main`.
+You are continuing work in `D:\Dev\NAMPlugin` on branch `reduce-amp-switch-artifacts`.
 
 Read first, in this exact order:
 1. `AGENTS.md`
@@ -219,12 +219,12 @@ Current direction:
 1. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, boost v2, amp variants v1, doubler improvements, startup/default asset refresh, and slot-specific amp UI work are already landed
 2. Do not reopen tuner work unless the user explicitly asks
 3. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
-4. Prefer small, reviewable follow-ups from the current stable baseline
+4. Current branch also contains:
+  - `e2fed53` `Reduce amp switching artifacts`
+  - `9d378e6` `Reduce IR switching artifacts`
+5. Prefer small, reviewable follow-ups from the current stable baseline
 
 Suggested next task unless the user redirects:
-1. Investigate and reduce the click sound when changing amp variants
-2. Focus first on:
-  - `NeuralAmpModeler/NeuralAmpModeler.cpp`
-  - `NeuralAmpModeler/NeuralAmpModeler.h`
-3. Inspect `_SelectAmpSlotModelVariant()` and the associated model handoff/reset path before proposing changes
-4. Keep the first fix minimal, reviewable, and RT-safe
+1. Verify the current branch in `Release | x64` if that has not already been done locally
+2. If the user is satisfied, prepare merge/cherry-pick of `e2fed53` and `9d378e6`
+3. Otherwise continue from this branch baseline rather than restarting the old click investigation
