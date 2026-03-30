@@ -1,6 +1,6 @@
-Last updated: 2026-03-26
+Last updated: 2026-03-30
 
-Purpose: concise handoff so a new agent can continue without replaying the full chat history.
+Purpose: concise handoff so a new agent can continue from the current stable baseline without replaying the full chat history.
 
 ## Read order for new agents
 1. `AGENTS.md`
@@ -9,255 +9,106 @@ Purpose: concise handoff so a new agent can continue without replaying the full 
 4. `FUTURE_PLAN.md`
 
 ## Current repository state
-- Active branch: `reduce-amp-switch-artifacts`
-- Working tree at handoff: clean
-- Recent relevant history before this handover update:
-  - `9d378e6` `Reduce IR switching artifacts`
-  - `e2fed53` `Reduce amp switching artifacts`
-  - `1eb2a65` `Add amp 1 character switch`
-  - `c28ba29` `Add amp 2 voicing controls`
-  - `6541126` `Refine amp UI behavior and resource loading`
-  - `d723495` `Add amp UI bitmap assets`
-  - `99e8f61` `New scaffolding for Amp layouts`
-  - `f79f5e2` `Improve PingPong dealy effect for more balance`
-  - `81fcf89` `Update default loaded assets`
-  - `59df315` `Remove soft clipping to avoid unwanted noice from som IRs`
-  - `501bab2` `Refine virtual doubler voicing`
-  - `f969f5f` `Update handover`
+- Active branch: `main`
+- Working tree at handoff: expected clean after this handoff update is committed and pushed
+- Current product name for user-facing outputs: `RE-AMP`
+- Internal code/project naming is still mostly `NeuralAmpModeler` and that is intentional for now
+- Current curated cab mic set:
+  - `S-57`
+  - `R-121`
+  - `M-421`
+- Release mode still embeds curated cab IRs and amp variant assets while allowing user-loaded custom IRs
+
+## Recent relevant history before this handoff update
+- `89f5c72` `Add curated MD-421 cab IR option`
+- `94429bd` `Fix amp bypass routing and state handling`
+- `e544f42` `Remove generated Python bytecode`
+- `9e9e4fa` `Rename external product identity to RE-AMP`
+- `00d08c4` `Rebrand app assets and standalone metadata`
+- `d66c291` `Update future plan`
+- `f800e1b` `Merge branch 'reduce-amp-switch-artifacts'`
+- `6ab8e9a` `Update artifact work handover`
+- `9d378e6` `Reduce IR switching artifacts`
+- `e2fed53` `Reduce amp switching artifacts`
 
 ## What is completed now
 
-### 1) Metering overhaul is landed and stable
-- Input/output metering is mono/stereo-aware
-- Meter UI is vector-based
-- Clip warning latch exists and clears by clicking either meter
-
-### 2) Gate/stomp coupling bug is fixed
-- Gate is decoupled from stomp bypass
-- Right/Ctrl-click bypass on the Stomp section no longer disables the current gate path
-
-### 3) Preset/session context restore is fixed
-- Standalone restart restores preset context, name, and dirty `*` state
-- Plugin/session restore restores preset context instead of always showing `Unsaved`
-- `Input Stereo` remains session/setup state, not preset-owned state
-
-### 4) Plugin preset asset restore is fixed
-- Plugin preset/session reopen restores stomp NAM / boost NAM and cab IR state
-- Relative preset-path handling was tightened during this work
-
-### 5) Interactive Cab V1 is landed
+### 1) Artifact reduction work is already merged to `main`
 Outcome:
-- The Cab page is now a dual-slot interactive cab mixer instead of the old single-cab blend workflow
+- The old amp/cab switching investigation branch is no longer the active baseline.
+- `main` already contains the amp and IR switching cleanup work.
 
-Landed work:
-- Two always-visible mono cab slots: `Cab A` and `Cab B`
-- Per-slot controls:
-  - enable
-  - source dropdown
-  - position slider
-  - level
-  - pan
-  - custom IR loader
-- Curated mic mode with 1D interpolation between five aligned captures per mic
-- Current curated mic set:
-  - `57`
-  - `121`
-- Slider direction is mirrored correctly for the left slot
-- Old single `Cab Blend` concept was removed
+Landed details:
+- Amp variant switching is materially cleaner, especially in `Normalized` mode.
+- Amp slot switching uses a short masked handoff instead of the older click/clonk behavior.
+- Cab enable/source/IR changes use slot-local old/new IR crossfades instead of the failed whole-output mute path.
 
-### 6) Curated cab assets are embedded for release mode
+Settled constants on the merged baseline:
+- `kAmpSlotSwitchDeClickSamples = 512`
+- `kAmpModelVariantCrossfadeSamples = 512`
+- `kPathToggleTransitionSamples = 512`
+- `kAmpSlotTransitionSamples = 3072`
+- `kOutputGainSmoothTimeSeconds = 0.02`
+- `kIRTransitionSamples = 12288`
+
+### 2) External-facing rebrand to `RE-AMP` is landed
 Outcome:
-- Release mode no longer depends on runtime disk reads for the curated cab mic set
+- Windows/mac standalone metadata, output naming, and installer/package naming were rebranded externally.
 
 Important nuance:
-- `Custom IR` loading is still allowed in release mode
-- Only the curated mic set is embedded; user-loaded IRs still use the normal file path flow
+- Internal source file names, class names, and most project names still use `NeuralAmpModeler`.
+- That internal rename has not been done and should not be reopened unless the user asks.
 
-### 7) Compressor stomp pedal v1 is landed
+### 3) Amp bypass behavior is fixed on `main`
 Outcome:
-- A built-in compressor stomp now exists ahead of the amp path
-
-Landed work:
-- Controls:
-  - `Amount`
-  - `Level`
-  - `Soft/Hard`
-  - on/off
-- Built-in compressor DSP was added instead of a NAM-based stomp model
-- Control smoothing/state is preallocated and runs in the existing audio callback path
-
-### 8) Boost v2 is landed
-Outcome:
-- The boost pedal supports two switchable model variants while sharing one control surface
-
-Landed work:
-- Separate boost model paths for `A` and `B`
-- `A/B` switch in the stomp UI
-- Boost drive control added
-- Capability/latency/state handling follows the selected boost variant
-- Preset/session restore includes both boost model paths
-
-### 9) Amp model variants v1 is landed
-Outcome:
-- Each amp slot supports multiple model variants, starting with `A` and `B`
-
-Landed work:
-- Per-slot `A/B` model storage/loading/persistence
-- Selected variant is stored and restored per amp slot
-- Shared amp controls remain common to the slot, not per variant
-- Release mode preload expects:
-  - `Amp1A`
-  - `Amp1B`
-  - `Amp2A`
-  - `Amp2B`
-  - `Amp3A`
-  - `Amp3B`
-
-### 10) Tuner improvements are landed
-Outcome:
-- The tuner is much more usable than the old baseline and the major center-jump bug is fixed
-
-Landed work:
-- Analyzer now updates every idle tick instead of the old decimated cadence
-- High-string acquisition was improved, especially on `B` and high `E`
-- Re-picks and semitone-boundary rollovers behave much better
-- Tuner now shows numeric signed cents offset
-- Sharp notes now render with dual names:
-  - `C#/Db`
-  - `D#/Eb`
-  - `F#/Gb`
-  - `G#/Ab`
-  - `A#/Bb`
-- Tuner UI was narrowed slightly and smoothed for a steadier feel
-- Tuner monitor default is now `MUTE`
-
-### 11) Doubler improvement pass is landed
-Outcome:
-- The virtual doubler now behaves more like a strong double-track preview and less like a generic widener
-
-Landed work:
-- Reduced phasey / roomy behavior compared with the earlier baseline
-- Reduced take correlation and better preserved separation
-- Final tuning favors a fixed recipe with the main control acting more like a taste/presentation control
-- Right-side doubler soft clip was removed because curated IRs exposed audible crackle on that path
-
-### 12) Startup/default asset baseline is updated
-Outcome:
-- Startup and the `Default` preset now load the current asset set instead of the old legacy files
-
-Landed work:
-- `NAM_STARTUP_TMPLOAD_DEFAULTS` now controls tmp-load startup defaults instead of `NAM_RELEASE_MODE`
-- Default startup/load path expects:
-  - `Amp1A/B`
-  - `Amp2A/B`
-  - `Amp3A/B`
-  - `BoostA/B`
-- Default cab state is now curated stereo:
-  - `57` on one side
-  - `121` on the other
-  - both at position `40`
-- Old runtime references to `Amp1/2/3`, `Boost1`, and `Cab1` were removed from live code paths
-
-### 13) Delay ping-pong balance tweak is landed
-Outcome:
-- Mono ping-pong delay feels less left-skewed while still keeping the ping-pong identity
-
-### 14) Amp-face scaffolding and slot-specific release UI work are landed
-Outcome:
-- Amp UI is now structurally separated enough to support different controls, labels, and tone-stack behavior per slot
-
-Structural work:
-- Added slot presentation / behavior / resolved-spec scaffolding
-- Tone-stack creation is now spec-driven
-- Slot-specific layout and control visibility can diverge without forking the whole editor
-
-Current slot behavior:
-- Amp 1:
-  - `CHARACTER` switch added on the left side
-  - switch toggles amp model `A/B`
-  - caption is white to match that face
-- Amp 2:
-  - `Depth` knob removed
-  - stacked `DEPTH` and `SCOOP` pushbuttons added
-  - dedicated `Amp2ToneStack` exists for its slot-specific voicing behavior
-- Amp 3:
-  - custom on/off switch art
-  - custom `BRIGHT/NORMAL` variant switch
-  - `DEPTH` switch replaces the old depth knob behavior
-  - `Presence` and `Depth` knobs are removed from that face
-  - bright mode also applies a hidden presence boost
-
-Asset/rendering updates:
-- Amp knobs and amp on/off switches support `@2x` / `@3x` bitmap variants
-- Amp knob rotation now uses direct bitmap rotation instead of rotating an intermediate layer
-- Keep that direct-rotation path; it fixed the visible wobble problem with the corrected exports
-
-### 15) Amp switching artifact reduction is landed on the current branch
-Outcome:
-- Amp variant switching in `Normalized` mode is now materially cleaner
-- Amp slot switching now uses a short acceptable masked handoff instead of the earlier click/clonk behavior
-- Hard amp/stomp path toggles were also cleaned up during the same work
+- Bypassing the whole AMP section now passes dry signal forward into the cab stage instead of muting.
+- Turning an amp off with its amp-face on/off button now bypasses the full amp stage, not just the model block.
+- `Normalized` output mode no longer applies model normalization gain to dry audio when the model stage is bypassed.
 
 Important landed details:
-- The output-mode clue mattered: a large part of the remaining variant click was the normalization gain jump, not only the model swap
-- The fix set that proved out was:
-  - committed amp slot shadowing for tone stack / pre gain / master
-  - normalized output-gain smoothing
-  - same-slot variant crossfade
-  - short slot-transition masking
-  - path-toggle fade for hard amp/stomp section toggles
-- Settled constants on the current branch:
-  - `kAmpSlotSwitchDeClickSamples = 512`
-  - `kAmpModelVariantCrossfadeSamples = 512`
-  - `kPathToggleTransitionSamples = 512`
-  - `kAmpSlotTransitionSamples = 3072`
-  - `kOutputGainSmoothTimeSeconds = 0.02`
+- The successful fix was in the live amp-stage state selection in `ProcessBlock()`, not more downstream routing guesses.
+- The cab handoff cleanup remains part of the current baseline.
 
-### 16) Cab / IR switching artifact reduction is landed on the current branch
+### 4) Curated `MD-421` cab support is landed
 Outcome:
-- Cab enable/source/IR changes no longer rely on the failed whole-output mute path
-- IR changes now use slot-local cab-stage old/new IR crossfades
-- Curated slider boundary changes, curated source changes, and custom IR arrow changes are materially cleaner
+- The curated cab system now includes a third mic source exposed in the UI as `M-421`.
 
-Important landed details:
-- The successful fix was not mute-around-swap; it was preserving the old IR branch and crossfading cab output against the new IR branch
-- Curated IR pairs are now staged together so each branch has a complete primary/secondary pair during the blend
-- The long IR crossfade is intentional because convolver history changes abruptly
-- Settled constant on the current branch:
-  - `kIRTransitionSamples = 12288`
+Landed details:
+- Added curated folder token `421`
+- Added UI source label `M-421`
+- Added `Mic/421.png`
+- Added release-mode embedded IR assets for the five `421` captures
+- Added missing Windows resource registration in `main.rc` so the new bitmap actually loads at runtime
+
+### 5) The broader feature baseline from earlier work still applies
+Already landed on `main`:
+- Metering overhaul
+- Gate/stomp decoupling
+- Preset/session restore fixes
+- Plugin preset stomp NAM / cab IR restore fixes
+- Interactive Cab V1
+- Embedded curated cab IRs for release mode
+- Compressor stomp pedal v1
+- Boost v2 with `A/B` model selection
+- Amp model variants v1
+- Doubler improvement pass
+- Startup/default asset refresh
+- Amp-face scaffolding and slot-specific amp UI work
+- Tuner improvements and tuner UI polish
 
 ## Important current conclusions
-- Do not reopen tuner work unless the user explicitly asks
-- The doubler is now on a good-enough baseline; treat further changes as product-taste tuning, not urgent cleanup
-- The amp-face spec scaffolding is intentional and should be used for future slot/model divergence instead of adding more hardcoded one-offs
-- `Custom IR` support in release mode is intentional and should remain
-- `Input Stereo` should remain session/setup state, not preset-owned state
-- Do not reopen amp/IR artifact work immediately unless the user hears a specific remaining regression; the current branch is the tuned baseline for that investigation
-
-## Current plugin/app state
-- The current branch now includes:
-  - Interactive Cab V1
-  - embedded curated cab IRs
-  - built-in compressor stomp v1
-  - boost v2 with `A/B` model selection
-  - amp model variants v1
-  - improved virtual doubler baseline
-  - updated startup/default asset loading
-  - amp-face scaffolding and slot-specific amp UI controls
-  - tuner improvements and tuner UI polish
-- `reduce-amp-switch-artifacts` additionally includes:
-  - amp variant/slot artifact reduction
-  - cab/IR switching artifact reduction
-- Release mode currently supports:
-  - embedded curated cab IRs
-  - preloaded amp variant assets `Amp1A/B`, `Amp2A/B`, `Amp3A/B`
-  - user-loaded custom IRs
+- Do not reopen tuner work unless the user explicitly asks.
+- Do not restart the old amp/IR artifact investigation from scratch; `main` already contains the accepted baseline.
+- Keep custom IR support in release mode.
+- Use the slot presentation / behavior / resolved-spec scaffolding for future amp-specific divergence.
+- Prefer small, reviewable follow-ups from the current stable `main` baseline.
+- Internal `NeuralAmpModeler` naming cleanup can wait.
 
 ## Build/config baseline to preserve
 - Audio/performance validation: `Release | x64` only
 - Standalone audio test: run without debugger (`Ctrl+F5`)
 - Do not evaluate DSP performance in Debug
-- No `Release | x64` build was run from this shell for the amp/IR artifact commits because `msbuild` / `devenv` were not available on PATH here
+- No recent `Release | x64` build was run from this shell for the latest doc-only changes
 - Do not assume local `config.h` matches committed defaults during user testing
 
 ## Current policy notes
@@ -271,14 +122,16 @@ Important landed details:
   - breaking changes are acceptable if they improve architecture or iteration speed
 
 ## Suggested next coding step
-1. Build and validate the current branch in `Release | x64`
-2. If the user is satisfied, merge or cherry-pick:
-  - `e2fed53` `Reduce amp switching artifacts`
-  - `9d378e6` `Reduce IR switching artifacts`
-3. Otherwise, move on to the next user-directed task from the new stable baseline instead of continuing artifact experimentation
+1. Start the next feature as a focused custom tone stack task for one amp slot.
+2. First map the current tone-stack creation path and slot-specific amp scaffolding before changing DSP.
+3. Keep the patch narrow:
+  - add or adapt one tone-stack implementation
+  - wire it through the existing slot behavior/spec flow
+  - avoid broad UI or serialization churn unless the user asks
+4. Validate in `Release | x64` and listen specifically for control mapping, bypass behavior, and any new zipper/click artifacts.
 
 ## Starter prompt for the next agent
-You are continuing work in `D:\\Dev\\NAMPlugin` on branch `reduce-amp-switch-artifacts`.
+You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
 
 Read first, in this exact order:
 1. `AGENTS.md`
@@ -294,37 +147,15 @@ Then confirm current repo/submodule state:
 - `git -C iPlug2 remote -v`
 
 Current baseline:
-1. Metering overhaul is landed and stable
-2. Gate is decoupled from stomp bypass
-3. Standalone/plugin preset context restore is fixed
-4. Plugin preset stomp NAM and cab IR restore is fixed
-5. Interactive Cab V1 is merged to `main`
-6. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
-7. Compressor stomp pedal v1 is merged to `main`
-8. Boost v2 with `A/B` model selection is merged to `main`
-9. Amp model variants v1 is merged to `main`
-10. Doubler improvements are merged to `main`
-11. Startup/default asset loading now uses `Amp1A/B ... Amp3A/B`, `BoostA/B`, and curated `57/121` stereo cabs
-12. Amp-face scaffolding and slot-specific amp UI updates are merged to `main`
-13. Tuner improvements and tuner UI polish are merged to `main`
-14. Branch `reduce-amp-switch-artifacts` contains:
-  - `e2fed53` `Reduce amp switching artifacts`
-  - `9d378e6` `Reduce IR switching artifacts`
-15. Settled artifact-tuning constants on that branch:
-  - `kAmpSlotSwitchDeClickSamples = 512`
-  - `kAmpModelVariantCrossfadeSamples = 512`
-  - `kPathToggleTransitionSamples = 512`
-  - `kAmpSlotTransitionSamples = 3072`
-  - `kOutputGainSmoothTimeSeconds = 0.02`
-  - `kIRTransitionSamples = 12288`
-
-Current working tree status:
-1. The tree should be clean
-2. Do not reopen tuner work unless the user explicitly asks
+1. `main` already includes the merged amp/IR switching artifact reduction work from `reduce-amp-switch-artifacts`
+2. External-facing rebrand to `RE-AMP` is landed
+3. Amp bypass routing/state handling fixes are landed
+4. Curated cab mic set now includes `S-57`, `R-121`, and `M-421`
+5. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, boost v2, amp variants v1, doubler improvements, startup/default asset refresh, and slot-specific amp UI work are already landed
+6. Do not reopen tuner work unless the user explicitly asks
+7. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
 
 Suggested next task unless the user redirects:
-1. First verify the current branch in `Release | x64` if that has not already been done locally
-2. If the user is happy with the behavior, prepare merge/cherry-pick of:
-  - `e2fed53`
-  - `9d378e6`
-3. Otherwise continue from this branch baseline; do not restart the old amp/IR click investigation from scratch
+1. Explore a custom tone stack for one amp slot
+2. Use the existing slot presentation / behavior / resolved-spec scaffolding instead of adding a parallel one-off path
+3. Keep the patch small and reviewable from the current stable `main` baseline
