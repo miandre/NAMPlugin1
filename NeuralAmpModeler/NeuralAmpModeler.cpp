@@ -288,10 +288,10 @@ constexpr float kAmpAuxButtonScale = 0.65f;
 constexpr float kAmp2DepthButtonCenterYOffset = -19.0f;
 constexpr float kAmp2ScoopButtonCenterYOffset = 17.0f;
 constexpr float kAmp2AuxButtonLabelYOffset = 6.0f;
-constexpr double kAmp3DepthSwitchOffValue = 1.0;
-constexpr double kAmp3DepthSwitchOnValue = 8.0;
-constexpr double kAmp3PresenceBaseValue = 5.0;
-constexpr double kAmp3BrightPresenceDelta = 7.0;
+constexpr double kAmp3DepthSwitchOffValue = 3.0;
+constexpr double kAmp3DepthSwitchOnValue = 6.0;
+constexpr double kAmp3PresenceBaseValue = 4.0;
+constexpr double kAmp3BrightPresenceDelta = 2.0;
 
 AmpFaceLayout GetAmpFaceLayout(const int slotIndex)
 {
@@ -3038,8 +3038,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool requestedAmpBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
   const bool requestedStompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
   const bool requestedCabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
-  const bool requestedAmpToneStackEnabled = GetParam(kEQActive)->Bool();
-  const bool requestedAmpModelEnabled = GetParam(kModelToggle)->Bool();
+  const bool requestedAmpModelEnabled = GetParam(kModelToggle)->Bool() && !requestedAmpBypassed;
+  const bool requestedAmpToneStackEnabled = GetParam(kEQActive)->Bool() && requestedAmpModelEnabled;
   const bool requestedStompCompressorEnabled = GetParam(kStompCompressorActive)->Bool();
   const bool requestedStompBoostEnabled = GetParam(kStompBoostActive)->Bool();
   if (mPathToggleTransitionState == kPathToggleTransitionStateFadeOut && mPathToggleTransitionSamplesRemaining <= 0)
@@ -3081,7 +3081,6 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     mPathToggleTransitionSamplesRemaining = kPathToggleTransitionSamples;
   }
 
-  const bool ampBypassed = mActiveAmpBypassed;
   const bool stompBypassed = mActiveStompBypassed;
   const bool cabBypassed = mActiveCabBypassed;
   for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
@@ -3125,10 +3124,12 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool boostEnabled = mActiveStompBoostEnabled && !stompBypassed
                             && ((numChannelsMonoCore == 1) ? (activeStompModel != nullptr) : haveStereoStomp);
   const double boostDriveTargetGain = DBToAmp(GetParam(kStompBoostDrive)->Value());
-  const bool toneStackActive = mActiveAmpToneStackEnabled && !ampBypassed;
-  const bool modelActive = mActiveAmpModelEnabled && !ampBypassed;
+  const bool modelActive = requestedAmpModelEnabled;
   const bool haveStereoModel = (mModel != nullptr) && (mModelRight != nullptr);
   const bool haveModelForCore = (numChannelsMonoCore == 1) ? (mModel != nullptr) : haveStereoModel;
+  const bool ampSectionActive = modelActive && haveModelForCore;
+  const bool toneStackActive = requestedAmpToneStackEnabled && ampSectionActive;
+  mOutputGain = _GetOutputGainForModel(ampSectionActive ? mModel.get() : nullptr);
   const bool tunerActive = GetParam(kTunerActive)->Bool();
   const int transposeSemitones = static_cast<int>(std::lround(GetParam(kTransposeSemitones)->Value()));
   const NoiseGateMacroParams gateMacro = GetNoiseGateMacroParams(GetParam(kNoiseGateThreshold)->Value());
@@ -3343,7 +3344,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       ? ((std::abs(mOutputGain) > 1.0e-9) ? (_GetOutputGainForModel(crossfadeTargetModel) / mOutputGain) : 1.0)
       : 1.0;
 
-  if (modelActive && haveModelForCore)
+  sample** ampOutPointers = modelInputPointers;
+  if (ampSectionActive)
   {
     if (preModelGain != 1.0)
     {
@@ -3479,21 +3481,16 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       mAmpModelCrossfadeSamplesRemaining = std::max(0, crossfadeRemaining);
     }
 
-    modelInputPointers = modelOutPointers;
+    ampOutPointers = modelOutPointers;
   }
-  else
-  {
-    _FallbackDSP(modelInputPointers, mOutputPointers, numChannelsMonoCore, numFrames);
-    modelInputPointers = mOutputPointers;
-  }
-  sample** toneStackOutPointers = (toneStackActive && activeToneStack != nullptr)
-                                    ? activeToneStack->Process(modelInputPointers, numChannelsMonoCore, nFrames)
-                                    : modelInputPointers;
-  if (!ampBypassed && mActiveAmpMasterGain != 1.0)
+  sample** postAmpPointers = (toneStackActive && activeToneStack != nullptr)
+                               ? activeToneStack->Process(ampOutPointers, numChannelsMonoCore, nFrames)
+                               : ampOutPointers;
+  if (ampSectionActive && mActiveAmpMasterGain != 1.0)
   {
     for (size_t c = 0; c < numChannelsMonoCore; ++c)
       for (size_t s = 0; s < numFrames; ++s)
-        toneStackOutPointers[c][s] *= mActiveAmpMasterGain;
+        postAmpPointers[c][s] *= mActiveAmpMasterGain;
   }
 
   auto copyMonoToStereo = [this, numFrames](sample** monoPointers) {
@@ -3507,11 +3504,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     }
   };
 
-  sample** irPointers = mOutputPointers;
-  if (numChannelsMonoCore == 1)
-    copyMonoToStereo(toneStackOutPointers);
-  else
-    irPointers = toneStackOutPointers;
+  sample** irPointers = nullptr;
   if (!cabBypassed)
   {
     const bool cabAEnabled = GetParam(kCabAEnabled)->Bool();
@@ -3559,12 +3552,19 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
     if (activeCabSlots > 0)
     {
-      sample* monoCabInput = toneStackOutPointers[0];
+      sample* monoCabInput = mInputArray[0].data();
       if (numChannelsMonoCore > 1)
       {
-        monoCabInput = mInputArray[0].data();
         for (size_t s = 0; s < numFrames; ++s)
-          monoCabInput[s] = static_cast<sample>(0.5 * (toneStackOutPointers[0][s] + toneStackOutPointers[1][s]));
+          monoCabInput[s] = static_cast<sample>(0.5 * (postAmpPointers[0][s] + postAmpPointers[1][s]));
+      }
+      else if (postAmpPointers[0] != nullptr && postAmpPointers[0] != monoCabInput)
+      {
+        std::copy_n(postAmpPointers[0], numFrames, monoCabInput);
+      }
+      else if (postAmpPointers[0] == nullptr)
+      {
+        std::fill_n(monoCabInput, numFrames, 0.0f);
       }
 
       std::fill_n(mOutputArray[0].data(), numFrames, 0.0f);
@@ -3634,6 +3634,18 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
           mixCabSlot(1, true);
       }
       irPointers = mOutputPointers;
+    }
+  }
+  if (irPointers == nullptr)
+  {
+    if (numChannelsMonoCore == 1)
+    {
+      copyMonoToStereo(postAmpPointers);
+      irPointers = mOutputPointers;
+    }
+    else
+    {
+      irPointers = postAmpPointers;
     }
   }
 
@@ -3993,8 +4005,8 @@ void NeuralAmpModeler::OnReset()
   mActiveAmpBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
   mActiveStompBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Stomp)];
   mActiveCabBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Cab)];
-  mActiveAmpToneStackEnabled = GetParam(kEQActive)->Bool();
-  mActiveAmpModelEnabled = GetParam(kModelToggle)->Bool();
+  mActiveAmpModelEnabled = GetParam(kModelToggle)->Bool() && !mActiveAmpBypassed;
+  mActiveAmpToneStackEnabled = GetParam(kEQActive)->Bool() && mActiveAmpModelEnabled;
   mActiveStompCompressorEnabled = GetParam(kStompCompressorActive)->Bool();
   mActiveStompBoostEnabled = GetParam(kStompBoostActive)->Bool();
   mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
@@ -5118,7 +5130,8 @@ void NeuralAmpModeler::OnParamChange(int paramIdx)
     case kInputLevel: _SetInputGain(); break;
     // Changes to the output gain
     case kOutputLevel:
-    case kOutputMode: _SetOutputGain(); break;
+    case kOutputMode:
+    case kModelToggle: _SetOutputGain(); break;
     case kMasterVolume: _SetMasterGain(); break;
     case kTunerActive: mTunerAnalyzer.Reset(); break;
     // Tone stack:
@@ -8586,7 +8599,9 @@ double NeuralAmpModeler::_GetOutputGainForModel(ResamplingNAM* model) const
 
 void NeuralAmpModeler::_SetOutputGain()
 {
-  mOutputGain = _GetOutputGainForModel(mModel.get());
+  const bool ampBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
+  const bool modelEnabled = GetParam(kModelToggle)->Bool();
+  mOutputGain = _GetOutputGainForModel((!ampBypassed && modelEnabled) ? mModel.get() : nullptr);
 }
 
 void NeuralAmpModeler::_SetMasterGain()
