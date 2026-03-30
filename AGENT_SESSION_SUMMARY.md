@@ -123,12 +123,13 @@ Already landed on `main`:
 
 ## Suggested next coding step
 1. Start the next feature as a focused custom tone stack task for one amp slot.
-2. First map the current tone-stack creation path and slot-specific amp scaffolding before changing DSP.
-3. Keep the patch narrow:
+2. First, discuss specs with user before coding. 
+3. Then, map the current tone-stack creation path and slot-specific amp scaffolding before changing DSP.
+4Keep the patch narrow:
   - add or adapt one tone-stack implementation
   - wire it through the existing slot behavior/spec flow
   - avoid broad UI or serialization churn unless the user asks
-4. Validate in `Release | x64` and listen specifically for control mapping, bypass behavior, and any new zipper/click artifacts.
+5. Validate in `Release | x64` and listen specifically for control mapping, bypass behavior, and any new zipper/click artifacts.
 
 ## Starter prompt for the next agent
 You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
