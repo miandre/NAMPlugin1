@@ -104,8 +104,8 @@ constexpr std::array<const char*, 6> kReleaseAmpAssetFileNames = {
 };
 constexpr std::array<const char*, 2> kReleaseStompAssetTokens = {"BoostA", "BoostB"};
 constexpr std::array<const char*, 2> kReleaseStompAssetFileNames = {"BoostA.nam", "BoostB.nam"};
-constexpr std::array<const char*, 2> kCuratedCabMicFolderNames = {"57", "121"};
-constexpr std::array<const char*, 3> kCabSourceLabels = {"Custom IR", "S-57", "R-121"};
+constexpr std::array<const char*, 3> kCuratedCabMicFolderNames = {"57", "121", "421"};
+constexpr std::array<const char*, 4> kCabSourceLabels = {"Custom IR", "S-57", "R-121", "M-421"};
 constexpr std::array<int, 5> kCuratedCabPositionAnchors = {0, 24, 49, 74, 99};
 constexpr int kDefaultCuratedCabSourceA = 1;
 constexpr int kDefaultCuratedCabSourceB = 2;
@@ -1145,12 +1145,12 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   constexpr int kDefaultCabSourceChoice = 0;
 #endif
   GetParam(kCabAEnabled)->InitBool("Cab A Enable", true);
-  GetParam(kCabASource)->InitEnum("Cab A Source", kDefaultCabSourceChoice, {"Custom IR", "57", "121"});
+  GetParam(kCabASource)->InitEnum("Cab A Source", kDefaultCabSourceChoice, {"Custom IR", "S-57", "R-121", "M-421"});
   GetParam(kCabAPosition)->InitDouble("Cab A Position", 0.0, 0.0, 99.0, 1.0, "");
   GetParam(kCabALevel)->InitGain("Cab A Level", 0.0, -24.0, 12.0, 0.1);
   GetParam(kCabAPan)->InitDouble("Cab A Pan", 0.0, -100.0, 100.0, 1.0, "");
   GetParam(kCabBEnabled)->InitBool("Cab B Enable", false);
-  GetParam(kCabBSource)->InitEnum("Cab B Source", kDefaultCabSourceChoice, {"Custom IR", "57", "121"});
+  GetParam(kCabBSource)->InitEnum("Cab B Source", kDefaultCabSourceChoice, {"Custom IR", "S-57", "R-121", "M-421"});
   GetParam(kCabBPosition)->InitDouble("Cab B Position", 0.0, 0.0, 99.0, 1.0, "");
   GetParam(kCabBLevel)->InitGain("Cab B Level", 0.0, -24.0, 12.0, 0.1);
   GetParam(kCabBPan)->InitDouble("Cab B Pan", 0.0, -100.0, 100.0, 1.0, "");
@@ -1252,6 +1252,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto fileBackgroundBitmap = pGraphics->LoadBitmap(FILEBACKGROUND_FN);
     const auto mic57Bitmap = pGraphics->LoadBitmap(MIC57_FN);
     const auto mic121Bitmap = pGraphics->LoadBitmap(MIC121_FN);
+    const auto mic421Bitmap = pGraphics->LoadBitmap(MIC421_FN);
     const auto inputLevelBackgroundBitmap = pGraphics->LoadBitmap(INPUTLEVELBACKGROUND_FN);
     const int ampKnobBitmapTargetScale = std::max(2, pGraphics->GetRoundedScreenScale());
     const std::array<IBitmap, 3> ampFaceKnobBitmaps = {
@@ -2356,7 +2357,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                  kCabASource,
                                  utilityStyle.WithShowLabel(false).WithShowValue(false),
                                  mic57Bitmap,
-                                 mic121Bitmap),
+                                 mic121Bitmap,
+                                 mic421Bitmap),
       -1,
       "CAB_A_CONTROLS");
     pGraphics->AttachControl(
@@ -2365,7 +2367,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                  kCabBSource,
                                  utilityStyle.WithShowLabel(false).WithShowValue(false),
                                  mic57Bitmap,
-                                 mic121Bitmap),
+                                 mic121Bitmap,
+                                 mic421Bitmap),
       -1,
       "CAB_B_CONTROLS");
     pGraphics->AttachControl(new NAMTopIconControl(footerAmpSlot1Area, ampPickerActiveSVG, ampPickerActiveSVG, ampPickerActiveSVG,

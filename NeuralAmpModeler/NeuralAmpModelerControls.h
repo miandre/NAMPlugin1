@@ -1637,12 +1637,13 @@ class NAMCabMicSliderControl : public IVSliderControl
 {
 public:
   NAMCabMicSliderControl(const IRECT& bounds, int positionParamIdx, int sourceParamIdx, const IVStyle& style,
-                         const IBitmap& mic57Bitmap, const IBitmap& mic121Bitmap)
+                         const IBitmap& mic57Bitmap, const IBitmap& mic121Bitmap, const IBitmap& mic421Bitmap)
   : IVSliderControl(bounds, positionParamIdx, "", style.WithShowLabel(false).WithShowValue(false), false,
                     EDirection::Horizontal, DEFAULT_GEARING, 6.0f, 3.0f, true)
   , mSourceParamIdx(sourceParamIdx)
   , mMic57Bitmap(mic57Bitmap)
   , mMic121Bitmap(mic121Bitmap)
+  , mMic421Bitmap(mic421Bitmap)
   {
   }
 
@@ -1653,6 +1654,8 @@ public:
       mMic57Bitmap = GetUI()->GetScaledBitmap(mMic57Bitmap);
     if (mMic121Bitmap.IsValid())
       mMic121Bitmap = GetUI()->GetScaledBitmap(mMic121Bitmap);
+    if (mMic421Bitmap.IsValid())
+      mMic421Bitmap = GetUI()->GetScaledBitmap(mMic421Bitmap);
   }
 
   void OnResize() override
@@ -1702,6 +1705,8 @@ private:
 
     switch (pSourceParam->Int())
     {
+      case 3:
+        return &mMic421Bitmap;
       case 2:
         return &mMic121Bitmap;
       case 1:
@@ -1713,6 +1718,7 @@ private:
   int mSourceParamIdx;
   IBitmap mMic57Bitmap;
   IBitmap mMic121Bitmap;
+  IBitmap mMic421Bitmap;
 };
 
 class NAMTunerMonitorControl : public IVTabSwitchControl
