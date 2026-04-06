@@ -404,6 +404,35 @@ double GetAmpSlotPreModelGainValue(const int slotIndex, const double storedPreMo
   return storedPreModelGain;
 }
 
+double Clamp01(const double value)
+{
+  return std::clamp(value, 0.0, 1.0);
+}
+
+double SmoothStep01(const double value)
+{
+  const double t = Clamp01(value);
+  return t * t * (3.0 - 2.0 * t);
+}
+
+double SmoothStep(const double start, const double end, const double value)
+{
+  if (end <= start)
+    return (value >= end) ? 1.0 : 0.0;
+
+  return SmoothStep01((value - start) / (end - start));
+}
+
+double Lerp(const double a, const double b, const double t)
+{
+  return a + (b - a) * t;
+}
+
+double GetStandardMasterGainDB(const double value)
+{
+  return (value <= 5.0) ? (-40.0 + (value / 5.0) * 40.0) : (((value - 5.0) / 5.0) * 12.0);
+}
+
 IRECT MakeAmpFaceSwitchControlArea(const IRECT& ampFaceArea,
                                    const AmpFaceLayout& layout,
                                    const IBitmap& switchBitmap)
@@ -3043,7 +3072,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   if (activeSlot == selectedSlot)
   {
     mActiveAmpPreModelGain = DBToAmp(GetAmpSlotPreModelGainValue(activeSlot, GetParam(kPreModelGain)->Value()));
-    mActiveAmpMasterGain = mMasterGain;
+    _UpdateActiveAmpMasterState(activeSlot);
   }
   auto* activeToneStack = mToneStacks[activeSlot].get();
   const bool requestedAmpBypassed = mTopNavBypassed[static_cast<size_t>(TopNavSection::Amp)];
@@ -3497,12 +3526,8 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   sample** postAmpPointers = (toneStackActive && activeToneStack != nullptr)
                                ? activeToneStack->Process(ampOutPointers, numChannelsMonoCore, nFrames)
                                : ampOutPointers;
-  if (ampSectionActive && mActiveAmpMasterGain != 1.0)
-  {
-    for (size_t c = 0; c < numChannelsMonoCore; ++c)
-      for (size_t s = 0; s < numFrames; ++s)
-        postAmpPointers[c][s] *= mActiveAmpMasterGain;
-  }
+  if (ampSectionActive)
+    _ProcessAmpMasterStage(postAmpPointers, numChannelsMonoCore, nFrames);
 
   auto copyMonoToStereo = [this, numFrames](sample** monoPointers) {
     if (monoPointers == nullptr || monoPointers[0] == nullptr)
@@ -4023,7 +4048,7 @@ void NeuralAmpModeler::OnReset()
   mActiveAmpPreModelGain = DBToAmp(
     GetAmpSlotPreModelGainValue(std::clamp(mCurrentModelSlot, 0, static_cast<int>(mAmpSlotStates.size()) - 1),
                                 GetParam(kPreModelGain)->Value()));
-  mActiveAmpMasterGain = mMasterGain;
+  _UpdateActiveAmpMasterState(mCurrentModelSlot);
   for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
   {
     mActiveCabSlotSourceChoice[static_cast<size_t>(slotIndex)] = GetParam(GetCabSlotSourceParamIdx(slotIndex))->Int();
@@ -7631,6 +7656,8 @@ NeuralAmpModeler::AmpSlotBehaviorSpec NeuralAmpModeler::_GetAmpSlotBehaviorSpec(
   const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotStates.size()) - 1);
   AmpSlotBehaviorSpec spec;
   spec.toneStackKind = (clampedSlot == kAmp2SlotIndex) ? ToneStackKind::Amp2 : ToneStackKind::BasicNam;
+  spec.masterBehaviorKind =
+    (clampedSlot == kAmp2SlotIndex) ? MasterBehaviorKind::Amp2Saturating : MasterBehaviorKind::Standard;
   spec.supportedControls.fill(false);
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::PreModelGain)] = true;
   spec.supportedControls[_GetAmpControlSpecIndex(AmpControlId::Bass)] = true;
@@ -7944,7 +7971,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mActiveAmpPreModelGain = DBToAmp(
       GetAmpSlotPreModelGainValue(std::clamp(mCurrentModelSlot, 0, static_cast<int>(mAmpSlotStates.size()) - 1),
                                   GetParam(kPreModelGain)->Value()));
-    mActiveAmpMasterGain = mMasterGain;
+    _UpdateActiveAmpMasterState(mCurrentModelSlot);
     updateActiveModelGainsAndLatency();
     return true;
   };
@@ -8297,7 +8324,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mActiveAmpPreModelGain = DBToAmp(
       GetAmpSlotPreModelGainValue(std::clamp(mCurrentModelSlot, 0, static_cast<int>(mAmpSlotStates.size()) - 1),
                                   GetParam(kPreModelGain)->Value()));
-    mActiveAmpMasterGain = mMasterGain;
+    _UpdateActiveAmpMasterState(mCurrentModelSlot);
     updateActiveModelGainsAndLatency();
   }
   if (mStagedStompModel != nullptr && (!inputStereoMode || mStagedStompModelRight != nullptr))
@@ -8625,8 +8652,89 @@ void NeuralAmpModeler::_SetOutputGain()
 void NeuralAmpModeler::_SetMasterGain()
 {
   const double value = GetParam(kMasterVolume)->Value();
-  const double masterGainDB = (value <= 5.0) ? (-40.0 + (value / 5.0) * 40.0) : (((value - 5.0) / 5.0) * 12.0);
+  const double masterGainDB = GetStandardMasterGainDB(value);
   mMasterGain = DBToAmp(masterGainDB);
+}
+
+void NeuralAmpModeler::_UpdateActiveAmpMasterState(const int slotIndex)
+{
+  const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotStates.size()) - 1);
+  const AmpSlotBehaviorSpec slotBehavior = _GetAmpSlotBehaviorSpec(clampedSlot);
+  const double masterValue = GetParam(kMasterVolume)->Value();
+  mActiveAmpMasterBehavior = slotBehavior.masterBehaviorKind;
+  mActiveAmpMasterSaturationDrive = 1.0;
+  mActiveAmpMasterSaturationMix = 0.0;
+  mActiveAmpMasterSaturationMakeupGain = 1.0;
+
+  switch (mActiveAmpMasterBehavior)
+  {
+    case MasterBehaviorKind::Amp2Saturating:
+    {
+      const double cleanGainDB =
+        (masterValue <= 5.0) ? GetStandardMasterGainDB(masterValue)
+                             : Lerp(0.0, 6.0, Clamp01((masterValue - 5.0) / 3.5));
+      const double saturationAmount = SmoothStep(6.5, 9.5, masterValue);
+      const double makeupGainDB = Lerp(0.0, 3.0, SmoothStep(7.5, 9.5, masterValue));
+      mActiveAmpMasterGain = DBToAmp(cleanGainDB);
+      mActiveAmpMasterSaturationDrive = Lerp(1.0, 6.0, saturationAmount);
+      mActiveAmpMasterSaturationMix = saturationAmount;
+      mActiveAmpMasterSaturationMakeupGain = DBToAmp(makeupGainDB);
+      break;
+    }
+    case MasterBehaviorKind::Standard:
+    default:
+      mActiveAmpMasterGain = mMasterGain;
+      break;
+  }
+}
+
+void NeuralAmpModeler::_ProcessAmpMasterStage(iplug::sample** inputs, const size_t numChannels, const size_t numFrames)
+{
+  if (inputs == nullptr)
+    return;
+
+  switch (mActiveAmpMasterBehavior)
+  {
+    case MasterBehaviorKind::Amp2Saturating:
+    {
+      const float wet = static_cast<float>(std::clamp(mActiveAmpMasterSaturationMix, 0.0, 1.0));
+      const float drive = static_cast<float>(std::max(1.0, mActiveAmpMasterSaturationDrive));
+      const float inverseDrive = 1.0f / drive;
+      const float outputGain =
+        static_cast<float>(mActiveAmpMasterGain * std::max(1.0, mActiveAmpMasterSaturationMakeupGain));
+      if (wet <= 0.0f && outputGain == 1.0f)
+        return;
+
+      // Amp 2 spends the last part of the master travel on compression/saturation instead of more level.
+      for (size_t c = 0; c < numChannels; ++c)
+      {
+        if (inputs[c] == nullptr)
+          continue;
+
+        for (size_t s = 0; s < numFrames; ++s)
+        {
+          const float dry = inputs[c][s];
+          const float shaped = nam::activations::fast_tanh(dry * drive) * inverseDrive;
+          inputs[c][s] = ((1.0f - wet) * dry + wet * shaped) * outputGain;
+        }
+      }
+      break;
+    }
+    case MasterBehaviorKind::Standard:
+    default:
+      if (mActiveAmpMasterGain == 1.0)
+        return;
+
+      for (size_t c = 0; c < numChannels; ++c)
+      {
+        if (inputs[c] == nullptr)
+          continue;
+
+        for (size_t s = 0; s < numFrames; ++s)
+          inputs[c][s] *= mActiveAmpMasterGain;
+      }
+      break;
+  }
 }
 
 void NeuralAmpModeler::_ResetBuiltInCompressor(const double sampleRate)

@@ -391,6 +391,12 @@ private:
     Amp2
   };
 
+  enum class MasterBehaviorKind : int
+  {
+    Standard = 0,
+    Amp2Saturating
+  };
+
   struct AmpSlotPresentationSpec
   {
     int layoutSlotIndex = 0;
@@ -422,6 +428,7 @@ private:
   struct AmpSlotBehaviorSpec
   {
     ToneStackKind toneStackKind = ToneStackKind::BasicNam;
+    MasterBehaviorKind masterBehaviorKind = MasterBehaviorKind::Standard;
     std::array<bool, kAmpControlCount> supportedControls = {};
   };
 
@@ -574,6 +581,8 @@ private:
   void _SetInputGain();
   void _SetOutputGain();
   void _SetMasterGain();
+  void _UpdateActiveAmpMasterState(int slotIndex);
+  void _ProcessAmpMasterStage(iplug::sample** inputs, size_t numChannels, size_t numFrames);
   void _ResetBuiltInCompressor(double sampleRate);
   void _ProcessBuiltInCompressor(iplug::sample** inputs, iplug::sample** outputs, size_t numChannels, size_t numFrames);
 
@@ -837,6 +846,10 @@ private:
   bool mActiveStompBoostEnabled = false;
   double mActiveAmpPreModelGain = 1.0;
   double mActiveAmpMasterGain = 1.0;
+  MasterBehaviorKind mActiveAmpMasterBehavior = MasterBehaviorKind::Standard;
+  double mActiveAmpMasterSaturationDrive = 1.0;
+  double mActiveAmpMasterSaturationMix = 0.0;
+  double mActiveAmpMasterSaturationMakeupGain = 1.0;
   std::array<int, 2> mActiveCabSlotSourceChoice = {};
   std::array<double, 2> mActiveCabSlotPosition = {};
   std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabPrimaryIR;
