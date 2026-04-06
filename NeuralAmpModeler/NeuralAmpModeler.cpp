@@ -396,6 +396,14 @@ double GetAmpSlotPresenceValue(const int slotIndex, const int variantIndex, cons
   return storedPresence;
 }
 
+double GetAmpSlotPreModelGainValue(const int slotIndex, const double storedPreModelGain)
+{
+  if (slotIndex == kAmp2SlotIndex)
+    return std::clamp(storedPreModelGain, -20.0, 10.0);
+
+  return storedPreModelGain;
+}
+
 IRECT MakeAmpFaceSwitchControlArea(const IRECT& ampFaceArea,
                                    const AmpFaceLayout& layout,
                                    const IBitmap& switchBitmap)
@@ -2642,15 +2650,15 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       -1,
       "FX_CONTROLS")
       ->SetTooltip("Delay DUCKER amount (0% = off)");
-    pGraphics->AttachControl(new NAMAmpBitmapKnobControl(preModelGainArea,
-                                                         kPreModelGain,
-                                                         "GAIN",
-                                                         ampKnobStyle,
-                                                         ampFaceKnobBitmaps,
-                                                         ampFaceKnobBackgroundBitmaps,
-                                                         mAmpSelectorIndex,
-                                                         ampFaceLayout.knobScale,
-                                                         ampFaceLayout.labelYOffset));
+    pGraphics->AttachControl(new NAMAmpBitmapPreGainControl(preModelGainArea,
+                                                            kPreModelGain,
+                                                            "GAIN",
+                                                            ampKnobStyle,
+                                                            ampFaceKnobBitmaps,
+                                                            ampFaceKnobBackgroundBitmaps,
+                                                            mAmpSelectorIndex,
+                                                            ampFaceLayout.knobScale,
+                                                            ampFaceLayout.labelYOffset));
     pGraphics->AttachControl(
       new NAMAmpBitmapKnobControl(
         bassKnobArea, kToneBass, "BASS", ampKnobStyle, ampFaceKnobBitmaps, ampFaceKnobBackgroundBitmaps, mAmpSelectorIndex,
@@ -3034,7 +3042,7 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const int activeSlot = std::clamp(mCurrentModelSlot, 0, static_cast<int>(mToneStacks.size()) - 1);
   if (activeSlot == selectedSlot)
   {
-    mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+    mActiveAmpPreModelGain = DBToAmp(GetAmpSlotPreModelGainValue(activeSlot, GetParam(kPreModelGain)->Value()));
     mActiveAmpMasterGain = mMasterGain;
   }
   auto* activeToneStack = mToneStacks[activeSlot].get();
@@ -4012,7 +4020,9 @@ void NeuralAmpModeler::OnReset()
   mActiveAmpToneStackEnabled = GetParam(kEQActive)->Bool() && mActiveAmpModelEnabled;
   mActiveStompCompressorEnabled = GetParam(kStompCompressorActive)->Bool();
   mActiveStompBoostEnabled = GetParam(kStompBoostActive)->Bool();
-  mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+  mActiveAmpPreModelGain = DBToAmp(
+    GetAmpSlotPreModelGainValue(std::clamp(mCurrentModelSlot, 0, static_cast<int>(mAmpSlotStates.size()) - 1),
+                                GetParam(kPreModelGain)->Value()));
   mActiveAmpMasterGain = mMasterGain;
   for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
   {
@@ -7521,7 +7531,7 @@ NeuralAmpModeler::AmpSlotState NeuralAmpModeler::_GetDefaultAmpSlotState(int slo
   state.modelToggle = GetParam(kModelToggle)->Bool() ? 1.0 : 0.0;
   state.modelToggleTouched = false;
   state.toneStackActive = GetParam(kEQActive)->Bool() ? 1.0 : 0.0;
-  state.preModelGain = GetParam(kPreModelGain)->Value();
+  state.preModelGain = GetAmpSlotPreModelGainValue(slotIndex, GetParam(kPreModelGain)->Value());
   state.bass = GetParam(kToneBass)->Value();
   state.mid = GetParam(kToneMid)->Value();
   state.treble = GetParam(kToneTreble)->Value();
@@ -7711,7 +7721,7 @@ void NeuralAmpModeler::_CaptureAmpSlotState(int slotIndex)
   auto& state = mAmpSlotStates[slotIndex];
   state.modelToggle = GetParam(kModelToggle)->Bool() ? 1.0 : 0.0;
   state.toneStackActive = GetParam(kEQActive)->Bool() ? 1.0 : 0.0;
-  state.preModelGain = GetParam(kPreModelGain)->Value();
+  state.preModelGain = GetAmpSlotPreModelGainValue(slotIndex, GetParam(kPreModelGain)->Value());
   state.bass = GetParam(kToneBass)->Value();
   state.mid = GetParam(kToneMid)->Value();
   state.treble = GetParam(kToneTreble)->Value();
@@ -7806,6 +7816,7 @@ void NeuralAmpModeler::_ApplyAmpSlotState(int slotIndex)
   mApplyingAmpSlotState = true;
   applyParam(kModelToggle, modelToggleValue);
   applyParam(kEQActive, state.toneStackActive);
+  state.preModelGain = GetAmpSlotPreModelGainValue(slotIndex, state.preModelGain);
   applyParam(kPreModelGain, state.preModelGain);
   applyParam(kToneBass, state.bass);
   applyParam(kToneMid, state.mid);
@@ -7930,7 +7941,9 @@ void NeuralAmpModeler::_ApplyDSPStaging()
 
     if (applyOutputDeClick)
       triggerOutputDeClick = true;
-    mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+    mActiveAmpPreModelGain = DBToAmp(
+      GetAmpSlotPreModelGainValue(std::clamp(mCurrentModelSlot, 0, static_cast<int>(mAmpSlotStates.size()) - 1),
+                                  GetParam(kPreModelGain)->Value()));
     mActiveAmpMasterGain = mMasterGain;
     updateActiveModelGainsAndLatency();
     return true;
@@ -8281,7 +8294,9 @@ void NeuralAmpModeler::_ApplyDSPStaging()
       .store(kAmpSlotModelStateReady, std::memory_order_relaxed);
     _SetAmpSlotCapabilityState(mCurrentModelSlot, mModel->HasLoudness(), mModel->HasOutputLevel());
     mNewModelLoadedInDSP = true;
-    mActiveAmpPreModelGain = DBToAmp(GetParam(kPreModelGain)->Value());
+    mActiveAmpPreModelGain = DBToAmp(
+      GetAmpSlotPreModelGainValue(std::clamp(mCurrentModelSlot, 0, static_cast<int>(mAmpSlotStates.size()) - 1),
+                                  GetParam(kPreModelGain)->Value()));
     mActiveAmpMasterGain = mMasterGain;
     updateActiveModelGainsAndLatency();
   }

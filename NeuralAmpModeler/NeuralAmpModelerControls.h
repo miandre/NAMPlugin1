@@ -915,7 +915,7 @@ public:
     _UpdateLabelText();
   }
 
-  void SetAmpStyle(int ampIndex)
+  virtual void SetAmpStyle(int ampIndex)
   {
     const int clampedIndex = std::clamp(ampIndex, 0, 2);
     if (mAmpIndex == clampedIndex)
@@ -986,6 +986,9 @@ public:
     g.PathTransformRestore();
   }
 
+protected:
+  int GetAmpStyleIndex() const { return mAmpIndex; }
+
 private:
   void _UpdateLabelText()
   {
@@ -1008,6 +1011,153 @@ private:
   float mKnobScale = 1.0f;
   float mLabelYOffset = 0.0f;
   float mValueYOffset = 0.0f;
+};
+
+class NAMAmpBitmapPreGainControl : public NAMAmpBitmapKnobControl
+{
+public:
+  NAMAmpBitmapPreGainControl(const IRECT& bounds,
+                             int paramIdx,
+                             const char* label,
+                             const IVStyle& style,
+                             const std::array<IBitmap, 3>& knobBitmaps,
+                             const std::array<IBitmap, 3>& backgroundBitmaps,
+                             int initialAmpIndex,
+                             float knobScale = 1.0f,
+                             float labelYOffset = 0.0f,
+                             float valueYOffset = 0.0f)
+  : NAMAmpBitmapKnobControl(
+      bounds, paramIdx, label, style, knobBitmaps, backgroundBitmaps, initialAmpIndex, knobScale, labelYOffset, valueYOffset)
+  {
+  }
+
+  void OnInit() override
+  {
+    NAMAmpBitmapKnobControl::OnInit();
+    _SyncControlValueToCurrentAmpCurve();
+  }
+
+  void SetAmpStyle(int ampIndex) override
+  {
+    NAMAmpBitmapKnobControl::SetAmpStyle(ampIndex);
+    _SyncControlValueToCurrentAmpCurve();
+  }
+
+  void SetValueFromDelegate(double value, int valIdx = 0) override
+  {
+    if (!_UsesAmp2Curve())
+    {
+      NAMAmpBitmapKnobControl::SetValueFromDelegate(value, valIdx);
+      return;
+    }
+
+    if (!GetUI()->ControlIsCaptured(this))
+    {
+      SetValue(_ParamNormalizedToControlNormalized(value, valIdx), valIdx);
+      IControl::SetDirty(false, valIdx);
+      _UpdateValueString(_ParamNormalizedToAmp2Value(value, valIdx));
+    }
+  }
+
+  void SetValueFromUserInput(double value, int valIdx = 0) override
+  {
+    if (!_UsesAmp2Curve())
+    {
+      NAMAmpBitmapKnobControl::SetValueFromUserInput(value, valIdx);
+      return;
+    }
+
+    SetValue(_ParamNormalizedToControlNormalized(value, valIdx), valIdx);
+    SetDirty(true, valIdx);
+  }
+
+  void SetDirty(bool push, int valIdx = kNoValIdx) override
+  {
+    if (!_UsesAmp2Curve())
+    {
+      NAMAmpBitmapKnobControl::SetDirty(push, valIdx);
+      return;
+    }
+
+    valIdx = (NVals() == 1) ? 0 : valIdx;
+    const double amp2Value = _ControlNormalizedToAmp2Value(GetValue(valIdx));
+
+    if (push && GetParamIdx(valIdx) > kNoParameter)
+      GetDelegate()->SendParameterValueFromUI(GetParamIdx(valIdx), _ControlNormalizedToParamNormalized(GetValue(valIdx), valIdx));
+
+    IControl::SetDirty(false, valIdx);
+    _UpdateValueString(amp2Value);
+  }
+
+private:
+  static constexpr double kAmp2PreGainMinDB = -20.0;
+  static constexpr double kAmp2PreGainMidDB = -5.0;
+  static constexpr double kAmp2PreGainMaxDB = 10.0;
+  static constexpr double kPreGainMidNorm = 0.5;
+
+  bool _UsesAmp2Curve() const
+  {
+    return GetAmpStyleIndex() == 1;
+  }
+
+  static double _ControlNormalizedToAmp2Value(const double normalizedValue)
+  {
+    const double n = std::clamp(normalizedValue, 0.0, 1.0);
+    if (n <= kPreGainMidNorm)
+    {
+      const double t = n / kPreGainMidNorm;
+      return kAmp2PreGainMinDB + t * (kAmp2PreGainMidDB - kAmp2PreGainMinDB);
+    }
+
+    const double t = (n - kPreGainMidNorm) / (1.0 - kPreGainMidNorm);
+    return kAmp2PreGainMidDB + t * (kAmp2PreGainMaxDB - kAmp2PreGainMidDB);
+  }
+
+  static double _Amp2ValueToControlNormalized(const double amp2Value)
+  {
+    const double v = std::clamp(amp2Value, kAmp2PreGainMinDB, kAmp2PreGainMaxDB);
+    if (v <= kAmp2PreGainMidDB)
+    {
+      const double denom = kAmp2PreGainMidDB - kAmp2PreGainMinDB;
+      const double t = (denom > 0.0) ? ((v - kAmp2PreGainMinDB) / denom) : 0.0;
+      return t * kPreGainMidNorm;
+    }
+
+    const double denom = kAmp2PreGainMaxDB - kAmp2PreGainMidDB;
+    const double t = (denom > 0.0) ? ((v - kAmp2PreGainMidDB) / denom) : 0.0;
+    return kPreGainMidNorm + t * (1.0 - kPreGainMidNorm);
+  }
+
+  double _ParamNormalizedToAmp2Value(const double normalizedValue, const int valIdx) const
+  {
+    if (const auto* pParam = GetParam(valIdx))
+      return std::clamp(pParam->FromNormalized(normalizedValue), kAmp2PreGainMinDB, kAmp2PreGainMaxDB);
+    return _ControlNormalizedToAmp2Value(normalizedValue);
+  }
+
+  double _ParamNormalizedToControlNormalized(const double normalizedValue, const int valIdx) const
+  {
+    return _Amp2ValueToControlNormalized(_ParamNormalizedToAmp2Value(normalizedValue, valIdx));
+  }
+
+  double _ControlNormalizedToParamNormalized(const double normalizedValue, const int valIdx) const
+  {
+    if (const auto* pParam = GetParam(valIdx))
+      return pParam->ToNormalized(_ControlNormalizedToAmp2Value(normalizedValue));
+    return normalizedValue;
+  }
+
+  void _UpdateValueString(const double amp2Value)
+  {
+    if (const auto* pParam = GetParam())
+      pParam->GetDisplay(amp2Value, false, mValueStr, true);
+  }
+
+  void _SyncControlValueToCurrentAmpCurve()
+  {
+    if (const auto* pParam = GetParam())
+      SetValueFromDelegate(pParam->GetNormalized());
+  }
 };
 
 class NAMDeactivatableKnobControl : public NAMKnobControl

@@ -78,6 +78,7 @@ public:
   void SetParam(const std::string name, const double val) override;
 
 private:
+  recursive_linear_filter::LowShelf mAmp2TrebleTiltComp;
   recursive_linear_filter::LowShelf mAmp2DepthBoost;
   recursive_linear_filter::Peaking mAmp2Scoop;
   recursive_linear_filter::Level mAmp2ScoopMakeup;
