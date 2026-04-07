@@ -12,6 +12,7 @@
 #define BUNDLE_MFR "RE-AMP"
 #define BUNDLE_DOMAIN "com"
 #define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
+#define NAM_DEV_DIAGNOSTICS 1 // Dev/test helper: set to 0 to hide the diagnostics stats overlay.
 // Amp workflow profile: 0 = Rig Mode (editable slot model pickers), 1 = Release Mode (slot model edits locked).
 #define NAM_RELEASE_MODE 0
 

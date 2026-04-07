@@ -1,4 +1,5 @@
 #include <algorithm> // std::clamp, std::min
+#include <chrono>
 #include <cctype>
 #include <cmath> // pow
 #include <cstdint>
@@ -7,7 +8,10 @@
 #include <filesystem>
 #include <functional>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <limits>
+#include <sstream>
 #include <utility>
 
 #include "Colors.h"
@@ -28,6 +32,10 @@
 #if defined(APP_API) && defined(OS_WIN)
 #include "resources/resource.h"
 #include <windows.h>
+#endif
+#if NAM_DEV_DIAGNOSTICS && defined(APP_API) && defined(_WIN32)
+#include <psapi.h>
+#pragma comment(lib, "Psapi.lib")
 #endif
 
 #if __has_include("third_party/rubberband/single/RubberBandSingle.cpp")
@@ -116,6 +124,12 @@ constexpr double kDefaultCuratedCabPanB = 0.0;
 constexpr const char* kEmbeddedCuratedCabIRPathPrefix = "embedded://curated/";
 constexpr float kAmpFaceKnobAreaWidth = 80.0f;
 constexpr int kCabSlotCount = 2;
+#if NAM_DEV_DIAGNOSTICS
+constexpr uint64_t kDevDiagnosticsUITextUpdateIntervalNs = 250000000ULL;
+#if defined(APP_API) && defined(_WIN32)
+constexpr uint64_t kDevDiagnosticsProcessPollIntervalNs = 250000000ULL;
+#endif
+#endif
 
 int GetCabSlotEnabledParamIdx(const int slotIndex)
 {
@@ -141,6 +155,24 @@ int GetCabSlotPanParamIdx(const int slotIndex)
 {
   return (slotIndex == 0) ? kCabAPan : kCabBPan;
 }
+
+#if NAM_DEV_DIAGNOSTICS
+uint64_t GetSteadyClockNowNs()
+{
+  return static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+#if defined(APP_API) && defined(_WIN32)
+uint64_t FileTimeToUInt64(const FILETIME& fileTime)
+{
+  ULARGE_INTEGER value;
+  value.LowPart = fileTime.dwLowDateTime;
+  value.HighPart = fileTime.dwHighDateTime;
+  return value.QuadPart;
+}
+#endif
+#endif
 
 int GetCabSlotFileBrowserCtrlTag(const int slotIndex)
 {
@@ -2082,6 +2114,15 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
         _ShowStandalonePresetMenu(pCaller->GetRECT());
       });
     pGraphics->AttachControl(new StandalonePresetNameEntryControl(), kCtrlTagStandalonePresetNameEntryProxy);
+#if NAM_DEV_DIAGNOSTICS
+    const auto devDiagnosticsArea =
+      IRECT(contentArea.L + 18.0f, bottomBarArea.T + 5.0f, footerAmpRowLeft + 190.0f, bottomBarArea.B - 4.0f);
+    const IText devDiagnosticsText(9.75f, COLOR_WHITE.WithOpacity(0.82f), "Roboto-Regular", EAlign::Near, EVAlign::Middle);
+    if (devDiagnosticsArea.W() > 80.0f)
+      pGraphics->AttachControl(
+                 new ITextControl(devDiagnosticsArea, "", devDiagnosticsText, COLOR_TRANSPARENT), kCtrlTagDevDiagnostics)
+        ->SetIgnoreMouse(true);
+#endif
     _UpdatePresetLabel();
     pGraphics->AttachControl(
       new IVButtonControl(cabASourceSelectorArea, SplashClickActionFunc, "Custom IR", cabSourcePickerStyle), kCtrlTagCabSourceSelectorA)
@@ -2921,6 +2962,15 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const size_t numChannelsExternalIn = (size_t)NInChansConnected();
   const size_t numChannelsExternalOut = (size_t)NOutChansConnected();
   const size_t numFrames = (size_t)nFrames;
+#if NAM_DEV_DIAGNOSTICS
+  const uint64_t devDiagnosticsStartNs = GetSteadyClockNowNs();
+  const auto publishDevDiagnosticsTiming = [this, devDiagnosticsStartNs, numFrames]() {
+    const uint64_t endNs = GetSteadyClockNowNs();
+    const double elapsedSeconds =
+      (endNs > devDiagnosticsStartNs) ? (static_cast<double>(endNs - devDiagnosticsStartNs) * 1.0e-9) : 0.0;
+    _PublishDevDiagnosticsDSPTiming(numFrames, elapsedSeconds);
+  };
+#endif
   const double sampleRate = GetSampleRate();
   const double hostTempoBPM = GetTempo();
   const bool hostTempoValid = std::isfinite(hostTempoBPM) && hostTempoBPM >= kDelayHostTempoMinBPM
@@ -3061,6 +3111,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
 
     std::feupdateenv(&fe_state);
     _UpdateMeters(inputs, outputs, numFrames, numChannelsExternalIn, numChannelsExternalOut);
+#if NAM_DEV_DIAGNOSTICS
+    publishDevDiagnosticsTiming();
+#endif
     return;
   }
   // Input enters the amp core as mono (standalone) or dual-mono (plugin stereo input).
@@ -3194,6 +3247,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       }
       std::feupdateenv(&fe_state);
       _UpdateMeters(nullptr, outputs, numFrames, 0, numChannelsExternalOut);
+#if NAM_DEV_DIAGNOSTICS
+      publishDevDiagnosticsTiming();
+#endif
       return;
     }
     if (tunerMonitorMode == 1)
@@ -3202,6 +3258,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       std::feupdateenv(&fe_state);
       _ProcessOutput(mInputPointers, outputs, numFrames, numChannelsMonoCore, numChannelsExternalOut);
       _UpdateMeters(nullptr, outputs, numFrames, 0, numChannelsExternalOut);
+#if NAM_DEV_DIAGNOSTICS
+      publishDevDiagnosticsTiming();
+#endif
       return;
     }
     // tunerMonitorMode == 2 -> fall through to full processing path.
@@ -3816,6 +3875,9 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   // * Output of input leveling (inputs -> mInputPointers),
   // * Output of output leveling (mOutputPointers -> outputs)
   _UpdateMeters(nullptr, outputs, numFrames, 0, numChannelsExternalOut);
+#if NAM_DEV_DIAGNOSTICS
+  publishDevDiagnosticsTiming();
+#endif
 }
 
 void NeuralAmpModeler::OnReset()
@@ -4210,6 +4272,9 @@ void NeuralAmpModeler::OnIdle()
 {
   _ApplyInputStereoAutoDefaultIfNeeded();
   _RefreshModelCapabilityIndicators();
+#if NAM_DEV_DIAGNOSTICS
+  _RefreshDevDiagnostics();
+#endif
 
   if (auto* pGraphics = GetUI())
   {
@@ -8736,6 +8801,152 @@ void NeuralAmpModeler::_ProcessAmpMasterStage(iplug::sample** inputs, const size
       break;
   }
 }
+
+#if NAM_DEV_DIAGNOSTICS
+void NeuralAmpModeler::_PublishDevDiagnosticsDSPTiming(const size_t numFrames, const double elapsedSeconds)
+{
+  if (numFrames == 0)
+    return;
+
+  const double elapsedNs = std::max(0.0, elapsedSeconds) * 1.0e9;
+  constexpr double kDSPAverageAlpha = 0.10;
+  constexpr double kDSPPeakHoldDecay = 0.995;
+
+  if (mDevDiagnosticsAverageBlockDurationNsWriter <= 0.0)
+    mDevDiagnosticsAverageBlockDurationNsWriter = elapsedNs;
+  else
+    mDevDiagnosticsAverageBlockDurationNsWriter =
+      ((1.0 - kDSPAverageAlpha) * mDevDiagnosticsAverageBlockDurationNsWriter) + (kDSPAverageAlpha * elapsedNs);
+
+  mDevDiagnosticsPeakBlockDurationNsWriter =
+    std::max(elapsedNs, mDevDiagnosticsPeakBlockDurationNsWriter * kDSPPeakHoldDecay);
+
+  mDevDiagnosticsLastBlockDurationNs.store(static_cast<uint64_t>(std::llround(elapsedNs)), std::memory_order_relaxed);
+  mDevDiagnosticsAverageBlockDurationNs.store(
+    static_cast<uint64_t>(std::llround(mDevDiagnosticsAverageBlockDurationNsWriter)), std::memory_order_relaxed);
+  mDevDiagnosticsPeakBlockDurationNs.store(
+    static_cast<uint64_t>(std::llround(mDevDiagnosticsPeakBlockDurationNsWriter)), std::memory_order_relaxed);
+  mDevDiagnosticsLastBlockFrames.store(
+    static_cast<uint32_t>(std::min<size_t>(numFrames, static_cast<size_t>(std::numeric_limits<uint32_t>::max()))),
+    std::memory_order_relaxed);
+}
+
+void NeuralAmpModeler::_RefreshDevDiagnostics()
+{
+  auto* pGraphics = GetUI();
+  if (pGraphics == nullptr)
+    return;
+
+  auto* pText = dynamic_cast<ITextControl*>(pGraphics->GetControlWithTag(kCtrlTagDevDiagnostics));
+  if (pText == nullptr)
+    return;
+
+  const uint64_t nowNs = GetSteadyClockNowNs();
+  if (mDevDiagnosticsLastUITextUpdateNs != 0
+      && (nowNs - mDevDiagnosticsLastUITextUpdateNs) < kDevDiagnosticsUITextUpdateIntervalNs)
+    return;
+
+  mDevDiagnosticsLastUITextUpdateNs = nowNs;
+
+  const double sampleRate = std::max(1.0, GetSampleRate());
+  const uint32_t lastBlockFrames = std::max<uint32_t>(1u, mDevDiagnosticsLastBlockFrames.load(std::memory_order_relaxed));
+  const double blockBudgetMs = (1000.0 * static_cast<double>(lastBlockFrames)) / sampleRate;
+  const double dspLatencySamples = static_cast<double>(GetLatency());
+  const double dspLatencyMs = (1000.0 * dspLatencySamples) / sampleRate;
+  const double bufferLatencyMs = (1000.0 * static_cast<double>(lastBlockFrames)) / sampleRate;
+  const double roundTripBufferLatencyMs = 2.0 * bufferLatencyMs;
+  const double dspAverageMs =
+    static_cast<double>(mDevDiagnosticsAverageBlockDurationNs.load(std::memory_order_relaxed)) * 1.0e-6;
+  const double dspPeakMs = static_cast<double>(mDevDiagnosticsPeakBlockDurationNs.load(std::memory_order_relaxed)) * 1.0e-6;
+  const double dspAveragePercent = (blockBudgetMs > 0.0) ? (100.0 * dspAverageMs / blockBudgetMs) : 0.0;
+  const double dspPeakPercent = (blockBudgetMs > 0.0) ? (100.0 * dspPeakMs / blockBudgetMs) : 0.0;
+
+#if defined(APP_API) && defined(_WIN32)
+  if (mDevDiagnosticsLastProcessPollNs == 0
+      || (nowNs - mDevDiagnosticsLastProcessPollNs) >= kDevDiagnosticsProcessPollIntervalNs)
+  {
+    PROCESS_MEMORY_COUNTERS_EX memoryCounters = {};
+    if (GetProcessMemoryInfo(GetCurrentProcess(),
+                             reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memoryCounters),
+                             sizeof(memoryCounters)))
+    {
+      mDevDiagnosticsWorkingSetMB = static_cast<double>(memoryCounters.WorkingSetSize) / (1024.0 * 1024.0);
+      mDevDiagnosticsPrivateMB = static_cast<double>(memoryCounters.PrivateUsage) / (1024.0 * 1024.0);
+    }
+
+    FILETIME creationTime = {};
+    FILETIME exitTime = {};
+    FILETIME kernelTime = {};
+    FILETIME userTime = {};
+    if (GetProcessTimes(GetCurrentProcess(), &creationTime, &exitTime, &kernelTime, &userTime))
+    {
+      const uint64_t processCpuTime100Ns = FileTimeToUInt64(kernelTime) + FileTimeToUInt64(userTime);
+      if (mDevDiagnosticsLastProcessPollNs != 0 && mDevDiagnosticsLastProcessCpuTime100Ns != 0)
+      {
+        const double wallSeconds = static_cast<double>(nowNs - mDevDiagnosticsLastProcessPollNs) * 1.0e-9;
+        const double cpuSeconds =
+          static_cast<double>(processCpuTime100Ns - mDevDiagnosticsLastProcessCpuTime100Ns) * 1.0e-7;
+        const double cpuCoreCount = static_cast<double>(std::max(1u, std::thread::hardware_concurrency()));
+        if (wallSeconds > 0.0 && cpuCoreCount > 0.0)
+        {
+          mDevDiagnosticsProcessCpuPercent = std::max(0.0, (100.0 * cpuSeconds) / (wallSeconds * cpuCoreCount));
+          mDevDiagnosticsProcessCpuWindow[mDevDiagnosticsProcessCpuWindowWriteIndex] = mDevDiagnosticsProcessCpuPercent;
+          mDevDiagnosticsProcessCpuWindowWriteIndex =
+            (mDevDiagnosticsProcessCpuWindowWriteIndex + 1) % mDevDiagnosticsProcessCpuWindow.size();
+          mDevDiagnosticsProcessCpuWindowValidCount =
+            std::min(mDevDiagnosticsProcessCpuWindowValidCount + 1, mDevDiagnosticsProcessCpuWindow.size());
+
+          double cpuSum = 0.0;
+          double cpuPeak = 0.0;
+          for (size_t i = 0; i < mDevDiagnosticsProcessCpuWindowValidCount; ++i)
+          {
+            const double sample = mDevDiagnosticsProcessCpuWindow[i];
+            cpuSum += sample;
+            cpuPeak = std::max(cpuPeak, sample);
+          }
+          if (mDevDiagnosticsProcessCpuWindowValidCount > 0)
+          {
+            mDevDiagnosticsProcessCpuAveragePercent = cpuSum / static_cast<double>(mDevDiagnosticsProcessCpuWindowValidCount);
+            mDevDiagnosticsProcessCpuPeakPercent = cpuPeak;
+          }
+          else
+          {
+            mDevDiagnosticsProcessCpuAveragePercent = mDevDiagnosticsProcessCpuPercent;
+            mDevDiagnosticsProcessCpuPeakPercent = mDevDiagnosticsProcessCpuPercent;
+          }
+        }
+      }
+      mDevDiagnosticsLastProcessCpuTime100Ns = processCpuTime100Ns;
+    }
+
+    mDevDiagnosticsLastProcessPollNs = nowNs;
+  }
+#endif
+
+  std::ostringstream diagnosticsText;
+  diagnosticsText << std::fixed << std::setprecision(1);
+  diagnosticsText << "DEV  SR " << sampleRate << "  Blk " << lastBlockFrames << "  Buf " << bufferLatencyMs << "/"
+                  << roundTripBufferLatencyMs << " ms  DSP " << dspLatencySamples << " smp/" << dspLatencyMs << " ms";
+  diagnosticsText << "\nLoad " << dspAverageMs << "/" << dspPeakMs << " ms  " << dspAveragePercent << "/"
+                  << dspPeakPercent << "%";
+#if defined(APP_API) && defined(_WIN32)
+  diagnosticsText << "  CPU c/a/p " << mDevDiagnosticsProcessCpuPercent << "/" << mDevDiagnosticsProcessCpuAveragePercent
+                  << "/" << mDevDiagnosticsProcessCpuPeakPercent << "%";
+  diagnosticsText << "  RAM " << mDevDiagnosticsWorkingSetMB << "/" << mDevDiagnosticsPrivateMB << " MB";
+#else
+  diagnosticsText << "  DSPLat " << dspLatencyMs << " ms";
+#endif
+
+  const std::string text = diagnosticsText.str();
+  const char* previousText = mLastDevDiagnosticsText.Get();
+  if (previousText == nullptr || std::strcmp(previousText, text.c_str()) != 0)
+  {
+    pText->SetStr(text.c_str());
+    mLastDevDiagnosticsText.Set(text.c_str());
+    pText->SetDirty(false);
+  }
+}
+#endif
 
 void NeuralAmpModeler::_ResetBuiltInCompressor(const double sampleRate)
 {

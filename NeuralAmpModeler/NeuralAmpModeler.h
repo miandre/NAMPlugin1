@@ -207,6 +207,7 @@ enum ECtrlTags
   kCtrlTagCabHeaderB,
   kCtrlTagCabMicLabelA,
   kCtrlTagCabMicLabelB,
+  kCtrlTagDevDiagnostics,
   kNumCtrlTags
 };
 
@@ -583,6 +584,10 @@ private:
   void _SetMasterGain();
   void _UpdateActiveAmpMasterState(int slotIndex);
   void _ProcessAmpMasterStage(iplug::sample** inputs, size_t numChannels, size_t numFrames);
+#if NAM_DEV_DIAGNOSTICS
+  void _PublishDevDiagnosticsDSPTiming(size_t numFrames, double elapsedSeconds);
+  void _RefreshDevDiagnostics();
+#endif
   void _ResetBuiltInCompressor(double sampleRate);
   void _ProcessBuiltInCompressor(iplug::sample** inputs, iplug::sample** outputs, size_t numChannels, size_t numFrames);
 
@@ -852,6 +857,29 @@ private:
   double mActiveAmpMasterSaturationMakeupGain = 1.0;
   std::array<int, 2> mActiveCabSlotSourceChoice = {};
   std::array<double, 2> mActiveCabSlotPosition = {};
+#if NAM_DEV_DIAGNOSTICS
+  std::atomic<uint64_t> mDevDiagnosticsLastBlockDurationNs{0};
+  std::atomic<uint64_t> mDevDiagnosticsAverageBlockDurationNs{0};
+  std::atomic<uint64_t> mDevDiagnosticsPeakBlockDurationNs{0};
+  std::atomic<uint32_t> mDevDiagnosticsLastBlockFrames{0};
+  double mDevDiagnosticsAverageBlockDurationNsWriter = 0.0;
+  double mDevDiagnosticsPeakBlockDurationNsWriter = 0.0;
+  WDL_String mLastDevDiagnosticsText;
+  uint64_t mDevDiagnosticsLastUITextUpdateNs = 0;
+#if defined(APP_API) && defined(_WIN32)
+  static constexpr size_t kDevDiagnosticsCPUWindowSampleCount = 40; // 10 seconds at 250 ms polling.
+  uint64_t mDevDiagnosticsLastProcessPollNs = 0;
+  uint64_t mDevDiagnosticsLastProcessCpuTime100Ns = 0;
+  double mDevDiagnosticsProcessCpuPercent = 0.0;
+  double mDevDiagnosticsProcessCpuAveragePercent = 0.0;
+  double mDevDiagnosticsProcessCpuPeakPercent = 0.0;
+  double mDevDiagnosticsWorkingSetMB = 0.0;
+  double mDevDiagnosticsPrivateMB = 0.0;
+  std::array<double, kDevDiagnosticsCPUWindowSampleCount> mDevDiagnosticsProcessCpuWindow = {};
+  size_t mDevDiagnosticsProcessCpuWindowWriteIndex = 0;
+  size_t mDevDiagnosticsProcessCpuWindowValidCount = 0;
+#endif
+#endif
   std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabPrimaryIR;
   std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabSecondaryIR;
   std::array<int, 2> mPreviousCabSlotSourceChoice = {};
