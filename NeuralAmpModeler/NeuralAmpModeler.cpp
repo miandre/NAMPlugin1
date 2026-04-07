@@ -3617,16 +3617,21 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
       std::copy_n(irOutPointers[0], numFrames, output);
       return true;
     };
-    auto processCabSlot = [&](const int slotIndex, const int sourceChoice, const double position,
-                              dsp::ImpulseResponse* primaryIR, dsp::ImpulseResponse* secondaryIR, sample* monoInput,
-                              sample* slotOutput) {
-      if (slotOutput == nullptr)
+    auto processCabChannel = [&](const int slotIndex, const int sourceChoice, const double position,
+                                 dsp::ImpulseResponse* primaryIR, dsp::ImpulseResponse* secondaryIR, sample* channelInput,
+                                 sample* channelOutput) {
+      if (channelOutput == nullptr)
         return;
+      if (channelInput == nullptr)
+      {
+        std::fill_n(channelOutput, numFrames, 0.0f);
+        return;
+      }
 
       if (sourceChoice > 0 && primaryIR != nullptr && secondaryIR != nullptr)
       {
         const CuratedCabSegment segment = GetCuratedCabSegment(GetCabSlotCuratedPosition(slotIndex, position));
-        sample* primaryInput = monoInput;
+        sample* primaryInput = channelInput;
         sample** primaryPtrs = primaryIR->Process(&primaryInput, 1, numFrames);
         sample** secondaryPtrs = secondaryIR->Process(&primaryInput, 1, numFrames);
         if (primaryPtrs != nullptr && primaryPtrs[0] != nullptr && secondaryPtrs != nullptr && secondaryPtrs[0] != nullptr)
@@ -3634,86 +3639,155 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
           const double primaryGain = 1.0 - segment.blend;
           const double secondaryGain = segment.blend;
           for (size_t s = 0; s < numFrames; ++s)
-            slotOutput[s] = static_cast<sample>(primaryGain * primaryPtrs[0][s] + secondaryGain * secondaryPtrs[0][s]);
+            channelOutput[s] = static_cast<sample>(primaryGain * primaryPtrs[0][s] + secondaryGain * secondaryPtrs[0][s]);
           return;
         }
       }
 
-      if (primaryIR != nullptr && processMonoIR(primaryIR, monoInput, slotOutput))
+      if (primaryIR != nullptr && processMonoIR(primaryIR, channelInput, channelOutput))
         return;
 
-      std::copy_n(monoInput, numFrames, slotOutput);
+      std::copy_n(channelInput, numFrames, channelOutput);
+    };
+    auto blendCabCrossfade = [numFrames](sample* currentOutput, const sample* previousOutput, const int crossfadeStart) {
+      if (currentOutput == nullptr || previousOutput == nullptr)
+        return;
+
+      int crossfadeRemaining = crossfadeStart;
+      for (size_t s = 0; s < numFrames; ++s)
+      {
+        const double progress =
+          (crossfadeRemaining > 0)
+            ? (1.0 - static_cast<double>(crossfadeRemaining) / static_cast<double>(kIRTransitionSamples))
+            : 1.0;
+        currentOutput[s] = static_cast<sample>(
+          (1.0 - progress) * static_cast<double>(previousOutput[s]) + progress * static_cast<double>(currentOutput[s]));
+        if (crossfadeRemaining > 0)
+          --crossfadeRemaining;
+      }
     };
 
     if (activeCabSlots > 0)
     {
-      sample* monoCabInput = mInputArray[0].data();
-      if (numChannelsMonoCore > 1)
+      sample* monoCabInput = nullptr;
+      if (numChannelsMonoCore == 1)
       {
-        for (size_t s = 0; s < numFrames; ++s)
-          monoCabInput[s] = static_cast<sample>(0.5 * (postAmpPointers[0][s] + postAmpPointers[1][s]));
-      }
-      else if (postAmpPointers[0] != nullptr && postAmpPointers[0] != monoCabInput)
-      {
-        std::copy_n(postAmpPointers[0], numFrames, monoCabInput);
-      }
-      else if (postAmpPointers[0] == nullptr)
-      {
-        std::fill_n(monoCabInput, numFrames, 0.0f);
+        monoCabInput = mInputArray[0].data();
+        if (postAmpPointers[0] != nullptr && postAmpPointers[0] != monoCabInput)
+        {
+          std::copy_n(postAmpPointers[0], numFrames, monoCabInput);
+        }
+        else if (postAmpPointers[0] == nullptr)
+        {
+          std::fill_n(monoCabInput, numFrames, 0.0f);
+        }
       }
 
       std::fill_n(mOutputArray[0].data(), numFrames, 0.0f);
       std::fill_n(mOutputArray[1].data(), numFrames, 0.0f);
 
       auto mixCabSlot = [&](const int slotIndex, const bool stereoMix) {
-        sample* slotOutput = mInputArray[1].data();
         const size_t slotArrayIndex = static_cast<size_t>(slotIndex);
         const int sourceChoice = mActiveCabSlotSourceChoice[slotArrayIndex];
         const double position = mActiveCabSlotPosition[slotArrayIndex];
+        const double levelGain = DBToAmp(GetParam(GetCabSlotLevelParamIdx(slotIndex))->Value());
+        const int slotCrossfadeStart = mCabSlotIRCrossfadeSamplesRemaining[slotArrayIndex];
         dsp::ImpulseResponse* primaryIR = (slotIndex == 0) ? mIR.get() : mCabBIR.get();
         dsp::ImpulseResponse* secondaryIR = (slotIndex == 0) ? mIRRight.get() : mCabBIRSecondary.get();
-        processCabSlot(slotIndex, sourceChoice, position, primaryIR, secondaryIR, monoCabInput, slotOutput);
 
-        int slotCrossfadeRemaining = mCabSlotIRCrossfadeSamplesRemaining[slotArrayIndex];
-        if (slotCrossfadeRemaining > 0)
+        if (numChannelsMonoCore == 1)
         {
-          sample* previousSlotOutput = mCabIRCrossfadeBuffer.data();
-          processCabSlot(slotIndex, mPreviousCabSlotSourceChoice[slotArrayIndex], mPreviousCabSlotPosition[slotArrayIndex],
-                         mPreviousCabPrimaryIR[slotArrayIndex].get(), mPreviousCabSecondaryIR[slotArrayIndex].get(),
-                         monoCabInput, previousSlotOutput);
-          for (size_t s = 0; s < numFrames; ++s)
+          sample* slotOutput = mCabSlotBuffer[0].data();
+          processCabChannel(slotIndex, sourceChoice, position, primaryIR, secondaryIR, monoCabInput, slotOutput);
+          if (slotCrossfadeStart > 0)
           {
-            const double progress =
-              1.0 - static_cast<double>(slotCrossfadeRemaining) / static_cast<double>(kIRTransitionSamples);
-            slotOutput[s] = static_cast<sample>(
-              (1.0 - progress) * static_cast<double>(previousSlotOutput[s]) + progress * static_cast<double>(slotOutput[s]));
-            if (slotCrossfadeRemaining > 0)
-              --slotCrossfadeRemaining;
+            sample* previousSlotOutput = mCabIRCrossfadeBuffer.data();
+            processCabChannel(slotIndex,
+                              mPreviousCabSlotSourceChoice[slotArrayIndex],
+                              mPreviousCabSlotPosition[slotArrayIndex],
+                              mPreviousCabPrimaryIR[slotArrayIndex].get(),
+                              mPreviousCabSecondaryIR[slotArrayIndex].get(),
+                              monoCabInput,
+                              previousSlotOutput);
+            blendCabCrossfade(slotOutput, previousSlotOutput, slotCrossfadeStart);
+            mCabSlotIRCrossfadeSamplesRemaining[slotArrayIndex] =
+              std::max(0, slotCrossfadeStart - static_cast<int>(numFrames));
           }
-          mCabSlotIRCrossfadeSamplesRemaining[slotArrayIndex] = std::max(0, slotCrossfadeRemaining);
-        }
 
-        if (!stereoMix)
-        {
-          const double levelGain = DBToAmp(GetParam(GetCabSlotLevelParamIdx(slotIndex))->Value());
+          if (!stereoMix)
+          {
+            for (size_t s = 0; s < numFrames; ++s)
+            {
+              const sample value = static_cast<sample>(static_cast<double>(slotOutput[s]) * levelGain);
+              mOutputArray[0][s] = value;
+              mOutputArray[1][s] = value;
+            }
+            return;
+          }
+
+          const double panNormalized =
+            std::clamp((GetParam(GetCabSlotPanParamIdx(slotIndex))->Value() + 100.0) * 0.005, 0.0, 1.0);
+          const double leftGain = (1.0 - panNormalized) * levelGain;
+          const double rightGain = panNormalized * levelGain;
           for (size_t s = 0; s < numFrames; ++s)
           {
-            const sample value = static_cast<sample>(static_cast<double>(slotOutput[s]) * levelGain);
-            mOutputArray[0][s] = value;
-            mOutputArray[1][s] = value;
+            const double value = static_cast<double>(slotOutput[s]);
+            mOutputArray[0][s] += static_cast<sample>(value * leftGain);
+            mOutputArray[1][s] += static_cast<sample>(value * rightGain);
           }
           return;
         }
 
-        const double levelGain = DBToAmp(GetParam(GetCabSlotLevelParamIdx(slotIndex))->Value());
-        const double panNormalized = std::clamp((GetParam(GetCabSlotPanParamIdx(slotIndex))->Value() + 100.0) * 0.005, 0.0, 1.0);
+        sample* slotOutputLeft = mCabSlotBuffer[0].data();
+        sample* slotOutputRight = mCabSlotBuffer[1].data();
+        dsp::ImpulseResponse* primaryIRChannel2 = (slotIndex == 0) ? mIRChannel2.get() : mCabBIRChannel2.get();
+        dsp::ImpulseResponse* secondaryIRChannel2 = (slotIndex == 0) ? mIRRightChannel2.get() : mCabBIRSecondaryChannel2.get();
+        processCabChannel(slotIndex, sourceChoice, position, primaryIR, secondaryIR, postAmpPointers[0], slotOutputLeft);
+        processCabChannel(
+          slotIndex, sourceChoice, position, primaryIRChannel2, secondaryIRChannel2, postAmpPointers[1], slotOutputRight);
+
+        if (slotCrossfadeStart > 0)
+        {
+          sample* previousSlotOutput = mCabIRCrossfadeBuffer.data();
+          processCabChannel(slotIndex,
+                            mPreviousCabSlotSourceChoice[slotArrayIndex],
+                            mPreviousCabSlotPosition[slotArrayIndex],
+                            mPreviousCabPrimaryIR[slotArrayIndex].get(),
+                            mPreviousCabSecondaryIR[slotArrayIndex].get(),
+                            postAmpPointers[0],
+                            previousSlotOutput);
+          blendCabCrossfade(slotOutputLeft, previousSlotOutput, slotCrossfadeStart);
+          processCabChannel(slotIndex,
+                            mPreviousCabSlotSourceChoice[slotArrayIndex],
+                            mPreviousCabSlotPosition[slotArrayIndex],
+                            mPreviousCabPrimaryIRChannel2[slotArrayIndex].get(),
+                            mPreviousCabSecondaryIRChannel2[slotArrayIndex].get(),
+                            postAmpPointers[1],
+                            previousSlotOutput);
+          blendCabCrossfade(slotOutputRight, previousSlotOutput, slotCrossfadeStart);
+          mCabSlotIRCrossfadeSamplesRemaining[slotArrayIndex] =
+            std::max(0, slotCrossfadeStart - static_cast<int>(numFrames));
+        }
+
+        if (!stereoMix)
+        {
+          for (size_t s = 0; s < numFrames; ++s)
+          {
+            mOutputArray[0][s] = static_cast<sample>(static_cast<double>(slotOutputLeft[s]) * levelGain);
+            mOutputArray[1][s] = static_cast<sample>(static_cast<double>(slotOutputRight[s]) * levelGain);
+          }
+          return;
+        }
+
+        // In stereo-core mode each cab slot keeps independent L/R IR history; pan remains a balance on the stereo slot.
+        const double panNormalized =
+          std::clamp((GetParam(GetCabSlotPanParamIdx(slotIndex))->Value() + 100.0) * 0.005, 0.0, 1.0);
         const double leftGain = (1.0 - panNormalized) * levelGain;
         const double rightGain = panNormalized * levelGain;
         for (size_t s = 0; s < numFrames; ++s)
         {
-          const double value = static_cast<double>(slotOutput[s]);
-          mOutputArray[0][s] += static_cast<sample>(value * leftGain);
-          mOutputArray[1][s] += static_cast<sample>(value * rightGain);
+          mOutputArray[0][s] += static_cast<sample>(static_cast<double>(slotOutputLeft[s]) * leftGain);
+          mOutputArray[1][s] += static_cast<sample>(static_cast<double>(slotOutputRight[s]) * rightGain);
         }
       };
 
@@ -4119,7 +4193,9 @@ void NeuralAmpModeler::OnReset()
     mPreviousCabSlotPosition[static_cast<size_t>(slotIndex)] = mActiveCabSlotPosition[static_cast<size_t>(slotIndex)];
     mCabSlotIRCrossfadeSamplesRemaining[static_cast<size_t>(slotIndex)] = 0;
     mPreviousCabPrimaryIR[static_cast<size_t>(slotIndex)] = nullptr;
+    mPreviousCabPrimaryIRChannel2[static_cast<size_t>(slotIndex)] = nullptr;
     mPreviousCabSecondaryIR[static_cast<size_t>(slotIndex)] = nullptr;
+    mPreviousCabSecondaryIRChannel2[static_cast<size_t>(slotIndex)] = nullptr;
   }
   mAmpModelCrossfadeTargetSelection = -1;
   mAmpModelCrossfadeSamplesRemaining = 0;
@@ -8114,7 +8190,9 @@ void NeuralAmpModeler::_ApplyDSPStaging()
   auto clearPreviousCabSlotIR = [this](const int slotIndex) {
     const size_t slotArrayIndex = static_cast<size_t>(slotIndex);
     mPreviousCabPrimaryIR[slotArrayIndex] = nullptr;
+    mPreviousCabPrimaryIRChannel2[slotArrayIndex] = nullptr;
     mPreviousCabSecondaryIR[slotArrayIndex] = nullptr;
+    mPreviousCabSecondaryIRChannel2[slotArrayIndex] = nullptr;
   };
   auto applyPendingCabSlotIRChanges = [this, inputStereoMode, &getCabSlotIRRefs, &clearPreviousCabSlotIR](
                                         const int slotIndex) {
@@ -8136,6 +8214,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     if (stagePrimaryReady || removePrimary)
     {
       mPreviousCabPrimaryIR[slotArrayIndex] = std::move(refs.livePrimary);
+      mPreviousCabPrimaryIRChannel2[slotArrayIndex] = std::move(refs.livePrimaryChannel2);
       if (stagePrimaryReady)
       {
         refs.livePrimary = std::move(refs.stagedPrimary);
@@ -8154,6 +8233,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     if (stageSecondaryReady || removeSecondary)
     {
       mPreviousCabSecondaryIR[slotArrayIndex] = std::move(refs.liveSecondary);
+      mPreviousCabSecondaryIRChannel2[slotArrayIndex] = std::move(refs.liveSecondaryChannel2);
       if (stageSecondaryReady)
       {
         refs.liveSecondary = std::move(refs.stagedSecondary);
@@ -9360,6 +9440,8 @@ bool NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t nu
       mOutputArray[c].resize(numFrames);
     for (auto& crossfadeChannel : mAmpModelCrossfadeArray)
       crossfadeChannel.resize(numFrames);
+    for (auto& cabSlotChannel : mCabSlotBuffer)
+      cabSlotChannel.resize(numFrames);
     mCabIRCrossfadeBuffer.resize(numFrames);
     mOutputGainRampArray.resize(numFrames);
   }
@@ -9370,6 +9452,8 @@ bool NeuralAmpModeler::_PrepareBuffers(const size_t numChannels, const size_t nu
     std::fill_n(mOutputArray[c].begin(), numFrames, 0.0);
   for (auto& crossfadeChannel : mAmpModelCrossfadeArray)
     std::fill_n(crossfadeChannel.begin(), numFrames, 0.0);
+  for (auto& cabSlotChannel : mCabSlotBuffer)
+    std::fill_n(cabSlotChannel.begin(), numFrames, 0.0f);
   std::fill_n(mCabIRCrossfadeBuffer.begin(), numFrames, 0.0f);
 
   // Would these ever get changed by something?

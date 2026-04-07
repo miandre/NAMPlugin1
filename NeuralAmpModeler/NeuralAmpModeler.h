@@ -683,6 +683,7 @@ private:
   // Output from NAM
   std::vector<std::vector<iplug::sample>> mOutputArray;
   std::array<std::vector<iplug::sample>, kNumChannelsInternal> mAmpModelCrossfadeArray;
+  std::array<std::vector<iplug::sample>, kNumChannelsInternal> mCabSlotBuffer;
   std::vector<iplug::sample> mCabIRCrossfadeBuffer;
   std::vector<double> mOutputGainRampArray;
   // Pointer versions
@@ -881,7 +882,9 @@ private:
 #endif
 #endif
   std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabPrimaryIR;
+  std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabPrimaryIRChannel2;
   std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabSecondaryIR;
+  std::array<std::unique_ptr<dsp::ImpulseResponse>, 2> mPreviousCabSecondaryIRChannel2;
   std::array<int, 2> mPreviousCabSlotSourceChoice = {};
   std::array<double, 2> mPreviousCabSlotPosition = {};
   std::array<int, 2> mCabSlotIRCrossfadeSamplesRemaining = {};
