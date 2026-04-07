@@ -1,4 +1,4 @@
-Last updated: 2026-03-30
+Last updated: 2026-04-07
 
 Purpose: concise handoff so a new agent can continue from the current stable baseline without replaying the full chat history.
 
@@ -20,6 +20,9 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 - Release mode still embeds curated cab IRs and amp variant assets while allowing user-loaded custom IRs
 
 ## Recent relevant history before this handoff update
+- `de8c435` `Add dev diagnostics readout overlay`
+- `2f3b0ec` `Add Amp 2 saturating master stage`
+- `5e73f81` `Tune Amp 2 tone stack and pre gain`
 - `89f5c72` `Add curated MD-421 cab IR option`
 - `94429bd` `Fix amp bypass routing and state handling`
 - `e544f42` `Remove generated Python bytecode`
@@ -96,11 +99,33 @@ Already landed on `main`:
 - Amp-face scaffolding and slot-specific amp UI work
 - Tuner improvements and tuner UI polish
 
+### 6) Amp 2 tuning work is now landed on `main`
+Outcome:
+- Amp 2 no longer uses the old generic shared voicing as-is.
+- Amp 2 now has its own tuned post-model tone stack, slot-specific pre-gain taper, and a saturating master behavior.
+
+Important landed details:
+- Amp 2 keeps the same visible control set: `Pre Gain`, `Bass`, `Mid`, `Treble`, `Presence`, `Depth`, `Master`, plus `DEPTH` and `SCOOP`.
+- Amp 2 `A/B` variants still share the same tone stack and master behavior; the variant switch remains model-only.
+- Amp 2 `Pre Gain` is intentionally remapped to `-20 dB / -5 dB / +10 dB` at min / noon / max.
+- Amp 2 `Master` now rises mostly as level first, then adds saturation/compression in the upper range instead of behaving as pure post-volume.
+
+### 7) Dev diagnostics overlay is now landed on `main`
+Outcome:
+- A dev-only diagnostics readout can now be shown in both standalone and plugin builds.
+
+Important landed details:
+- Controlled by `NAM_DEV_DIAGNOSTICS` in `NeuralAmpModeler/config.h`.
+- Standalone shows sample rate, block size, buffer latency estimate, DSP latency, DSP load, process CPU `current/average/peak`, and RAM.
+- Plugin builds intentionally omit CPU/RAM and show only DSP/buffer/latency stats, because plugin CPU/RAM would mostly reflect the host DAW process.
+
 ## Important current conclusions
 - Do not reopen tuner work unless the user explicitly asks.
 - Do not restart the old amp/IR artifact investigation from scratch; `main` already contains the accepted baseline.
 - Keep custom IR support in release mode.
 - Use the slot presentation / behavior / resolved-spec scaffolding for future amp-specific divergence.
+- User now builds manually after patches; do not run builds unless the user explicitly asks.
+- The next issue to investigate is stereo correctness through the cab/IR path: with true stereo input, the signal appears to collapse to mono somewhere before becoming stereo again.
 - Prefer small, reviewable follow-ups from the current stable `main` baseline.
 - Internal `NeuralAmpModeler` naming cleanup can wait.
 
@@ -108,6 +133,7 @@ Already landed on `main`:
 - Audio/performance validation: `Release | x64` only
 - Standalone audio test: run without debugger (`Ctrl+F5`)
 - Do not evaluate DSP performance in Debug
+- The user now builds manually after each patch unless they explicitly ask otherwise
 - No recent `Release | x64` build was run from this shell for the latest doc-only changes
 - Do not assume local `config.h` matches committed defaults during user testing
 
@@ -122,14 +148,14 @@ Already landed on `main`:
   - breaking changes are acceptable if they improve architecture or iteration speed
 
 ## Suggested next coding step
-1. Start the next feature as a focused custom tone stack task for one amp slot.
-2. First, discuss specs with user before coding. 
-3. Then, map the current tone-stack creation path and slot-specific amp scaffolding before changing DSP.
-4Keep the patch narrow:
-  - add or adapt one tone-stack implementation
-  - wire it through the existing slot behavior/spec flow
-  - avoid broad UI or serialization churn unless the user asks
-5. Validate in `Release | x64` and listen specifically for control mapping, bypass behavior, and any new zipper/click artifacts.
+1. Investigate the cab/IR stereo path before adding more features.
+2. Map the true stereo signal path through amp processing, cab/IR processing, post-IR processing, and output routing to find exactly where stereo collapses to mono.
+3. Fix it using the current stereo/mono routing scaffolding instead of adding a parallel path.
+4. Keep the patch narrow:
+   - preserve existing effective-mono behavior when the source is actually mono
+   - avoid broad cab refactors unless the root cause forces it
+   - do not regress the current amp/IR switching artifact work
+5. Verify with true stereo material and listen for width preservation, routing correctness, and any new clicks or load regressions.
 
 ## Starter prompt for the next agent
 You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
@@ -155,8 +181,11 @@ Current baseline:
 5. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, boost v2, amp variants v1, doubler improvements, startup/default asset refresh, and slot-specific amp UI work are already landed
 6. Do not reopen tuner work unless the user explicitly asks
 7. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
+8. Amp 2 custom tuning is landed on `main`: custom tone stack voicing, slot-specific `Pre Gain` taper, and a saturating `Master` behavior
+9. Dev diagnostics overlay is landed: standalone shows CPU/RAM plus DSP stats, plugin builds intentionally show only DSP/buffer/latency stats
+10. The user now builds manually after patches; do not run builds unless explicitly asked
 
 Suggested next task unless the user redirects:
-1. Explore a custom tone stack for one amp slot
-2. Use the existing slot presentation / behavior / resolved-spec scaffolding instead of adding a parallel one-off path
+1. Investigate where the cab/IR path collapses true stereo to mono before widening again
+2. Use the existing stereo/mono routing scaffolding and current cab architecture instead of adding a parallel path
 3. Keep the patch small and reviewable from the current stable `main` baseline

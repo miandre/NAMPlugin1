@@ -1,4 +1,4 @@
-Last updated: 2026-03-30
+Last updated: 2026-04-07
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -111,28 +111,47 @@ Outcome:
 - Curated cab source list now includes `M-421`
 - Release-mode embedded IRs and runtime bitmap/resource wiring are in place
 
+### Done: Amp 2 custom voicing pass
+Outcome:
+- Amp 2 now has a slot-specific tuned tone stack, slot-specific `Pre Gain` taper, and a saturating `Master` behavior while keeping the same control surface
+
+Important nuances:
+- Amp 2 `A/B` variants still share one tone stack/master behavior; the variant switch remains model-only
+- Amp 2 `Pre Gain` is intentionally `-20 dB / -5 dB / +10 dB` at min / noon / max
+
+### Done: Dev diagnostics overlay
+Outcome:
+- A dev diagnostics overlay is available for both standalone and plugin builds
+
+Important nuances:
+- Controlled by `NAM_DEV_DIAGNOSTICS` in `NeuralAmpModeler/config.h`
+- Standalone shows DSP stats plus process CPU `current/average/peak` and RAM
+- Plugin builds intentionally omit CPU/RAM and show only DSP/buffer/latency stats
+
 ## Active milestones
 
-### Milestone L: Custom tone stack for one amp slot
+### Milestone S: Preserve true stereo through the cab/IR path
 Goal:
-- Add a dedicated custom tone stack behavior for one amp while preserving the current slot-specific amp architecture
+- Remove the unintended mono collapse in the cab/IR section when the input path is truly stereo
 
 Why now:
-- The slot presentation / behavior / resolved-spec scaffolding is already in place
-- This is the next likely user-directed feature
+- This is a correctness issue in the current stereo signal path
+- It should be resolved before more stereo/cab feature work is layered on top
 
 Recommended implementation shape:
-- Start by mapping the current tone-stack creation path and slot-specific amp spec flow
-- Add or adapt one tone-stack implementation for the chosen amp slot
-- Reuse the existing slot-specific wiring instead of creating a separate parallel path
-- Keep control ownership, bypass behavior, and master/gain staging consistent with the current amp-stage baseline
+- Trace channel routing from true stereo input through the amp stage, cab/IR stage, post-IR processing, and final output routing
+- Identify the exact point where the signal is summed or duplicated incorrectly
+- Reuse the existing stereo/mono routing scaffolding instead of adding a separate stereo path
+- Preserve the current effective-mono optimizations when the source is actually mono
+- Use the diagnostics overlay if useful to watch DSP load while changing routing
 
 Risk:
 - Medium
 
 RT safety watch-outs:
 - No allocations/locks/I/O/logging in audio-thread paths
-- If controls change coefficients continuously, smooth them if needed to avoid zipper noise
+- Keep per-channel routing deterministic and allocation-free in the callback
+- Avoid unnecessary channel duplication/copying in the hot path
 
 ### Milestone B: Release asset packaging and final variant strategy
 Goal:
@@ -194,7 +213,7 @@ Examples:
 - off-state visual language
 
 ## Recommended execution order from now
-1. Milestone L: custom tone stack for one amp slot
+1. Milestone S: preserve true stereo through the cab/IR path
 2. Resume Milestone B when the final release asset set is clearer
 3. Milestone F only if the user returns to transpose
 4. Milestone D only after Cab v1 remains stable in regular use
