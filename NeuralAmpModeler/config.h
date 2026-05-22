@@ -14,7 +14,9 @@
 #define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
 #define NAM_DEV_DIAGNOSTICS 1 // Dev/test helper: set to 0 to hide the diagnostics stats overlay.
 // Amp workflow profile: 0 = Rig Mode (editable slot model pickers), 1 = Release Mode (slot model edits locked).
-#define NAM_RELEASE_MODE 0
+#define NAM_RELEASE_MODE 1
+// Temporary preset migration guard: in release mode, ignore serialized amp model paths and always restore bundled models.
+#define NAM_RELEASE_IGNORE_PRESET_MODEL_PATHS 1
 
 #define SHARED_RESOURCES_SUBPATH "RE-AMP"
 
