@@ -95,6 +95,14 @@ void NeuralAmpModeler::_UnserializeApplyConfig(nlohmann::json& config)
   else
     mIRPathRight.Set("");
 
+#if NAM_RELEASE_IGNORE_PRESET_MODEL_PATHS
+  if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+  {
+    // Temporary beta-test guard: release builds keep bundled amp identities even if an older preset serialized file paths.
+    mNAMPath.Set("");
+  }
+#endif
+
   if (mAmpWorkflowMode == AmpWorkflowMode::Release)
     _ApplyReleaseAssetManifestToState();
 

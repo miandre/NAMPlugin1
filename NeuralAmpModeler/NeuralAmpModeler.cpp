@@ -27,6 +27,7 @@
 #include "architecture.hpp"
 
 #include "EmbeddedCabIRAssets.h"
+#include "EmbeddedModelAssets.h"
 #include "NeuralAmpModelerControls.h"
 #include "IPopupMenuControl.h"
 #if defined(APP_API) && defined(OS_WIN)
@@ -122,6 +123,7 @@ constexpr double kDefaultCuratedCabLevelDB = 0.0;
 constexpr double kDefaultCuratedCabPanA = 0.0;
 constexpr double kDefaultCuratedCabPanB = 0.0;
 constexpr const char* kEmbeddedCuratedCabIRPathPrefix = "embedded://curated/";
+constexpr const char* kEmbeddedModelPathPrefix = "embedded://model/";
 constexpr float kAmpFaceKnobAreaWidth = 80.0f;
 constexpr int kCabSlotCount = 2;
 #if NAM_DEV_DIAGNOSTICS
@@ -226,6 +228,26 @@ WDL_String MakeEmbeddedCuratedCabIRPath(const int sourceChoice, const int captur
   return path;
 }
 
+WDL_String MakeEmbeddedReleaseAmpModelPath(const size_t assetIndex)
+{
+  WDL_String path;
+  if (assetIndex == 0 || assetIndex > kReleaseAmpAssetTokens.size())
+    return path;
+
+  path.SetFormatted(256, "%samp/%s", kEmbeddedModelPathPrefix, kReleaseAmpAssetTokens[assetIndex - 1]);
+  return path;
+}
+
+WDL_String MakeEmbeddedReleaseStompModelPath(const size_t assetIndex)
+{
+  WDL_String path;
+  if (assetIndex == 0 || assetIndex > kReleaseStompAssetTokens.size())
+    return path;
+
+  path.SetFormatted(256, "%sstomp/%s", kEmbeddedModelPathPrefix, kReleaseStompAssetTokens[assetIndex - 1]);
+  return path;
+}
+
 const embedded_cab_ir::EmbeddedCabIRAsset* GetEmbeddedCuratedCabIRAssetForPath(const WDL_String& irPath)
 {
   const char* path = irPath.Get();
@@ -259,6 +281,48 @@ const embedded_cab_ir::EmbeddedCabIRAsset* GetEmbeddedCuratedCabIRAssetForPath(c
     return nullptr;
 
   return embedded_cab_ir::GetCuratedCabIRAsset(sourceChoice, static_cast<int>(captureIndex));
+}
+
+const embedded_model::EmbeddedModelAsset* GetEmbeddedModelAssetForPath(const WDL_String& modelPath)
+{
+  const char* path = modelPath.Get();
+  constexpr size_t prefixLength = 17; // strlen("embedded://model/")
+  if (std::strncmp(path, kEmbeddedModelPathPrefix, prefixLength) != 0)
+    return nullptr;
+
+  const char* category = path + prefixLength;
+  const char* separator = std::strchr(category, '/');
+  if (separator == nullptr || separator == category || *(separator + 1) == '\0')
+    return nullptr;
+
+  const size_t categoryLength = static_cast<size_t>(separator - category);
+  const char* token = separator + 1;
+  if (categoryLength == 3 && std::strncmp(category, "amp", categoryLength) == 0)
+    return embedded_model::GetAmpModelAsset(token);
+  if (categoryLength == 5 && std::strncmp(category, "stomp", categoryLength) == 0)
+    return embedded_model::GetStompModelAsset(token);
+  return nullptr;
+}
+
+std::unique_ptr<nam::DSP> LoadNAMDSPForPath(const WDL_String& modelPath)
+{
+  if (const auto* embeddedAsset = GetEmbeddedModelAssetForPath(modelPath))
+  {
+    const char* jsonBegin = embeddedAsset->json;
+    const char* jsonEnd = embeddedAsset->json + embeddedAsset->jsonSize;
+    const nlohmann::json config = nlohmann::json::parse(jsonBegin, jsonEnd);
+    return nam::get_dsp(config);
+  }
+
+  return nam::get_dsp(std::filesystem::u8path(modelPath.Get()));
+}
+
+std::unique_ptr<ResamplingNAM> LoadResampledNAMForPath(const WDL_String& modelPath, const double sampleRate, const int blockSize)
+{
+  std::unique_ptr<nam::DSP> model = LoadNAMDSPForPath(modelPath);
+  std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), sampleRate);
+  temp->Reset(sampleRate, blockSize);
+  return temp;
 }
 
 bool StageEmbeddedCuratedCabIR(const WDL_String& irPath, const double sampleRate,
@@ -804,6 +868,11 @@ std::filesystem::path EnsureStandalonePresetExtension(std::filesystem::path file
 bool ResolvePresetRelativeAssetPath(const std::filesystem::path& presetFilePath, WDL_String& assetPath)
 {
   if (assetPath.GetLength() <= 0)
+    return false;
+
+  constexpr const char* kEmbeddedPathScheme = "embedded://";
+  constexpr size_t kEmbeddedPathSchemeLength = 11;
+  if (std::strncmp(assetPath.Get(), kEmbeddedPathScheme, kEmbeddedPathSchemeLength) == 0)
     return false;
 
   std::filesystem::path path(assetPath.Get());
@@ -1712,6 +1781,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     constexpr float kSettingsIconHeight = 24.0f;
     constexpr float kSettingsRightPad = 8.0f;
     const float topUtilityIconCenterY = topUtilityRowArea.MH();
+    const bool showSettingsButton = (mAmpWorkflowMode != AmpWorkflowMode::Release);
     const auto settingsButtonArea =
       IRECT(topBarArea.R - kSettingsRightPad - kSettingsIconHeight,
             topUtilityIconCenterY - 0.5f * kSettingsIconHeight,
@@ -1796,7 +1866,8 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                                     topNavEqArea.R + topNavIconGap + topNavFxWidth, topNavTop + topNavIconHeight);
     // Tuner is a tool icon, placed to the left of settings rather than in the section strip.
     constexpr float kTunerToolGap = 20.0f;
-    const float tunerToolRight = settingsButtonArea.L - kTunerToolGap;
+    const float tunerToolAnchorRight = showSettingsButton ? settingsButtonArea.L : settingsButtonArea.R;
+    const float tunerToolRight = tunerToolAnchorRight - kTunerToolGap;
     const float tunerToolLeft = std::max(contentArea.L, tunerToolRight - topNavTunerWidth);
     const float topToolRowTop = topUtilityIconCenterY - 0.5f * kTunerToolIconHeight;
     const auto topNavTunerArea =
@@ -2826,12 +2897,15 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       ->SetTooltip("Close tuner");
 
     // Settings/help/about box
-    pGraphics->AttachControl(new NAMCircleButtonControl(
-      settingsButtonArea,
-      [pGraphics](IControl* pCaller) {
-        pGraphics->GetControlWithTag(kCtrlTagSettingsBox)->As<NAMSettingsPageControl>()->HideAnimated(false);
-      },
-      gearSVG));
+    if (showSettingsButton)
+    {
+      pGraphics->AttachControl(new NAMCircleButtonControl(
+        settingsButtonArea,
+        [pGraphics](IControl* pCaller) {
+          pGraphics->GetControlWithTag(kCtrlTagSettingsBox)->As<NAMSettingsPageControl>()->HideAnimated(false);
+        },
+        gearSVG));
+    }
 
     auto* pSettingsBox =
       new NAMSettingsPageControl(b, settingsBackgroundBitmap, inputLevelBackgroundBitmap, switchHandleBitmap, crossSVG, style,
@@ -4017,7 +4091,6 @@ void NeuralAmpModeler::OnReset()
   }
 #endif
 
-#if defined(APP_API) && (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
   if (!mStartupDefaultLoadAttempted)
   {
     mStartupDefaultLoadAttempted = true;
@@ -4026,6 +4099,7 @@ void NeuralAmpModeler::OnReset()
     {
       _ApplyReleaseAssetManifestToState();
     }
+#if (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
     else
     {
       const bool anyAmpSlotPath = std::any_of(
@@ -4085,6 +4159,7 @@ void NeuralAmpModeler::OnReset()
         }
       }
     }
+#endif
 
     for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
     {
@@ -4102,13 +4177,17 @@ void NeuralAmpModeler::OnReset()
         }
       }
     }
-    _ApplyAmpSlotState(mAmpSelectorIndex);
+    const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
+    _ApplyAmpSlotState(activeSlot);
+    if (mAmpNAMPaths[activeSlot].GetLength() > 0)
+      mPendingAmpModelSelection.store(_GetSelectedAmpSlotModelStorageIndex(activeSlot), std::memory_order_release);
+    if (mDefaultPresetActive)
+      mDefaultPresetPostLoadSyncPending = true;
     if (mStompModel == nullptr && mStagedStompModel == nullptr && mStompNAMPath.GetLength())
       _StageStompModel(mStompNAMPath, 0);
     if (mStompModelB == nullptr && mStagedStompModelB == nullptr && mStompNAMPathB.GetLength())
       _StageStompModel(mStompNAMPathB, 1);
   }
-#endif
 
   if (sampleRate > 0.0)
   {
@@ -4982,6 +5061,15 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
       ResolvePresetRelativeAssetPath(presetFilePath, customIRPathB);
     }
 
+#if NAM_RELEASE_IGNORE_PRESET_MODEL_PATHS
+    if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+    {
+      // Temporary beta-test guard: release builds ignore serialized amp file paths and keep bundled model identities.
+      for (auto& ampPath : ampPathsByVariant)
+        ampPath.Set("");
+    }
+#endif
+
     const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     mAmpSelectorIndex = std::clamp(static_cast<int>(activeSlot), 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     _BeginPresetRecallTransition(previousActiveSlot, mAmpSelectorIndex);
@@ -5089,6 +5177,10 @@ int NeuralAmpModeler::UnserializeState(const IByteChunk& chunk, int startPos)
     }
     const int previousActiveSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
     _BeginPresetRecallTransition(previousActiveSlot, mAmpSelectorIndex);
+#if NAM_RELEASE_IGNORE_PRESET_MODEL_PATHS
+    if (mAmpWorkflowMode == AmpWorkflowMode::Release)
+      legacyNAMPath.Set("");
+#endif
     mNAMPath = legacyNAMPath;
     mAmpSlotSelectedVariant[static_cast<size_t>(mAmpSelectorIndex)] = 0;
     mAmpNAMPathsByVariant[static_cast<size_t>(_GetAmpSlotModelStorageIndex(mAmpSelectorIndex, 0))] = legacyNAMPath;
@@ -5893,11 +5985,12 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
     SendParameterValueFromDelegate(kInputStereoMode, GetParam(kInputStereoMode)->GetNormalized(), true);
   }
 
-#if defined(APP_API) && (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
+#if defined(APP_API)
   if (mAmpWorkflowMode == AmpWorkflowMode::Release)
   {
     _ApplyReleaseAssetManifestToState();
   }
+#if (NAM_STARTUP_TMPLOAD_DEFAULTS > 0)
   else
   {
     auto existsNoThrow = [](const std::filesystem::path& path) {
@@ -5947,6 +6040,7 @@ bool NeuralAmpModeler::_LoadDefaultPreset()
       (void) _ApplyDefaultCuratedCabState(true);
     }
   }
+#endif
 #endif
 
   const int activeSlot = std::clamp(mAmpSelectorIndex, 0, static_cast<int>(mAmpNAMPaths.size()) - 1);
@@ -6615,37 +6709,6 @@ bool NeuralAmpModeler::_EnsureReleaseAssetManifest()
   if (mReleaseAssetManifest.valid)
     return true;
 
-  auto existsNoThrow = [](const std::filesystem::path& path) {
-    std::error_code ec;
-    const bool exists = std::filesystem::exists(path, ec);
-    return exists && !ec;
-  };
-  auto makeAbsoluteNoThrow = [](const std::filesystem::path& path) {
-    std::error_code ec;
-    const std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
-    return ec ? path : absolutePath;
-  };
-  auto setWdlPath = [](WDL_String& target, const std::filesystem::path& path) { target.Set(path.string().c_str()); };
-
-  const auto candidateDirs = GetReleaseAssetCandidateDirs(GetBundleID());
-  std::filesystem::path assetsRoot;
-  for (const auto& candidateDir : candidateDirs)
-  {
-    bool haveAllAssets = true;
-    for (const char* fileName : kReleaseAmpAssetFileNames)
-      haveAllAssets = haveAllAssets && existsNoThrow(candidateDir / fileName);
-    for (const char* fileName : kReleaseStompAssetFileNames)
-      haveAllAssets = haveAllAssets && existsNoThrow(candidateDir / fileName);
-    if (!haveAllAssets)
-      continue;
-
-    assetsRoot = makeAbsoluteNoThrow(candidateDir);
-    break;
-  }
-
-  if (assetsRoot.empty())
-    return false;
-
   mReleaseAssetManifest.valid = false;
   mReleaseAssetManifest.ampSlots = {
     ReleaseAmpAssetId::Amp1A,
@@ -6656,17 +6719,16 @@ bool NeuralAmpModeler::_EnsureReleaseAssetManifest()
     ReleaseAmpAssetId::Amp3B
   };
   mReleaseAssetManifest.stomp = ReleaseStompAssetId::BoostA;
-  mReleaseAssetManifest.rootPath.Set("");
+  mReleaseAssetManifest.rootPath.Set(kEmbeddedModelPathPrefix);
   mReleaseAssetManifest.valid = true;
-  setWdlPath(mReleaseAssetManifest.rootPath, assetsRoot);
 
   mReleaseAmpAssetPaths[static_cast<size_t>(ReleaseAmpAssetId::None)].Set("");
   for (size_t i = 0; i < kReleaseAmpAssetFileNames.size(); ++i)
-    setWdlPath(mReleaseAmpAssetPaths[i + 1], assetsRoot / kReleaseAmpAssetFileNames[i]);
+    mReleaseAmpAssetPaths[i + 1] = MakeEmbeddedReleaseAmpModelPath(i + 1);
 
   mReleaseStompAssetPaths[static_cast<size_t>(ReleaseStompAssetId::None)].Set("");
   for (size_t i = 0; i < kReleaseStompAssetFileNames.size(); ++i)
-    setWdlPath(mReleaseStompAssetPaths[i + 1], assetsRoot / kReleaseStompAssetFileNames[i]);
+    mReleaseStompAssetPaths[i + 1] = MakeEmbeddedReleaseStompModelPath(i + 1);
 
   return true;
 }
@@ -6678,13 +6740,13 @@ void NeuralAmpModeler::_ApplyReleaseAssetManifestToState()
 
   for (int slotIndex = 0; slotIndex < static_cast<int>(mAmpNAMPaths.size()); ++slotIndex)
   {
-    mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)] = 0;
+    const int selectedVariant = _ClampAmpModelVariantIndex(mAmpSlotSelectedVariant[static_cast<size_t>(slotIndex)]);
     for (int variantIndex = 0; variantIndex < kAmpModelVariantCount; ++variantIndex)
     {
       const int storageIndex = _GetAmpSlotModelStorageIndex(slotIndex, variantIndex);
       _SetAmpSlotReleaseAsset(slotIndex, mReleaseAssetManifest.ampSlots[static_cast<size_t>(storageIndex)], variantIndex);
     }
-    _SetAmpSlotSelectedVariant(slotIndex, 0);
+    _SetAmpSlotSelectedVariant(slotIndex, selectedVariant);
   }
 
   mStompNAMPath = _ResolveReleaseStompAssetPath(mReleaseAssetManifest.stomp);
@@ -7138,18 +7200,10 @@ void NeuralAmpModeler::_ModelLoadWorkerLoop()
     std::unique_ptr<ResamplingNAM> loadedModelRight;
     try
     {
-      auto dspPath = std::filesystem::u8path(job.modelPath.Get());
       const double sampleRate = (job.sampleRate > 0.0) ? job.sampleRate : 48000.0;
       const int blockSize = std::max(1, job.blockSize);
-      auto loadResampledModel = [&dspPath, sampleRate, blockSize]() {
-        std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
-        std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), sampleRate);
-        temp->Reset(sampleRate, blockSize);
-        return temp;
-      };
-
-      loadedModel = loadResampledModel();
-      loadedModelRight = loadResampledModel();
+      loadedModel = LoadResampledNAMForPath(job.modelPath, sampleRate, blockSize);
+      loadedModelRight = LoadResampledNAMForPath(job.modelPath, sampleRate, blockSize);
       success = (loadedModel != nullptr) && (loadedModelRight != nullptr);
       if (success)
       {
@@ -9099,16 +9153,8 @@ std::string NeuralAmpModeler::_StageModel(const WDL_String& modelPath, int slotI
   WDL_String previousSlotPath = mAmpNAMPaths[slotIndex];
   try
   {
-    auto dspPath = std::filesystem::u8path(modelPath.Get());
-    auto loadResampledModel = [this, &dspPath]() {
-      std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
-      std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
-      temp->Reset(GetSampleRate(), GetBlockSize());
-      return temp;
-    };
-
-    auto stagedModel = loadResampledModel();
-    auto stagedModelRight = loadResampledModel();
+    auto stagedModel = LoadResampledNAMForPath(modelPath, GetSampleRate(), GetBlockSize());
+    auto stagedModelRight = LoadResampledNAMForPath(modelPath, GetSampleRate(), GetBlockSize());
     _SetAmpSlotCapabilityState(
       slotIndex, (stagedModel != nullptr) && stagedModel->HasLoudness(),
       (stagedModel != nullptr) && stagedModel->HasOutputLevel());
@@ -9161,16 +9207,8 @@ std::string NeuralAmpModeler::_StageStompModel(const WDL_String& modelPath, int 
   WDL_String previousNAMPath = targetNAMPath;
   try
   {
-    auto dspPath = std::filesystem::u8path(modelPath.Get());
-    auto loadResampledStompModel = [this, &dspPath]() {
-      std::unique_ptr<nam::DSP> model = nam::get_dsp(dspPath);
-      std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), GetSampleRate());
-      temp->Reset(GetSampleRate(), GetBlockSize());
-      return temp;
-    };
-
-    auto stagedStompModel = loadResampledStompModel();
-    auto stagedStompModelRight = loadResampledStompModel();
+    auto stagedStompModel = LoadResampledNAMForPath(modelPath, GetSampleRate(), GetBlockSize());
+    auto stagedStompModelRight = LoadResampledNAMForPath(modelPath, GetSampleRate(), GetBlockSize());
     // Publish stereo companion first; publish primary last to avoid half-swapped stereo state.
     targetStagedModelRight = std::move(stagedStompModelRight);
     targetStagedModel = std::move(stagedStompModel);

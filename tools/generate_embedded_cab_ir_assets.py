@@ -11,7 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 INPUT_ROOT = ROOT / "NeuralAmpModeler" / "resources" / "tmpLoad" / "IR"
 OUTPUT_HEADER = ROOT / "NeuralAmpModeler" / "EmbeddedCabIRAssets.h"
 OUTPUT_SOURCE = ROOT / "NeuralAmpModeler" / "EmbeddedCabIRAssets.cpp"
-MIC_FOLDERS = ("57", "121")
+MIC_FOLDERS = ("57", "121", "421")
 CAPTURE_COUNT = 5
 
 
@@ -106,10 +106,12 @@ def _write_source(assets: list[tuple[str, int, list[float], int]]) -> None:
         )
         lines.append("")
 
-    lines.append("const std::array<std::array<const EmbeddedCabIRAsset*, 5>, 2> kCuratedCabIRAssets = {{")
+    lines.append(
+        f"const std::array<std::array<const EmbeddedCabIRAsset*, {CAPTURE_COUNT}>, {len(MIC_FOLDERS)}> kCuratedCabIRAssets = {{"
+    )
     for mic_name in MIC_FOLDERS:
         asset_refs = ", ".join(f"&kMic{mic_name}Capture{capture_index}Asset" for capture_index in range(CAPTURE_COUNT))
-        lines.append(f"  std::array<const EmbeddedCabIRAsset*, 5>{{{asset_refs}}},")
+        lines.append(f"  std::array<const EmbeddedCabIRAsset*, {CAPTURE_COUNT}>{{{asset_refs}}},")
     lines.append("};")
     lines.append("} // namespace")
     lines.append("")
