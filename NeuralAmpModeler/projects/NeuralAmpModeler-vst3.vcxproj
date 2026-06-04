@@ -426,6 +426,7 @@
     <ClCompile Include="..\..\iPlug2\IPlug\IPlugPluginBase.cpp" />
     <ClCompile Include="..\..\iPlug2\IPlug\IPlugProcessor.cpp" />
     <ClCompile Include="..\..\iPlug2\IPlug\IPlugTimer.cpp" />
+    <ClCompile Include="..\..\iPlug2\WDL\win32_utf8.c" />
     <ClCompile Include="..\..\iPlug2\IPlug\VST3\IPlugVST3.cpp" />
     <ClCompile Include="..\..\iPlug2\IPlug\VST3\IPlugVST3_ProcessorBase.cpp" />
     <ClCompile Include="..\..\AudioDSPTools\dsp\dsp.cpp" />
