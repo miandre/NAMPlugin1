@@ -1,4 +1,4 @@
-Last updated: 2026-04-07
+Last updated: 2026-06-04
 
 Purpose: concise handoff so a new agent can continue from the current stable baseline without replaying the full chat history.
 
@@ -10,7 +10,11 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 
 ## Current repository state
 - Active branch: `main`
-- Working tree at handoff: expected clean after this handoff update is committed and pushed
+- HEAD at handoff: `9ae005c`
+- Working tree at handoff:
+  - modified: `AGENTS.md`
+  - modified: `AGENT_SESSION_SUMMARY.md`
+  - modified: `NeuralAmpModeler/config.h`
 - Current product name for user-facing outputs: `RE-AMP`
 - Internal code/project naming is still mostly `NeuralAmpModeler` and that is intentional for now
 - Current curated cab mic set:
@@ -20,6 +24,14 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 - Release mode still embeds curated cab IRs and amp variant assets while allowing user-loaded custom IRs
 
 ## Recent relevant history before this handoff update
+- 2026-06-04: fast-forwarded local `main` to include the `iplug2-upstream-update` branch; baseline HEAD is now `9ae005c`
+- 2026-06-04: added a repo-level rule to `AGENTS.md` stating that the user builds manually from Visual Studio and agents must not run builds unless explicitly asked
+- `9ae005c` `Update iPlug2 mono input selection fix`
+- `4a47cc4` `Link iPlug2 UTF8 helpers in app and VST3`
+- `2866063` `Update iPlug2 popup menu compatibility fix`
+- `3c319a4` `Update iPlug2 RtAudio validation fix`
+- `1f16bd2` `Update iPlug2 upstream branch`
+- `9311b5b` `Update dependencies for A2 NAM support`
 - `de8c435` `Add dev diagnostics readout overlay`
 - `2f3b0ec` `Add Amp 2 saturating master stage`
 - `5e73f81` `Tune Amp 2 tone stack and pre gain`
@@ -119,13 +131,24 @@ Important landed details:
 - Standalone shows sample rate, block size, buffer latency estimate, DSP latency, DSP load, process CPU `current/average/peak`, and RAM.
 - Plugin builds intentionally omit CPU/RAM and show only DSP/buffer/latency stats, because plugin CPU/RAM would mostly reflect the host DAW process.
 
+### 8) A2 support and iPlug2 upstream updates are now part of the current baseline
+Outcome:
+- `main` now includes the A2 dependency update plus the later iPlug2 upstream integration work that followed on top of it.
+
+Important landed details:
+- The A2-related dependency baseline is represented by `9311b5b` (`Update dependencies for A2 NAM support`).
+- The current baseline also includes the later iPlug2 fixes from `iplug2-upstream-update`.
+- Those follow-up commits cover upstream branch refresh, RtAudio validation, popup menu compatibility, UTF-8 helper linkage for app/VST3, and mono input selection behavior.
+- The current local `main` branch is the preferred starting baseline for further work.
+
 ## Important current conclusions
 - Do not reopen tuner work unless the user explicitly asks.
 - Do not restart the old amp/IR artifact investigation from scratch; `main` already contains the accepted baseline.
 - Keep custom IR support in release mode.
 - Use the slot presentation / behavior / resolved-spec scaffolding for future amp-specific divergence.
 - User now builds manually after patches; do not run builds unless the user explicitly asks.
-- The next issue to investigate is stereo correctness through the cab/IR path: with true stereo input, the signal appears to collapse to mono somewhere before becoming stereo again.
+- That build rule is now also recorded directly in `AGENTS.md`, not only in this handoff file.
+- The earlier stereo-collapse-through-cab concern appears to have been addressed by `d41b00c` (`Preserve stereo through cab IR processing`); do not reopen that investigation unless the user reports a current regression.
 - Prefer small, reviewable follow-ups from the current stable `main` baseline.
 - Internal `NeuralAmpModeler` naming cleanup can wait.
 
@@ -136,6 +159,7 @@ Important landed details:
 - The user now builds manually after each patch unless they explicitly ask otherwise
 - No recent `Release | x64` build was run from this shell for the latest doc-only changes
 - Do not assume local `config.h` matches committed defaults during user testing
+- Local `NeuralAmpModeler/config.h` churn is expected during the dev phase, especially for toggles like `NAM_STARTUP_TMPLOAD_DEFAULTS`, `NAM_DEV_DIAGNOSTICS`, `NAM_RELEASE_MODE`, and `NAM_RELEASE_IGNORE_PRESET_MODEL_PATHS`; do not treat that dirtiness alone as a blocker
 
 ## Current policy notes
 - Audio-thread rules still apply:
@@ -148,14 +172,8 @@ Important landed details:
   - breaking changes are acceptable if they improve architecture or iteration speed
 
 ## Suggested next coding step
-1. Investigate the cab/IR stereo path before adding more features.
-2. Map the true stereo signal path through amp processing, cab/IR processing, post-IR processing, and output routing to find exactly where stereo collapses to mono.
-3. Fix it using the current stereo/mono routing scaffolding instead of adding a parallel path.
-4. Keep the patch narrow:
-   - preserve existing effective-mono behavior when the source is actually mono
-   - avoid broad cab refactors unless the root cause forces it
-   - do not regress the current amp/IR switching artifact work
-5. Verify with true stereo material and listen for width preservation, routing correctness, and any new clicks or load regressions.
+1. Continue from the current stable `main` baseline and prefer small, reviewable follow-ups in the area the user explicitly requests next.
+2. If stereo behavior is questioned again, treat it as regression verification against `d41b00c` rather than an open unresolved architecture problem.
 
 ## Starter prompt for the next agent
 You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
@@ -183,9 +201,11 @@ Current baseline:
 7. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
 8. Amp 2 custom tuning is landed on `main`: custom tone stack voicing, slot-specific `Pre Gain` taper, and a saturating `Master` behavior
 9. Dev diagnostics overlay is landed: standalone shows CPU/RAM plus DSP stats, plugin builds intentionally show only DSP/buffer/latency stats
-10. The user now builds manually after patches; do not run builds unless explicitly asked
+10. The A2 dependency update baseline is landed on `main`, and local `main` also includes the iPlug2 upstream follow-up commits through `9ae005c`
+11. The user now builds manually after patches; do not run builds unless explicitly asked
+12. That no-build-without-user-prompt rule is now written directly in `AGENTS.md`
 
 Suggested next task unless the user redirects:
-1. Investigate where the cab/IR path collapses true stereo to mono before widening again
-2. Use the existing stereo/mono routing scaffolding and current cab architecture instead of adding a parallel path
+1. Start from the current `main` baseline and follow the user's next requested task
+2. If stereo behavior is reported again, verify against the `d41b00c` cab/IR stereo-preservation changes first
 3. Keep the patch small and reviewable from the current stable `main` baseline

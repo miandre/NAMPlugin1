@@ -17,6 +17,7 @@ Latest handover + starter prompt for new agents is maintained in `AGENT_SESSION_
 - Audio/performance validation: **Release | x64** only.
 - Run standalone for audio testing: **Start Without Debugging** (Ctrl+F5 in Visual Studio).
 - Debug builds / running under debugger can severely degrade real-time DSP; do not judge DSP performance in Debug.
+- The user builds manually from Visual Studio; do not run builds unless the user explicitly asks.
 
 ## Non-negotiable real-time audio rules (audio thread)
 For `ProcessBlock()` and anything it calls directly/indirectly:
@@ -34,6 +35,7 @@ If unsure whether code runs on the audio thread, assume it does and keep it real
 - Keep style consistent with surrounding code.
 - Do not reformat unrelated code or perform sweeping refactors unless asked.
 - Ask before: adding dependencies, changing preset/serialization, changing default audio/device behavior, large multi-file refactors.
+- Treat local `NeuralAmpModeler/config.h` dev-toggle churn as expected during development; do not treat that file being dirty as a blocker unless the task depends on those flags or the changes extend beyond the expected dev/test toggle area.
 
 ## Required agent workflow (always)
 When asked to implement or change code:
