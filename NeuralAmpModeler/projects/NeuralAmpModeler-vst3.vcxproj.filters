@@ -138,6 +138,9 @@
     <ClCompile Include="..\NeuralAmpModelerCore\NAM\convnet.cpp">
       <Filter>NAM</Filter>
     </ClCompile>
+    <ClCompile Include="..\NeuralAmpModelerCore\NAM\container.cpp">
+      <Filter>NAM</Filter>
+    </ClCompile>
     <ClCompile Include="..\NeuralAmpModelerCore\NAM\dsp.cpp">
       <Filter>NAM</Filter>
     </ClCompile>
@@ -150,7 +153,13 @@
     <ClCompile Include="..\NeuralAmpModelerCore\NAM\util.cpp">
       <Filter>NAM</Filter>
     </ClCompile>
-    <ClCompile Include="..\NeuralAmpModelerCore\NAM\wavenet.cpp">
+    <ClCompile Include="..\NeuralAmpModelerCore\NAM\wavenet\a2_fast.cpp">
+      <Filter>NAM</Filter>
+    </ClCompile>
+    <ClCompile Include="..\NeuralAmpModelerCore\NAM\wavenet\model.cpp">
+      <Filter>NAM</Filter>
+    </ClCompile>
+    <ClCompile Include="..\NeuralAmpModelerCore\NAM\wavenet\slimmable.cpp">
       <Filter>NAM</Filter>
     </ClCompile>
     <ClCompile Include="..\NeuralAmpModelerCore\NAM\activations.cpp">
@@ -400,13 +409,37 @@
     <ClInclude Include="..\NeuralAmpModelerCore\NAM\activations.h">
       <Filter>NAM</Filter>
     </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\container.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\conv1d.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
     <ClInclude Include="..\NeuralAmpModelerCore\NAM\convnet.h">
       <Filter>NAM</Filter>
     </ClInclude>
     <ClInclude Include="..\NeuralAmpModelerCore\NAM\dsp.h">
       <Filter>NAM</Filter>
     </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\film.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\gating_activations.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
     <ClInclude Include="..\NeuralAmpModelerCore\NAM\lstm.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\model_config.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\registry.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\ring_buffer.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\slimmable.h">
       <Filter>NAM</Filter>
     </ClInclude>
     <ClInclude Include="..\NeuralAmpModelerCore\NAM\util.h">
@@ -415,7 +448,19 @@
     <ClInclude Include="..\NeuralAmpModelerCore\NAM\version.h">
       <Filter>NAM</Filter>
     </ClInclude>
-    <ClInclude Include="..\NeuralAmpModelerCore\NAM\wavenet.h">
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\wavenet\a2_fast.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\wavenet\detail.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\wavenet\model.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\wavenet\params.h">
+      <Filter>NAM</Filter>
+    </ClInclude>
+    <ClInclude Include="..\NeuralAmpModelerCore\NAM\wavenet\slimmable.h">
       <Filter>NAM</Filter>
     </ClInclude>
     <ClInclude Include="..\NeuralAmpModelerControls.h" />

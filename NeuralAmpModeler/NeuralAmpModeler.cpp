@@ -320,6 +320,11 @@ std::unique_ptr<nam::DSP> LoadNAMDSPForPath(const WDL_String& modelPath)
 std::unique_ptr<ResamplingNAM> LoadResampledNAMForPath(const WDL_String& modelPath, const double sampleRate, const int blockSize)
 {
   std::unique_ptr<nam::DSP> model = LoadNAMDSPForPath(modelPath);
+  if (model->NumInputChannels() != 1)
+    throw std::runtime_error("Model must have 1 input channel, but has " + std::to_string(model->NumInputChannels()));
+  if (model->NumOutputChannels() != 1)
+    throw std::runtime_error("Model must have 1 output channel, but has " + std::to_string(model->NumOutputChannels()));
+
   std::unique_ptr<ResamplingNAM> temp = std::make_unique<ResamplingNAM>(std::move(model), sampleRate);
   temp->Reset(sampleRate, blockSize);
   return temp;
