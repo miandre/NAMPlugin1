@@ -10,11 +10,9 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 
 ## Current repository state
 - Active branch: `main`
-- HEAD at handoff: `9ae005c`
+- HEAD at handoff: `2fb6591`
 - Working tree at handoff:
-  - modified: `AGENTS.md`
-  - modified: `AGENT_SESSION_SUMMARY.md`
-  - modified: `NeuralAmpModeler/config.h`
+  - clean
 - Current product name for user-facing outputs: `RE-AMP`
 - Internal code/project naming is still mostly `NeuralAmpModeler` and that is intentional for now
 - Current curated cab mic set:
@@ -24,8 +22,10 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 - Release mode still embeds curated cab IRs and amp variant assets while allowing user-loaded custom IRs
 
 ## Recent relevant history before this handoff update
+- 2026-06-04: landed build-time A2 slimmable-size control for all plugin-loaded slimmable NAM models; baseline HEAD is now `2fb6591`
 - 2026-06-04: fast-forwarded local `main` to include the `iplug2-upstream-update` branch; baseline HEAD is now `9ae005c`
 - 2026-06-04: added a repo-level rule to `AGENTS.md` stating that the user builds manually from Visual Studio and agents must not run builds unless explicitly asked
+- `2fb6591` `Apply build-time slim setting to slimmable NAM loads`
 - `9ae005c` `Update iPlug2 mono input selection fix`
 - `4a47cc4` `Link iPlug2 UTF8 helpers in app and VST3`
 - `2866063` `Update iPlug2 popup menu compatibility fix`
@@ -141,6 +141,17 @@ Important landed details:
 - Those follow-up commits cover upstream branch refresh, RtAudio validation, popup menu compatibility, UTF-8 helper linkage for app/VST3, and mono input selection behavior.
 - The current local `main` branch is the preferred starting baseline for further work.
 
+### 9) Build-time A2 slimmable-size control is now landed on `main`
+Outcome:
+- The plugin now applies a build-time slim value to every loaded NAM model that implements `nam::SlimmableModel`.
+
+Important landed details:
+- The central application point is `LoadNAMDSPForPath()` in `NeuralAmpModeler/NeuralAmpModeler.cpp`.
+- That path covers embedded and external model loads before `ResamplingNAM` wrapping, so the setting reaches staged amp models, right-channel companion models, and stomp models.
+- `NeuralAmpModeler/config.h` now exposes an override-friendly `NAM_SLIMMABLE_SIZE` macro plus typed `NAMConfig::SlimmableSize`.
+- Visual Studio preprocessor override usage is `NAM_SLIMMABLE_SIZE=0.5` in project properties; do not prepend `/D` in the property field.
+- The runtime call clamps the configured value to `0.0 .. 1.0` before calling `SetSlimmableSize()`.
+
 ## Important current conclusions
 - Do not reopen tuner work unless the user explicitly asks.
 - Do not restart the old amp/IR artifact investigation from scratch; `main` already contains the accepted baseline.
@@ -151,13 +162,14 @@ Important landed details:
 - The earlier stereo-collapse-through-cab concern appears to have been addressed by `d41b00c` (`Preserve stereo through cab IR processing`); do not reopen that investigation unless the user reports a current regression.
 - Prefer small, reviewable follow-ups from the current stable `main` baseline.
 - Internal `NeuralAmpModeler` naming cleanup can wait.
+- If future work needs A2 CPU tuning, start from the landed `NAM_SLIMMABLE_SIZE` hook instead of adding a second model-load path.
 
 ## Build/config baseline to preserve
 - Audio/performance validation: `Release | x64` only
 - Standalone audio test: run without debugger (`Ctrl+F5`)
 - Do not evaluate DSP performance in Debug
 - The user now builds manually after each patch unless they explicitly ask otherwise
-- No recent `Release | x64` build was run from this shell for the latest doc-only changes
+- The user manually built and verified the A2 slim-setting change before pushing it
 - Do not assume local `config.h` matches committed defaults during user testing
 - Local `NeuralAmpModeler/config.h` churn is expected during the dev phase, especially for toggles like `NAM_STARTUP_TMPLOAD_DEFAULTS`, `NAM_DEV_DIAGNOSTICS`, `NAM_RELEASE_MODE`, and `NAM_RELEASE_IGNORE_PRESET_MODEL_PATHS`; do not treat that dirtiness alone as a blocker
 
@@ -202,8 +214,9 @@ Current baseline:
 8. Amp 2 custom tuning is landed on `main`: custom tone stack voicing, slot-specific `Pre Gain` taper, and a saturating `Master` behavior
 9. Dev diagnostics overlay is landed: standalone shows CPU/RAM plus DSP stats, plugin builds intentionally show only DSP/buffer/latency stats
 10. The A2 dependency update baseline is landed on `main`, and local `main` also includes the iPlug2 upstream follow-up commits through `9ae005c`
-11. The user now builds manually after patches; do not run builds unless explicitly asked
-12. That no-build-without-user-prompt rule is now written directly in `AGENTS.md`
+11. Build-time A2 slimmable-size control is landed on `main` via `NAM_SLIMMABLE_SIZE` / `NAMConfig::SlimmableSize`, applied in `LoadNAMDSPForPath()`
+12. The user now builds manually after patches; do not run builds unless explicitly asked
+13. That no-build-without-user-prompt rule is now written directly in `AGENTS.md`
 
 Suggested next task unless the user redirects:
 1. Start from the current `main` baseline and follow the user's next requested task
