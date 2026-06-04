@@ -17,6 +17,7 @@
 #include "Colors.h"
 #include "../NeuralAmpModelerCore/NAM/activations.h"
 #include "../NeuralAmpModelerCore/NAM/get_dsp.h"
+#include "../NeuralAmpModelerCore/NAM/slimmable.h"
 // clang-format off
 // These includes need to happen in this order or else the latter won't know
 // a bunch of stuff.
@@ -306,15 +307,24 @@ const embedded_model::EmbeddedModelAsset* GetEmbeddedModelAssetForPath(const WDL
 
 std::unique_ptr<nam::DSP> LoadNAMDSPForPath(const WDL_String& modelPath)
 {
+  auto applyConfiguredSlimmableSize = [](std::unique_ptr<nam::DSP>& model) {
+    if (auto* slimmable = dynamic_cast<nam::SlimmableModel*>(model.get()))
+      slimmable->SetSlimmableSize(std::clamp(NAMConfig::SlimmableSize, 0.0, 1.0));
+  };
+
   if (const auto* embeddedAsset = GetEmbeddedModelAssetForPath(modelPath))
   {
     const char* jsonBegin = embeddedAsset->json;
     const char* jsonEnd = embeddedAsset->json + embeddedAsset->jsonSize;
     const nlohmann::json config = nlohmann::json::parse(jsonBegin, jsonEnd);
-    return nam::get_dsp(config);
+    auto model = nam::get_dsp(config);
+    applyConfiguredSlimmableSize(model);
+    return model;
   }
 
-  return nam::get_dsp(std::filesystem::u8path(modelPath.Get()));
+  auto model = nam::get_dsp(std::filesystem::u8path(modelPath.Get()));
+  applyConfiguredSlimmableSize(model);
+  return model;
 }
 
 std::unique_ptr<ResamplingNAM> LoadResampledNAMForPath(const WDL_String& modelPath, const double sampleRate, const int blockSize)

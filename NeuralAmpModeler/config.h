@@ -11,14 +11,28 @@
 #define BUNDLE_NAME "RE-AMP"
 #define BUNDLE_MFR "RE-AMP"
 #define BUNDLE_DOMAIN "com"
+#define SHARED_RESOURCES_SUBPATH "RE-AMP"
+
+#ifndef NAM_SLIMMABLE_SIZE
+  // Build-time slim value for NAM models that implement nam::SlimmableModel.
+  // 0.0 = smallest/lowest CPU option exposed by the model, 1.0 = full size.
+  #define NAM_SLIMMABLE_SIZE 0.4
+#endif
+
+#ifndef NAM_CONFIG_SLIMMABLE_SIZE_CONSTANT_DEFINED
+  #define NAM_CONFIG_SLIMMABLE_SIZE_CONSTANT_DEFINED
+namespace NAMConfig
+{
+inline constexpr double SlimmableSize = NAM_SLIMMABLE_SIZE;
+}
+#endif
+
 #define NAM_STARTUP_TMPLOAD_DEFAULTS 1 // Dev/test helper: set to 0 to disable auto-loading tmpLoad defaults on app start.
 #define NAM_DEV_DIAGNOSTICS 1 // Dev/test helper: set to 0 to hide the diagnostics stats overlay.
 // Amp workflow profile: 0 = Rig Mode (editable slot model pickers), 1 = Release Mode (slot model edits locked).
-#define NAM_RELEASE_MODE 1
+#define NAM_RELEASE_MODE 0
 // Temporary preset migration guard: in release mode, ignore serialized amp model paths and always restore bundled models.
 #define NAM_RELEASE_IGNORE_PRESET_MODEL_PATHS 1
-
-#define SHARED_RESOURCES_SUBPATH "RE-AMP"
 
 #ifdef APP_API
   // Standalone host opens max channel count from this list.
