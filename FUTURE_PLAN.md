@@ -1,4 +1,4 @@
-Last updated: 2026-04-07
+Last updated: 2026-06-05
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -59,9 +59,14 @@ Outcome:
 Outcome:
 - A built-in compressor stomp is now available with a minimal musical control set
 
-### Done: Boost v2
+### Done: Modeled boost pedals
 Outcome:
-- The boost pedal supports switchable `A/B` model variants while sharing one control surface
+- The live boost pedal now uses two built-in modeled voices with a shared control surface
+
+Important nuances:
+- The boost mode switch now compares `TS` and `PD` voices in the live path
+- User-facing boost controls now display `0..10` with `5` at noon and no unit text
+- The old boost NAM slot plumbing still exists in code/settings for possible future development use, but it is no longer the live boost signal path
 
 ### Done: Amp model variants v1
 Outcome:
@@ -130,28 +135,27 @@ Important nuances:
 
 ## Active milestones
 
-### Milestone S: Preserve true stereo through the cab/IR path
+### Milestone R: Reverb output normalization UX pass
 Goal:
-- Remove the unintended mono collapse in the cab/IR section when the input path is truly stereo
+- Make reverb output feel more level-consistent across useful settings so users hear tone/space changes more than raw volume jumps
 
 Why now:
-- This is a correctness issue in the current stereo signal path
-- It should be resolved before more stereo/cab feature work is layered on top
+- This is the next small feature the user explicitly wants to work on
+- It is a contained DSP/UX follow-up that fits the current small-patch workflow
 
 Recommended implementation shape:
-- Trace channel routing from true stereo input through the amp stage, cab/IR stage, post-IR processing, and final output routing
-- Identify the exact point where the signal is summed or duplicated incorrectly
-- Reuse the existing stereo/mono routing scaffolding instead of adding a separate stereo path
-- Preserve the current effective-mono optimizations when the source is actually mono
-- Use the diagnostics overlay if useful to watch DSP load while changing routing
+- Identify which reverb controls currently create the most noticeable output gain swings in normal use
+- Prefer lightweight gain compensation or parameter-dependent makeup within the existing reverb path instead of broad architectural changes
+- Preserve some natural perceived loudness variation from tonal changes; the goal is better UX, not mathematically flat loudness at every setting
+- Keep the solution deterministic and easy to tune by ear in follow-up passes
 
 Risk:
 - Medium
 
 RT safety watch-outs:
 - No allocations/locks/I/O/logging in audio-thread paths
-- Keep per-channel routing deterministic and allocation-free in the callback
-- Avoid unnecessary channel duplication/copying in the hot path
+- Keep compensation in the existing audio-thread-safe DSP path
+- Avoid adding extra buffer passes unless they are clearly necessary
 
 ### Milestone B: Release asset packaging and final variant strategy
 Goal:
@@ -205,6 +209,7 @@ RT safety watch-outs:
 - Internal rename cleanup from `NeuralAmpModeler` to `RE-AMP` can wait unless the user asks
 - Continue amp/cab UI polish only if the user explicitly wants it
 - Keep those changes UI-only and isolated from DSP/state work where possible
+- Decide later whether the old boost NAM slot plumbing should be removed, hidden more deeply, or kept as a dev-only capability
 
 Examples:
 - per-slot art tweaks
@@ -213,7 +218,7 @@ Examples:
 - off-state visual language
 
 ## Recommended execution order from now
-1. Milestone S: preserve true stereo through the cab/IR path
+1. Milestone R: reverb output normalization UX pass
 2. Resume Milestone B when the final release asset set is clearer
 3. Milestone F only if the user returns to transpose
 4. Milestone D only after Cab v1 remains stable in regular use

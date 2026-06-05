@@ -1,4 +1,4 @@
-Last updated: 2026-06-04
+Last updated: 2026-06-05
 
 Purpose: concise handoff so a new agent can continue from the current stable baseline without replaying the full chat history.
 
@@ -10,7 +10,7 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 
 ## Current repository state
 - Active branch: `main`
-- HEAD at handoff: `2fb6591`
+- HEAD at handoff: `dab31ad`
 - Working tree at handoff:
   - clean
 - Current product name for user-facing outputs: `RE-AMP`
@@ -22,9 +22,15 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 - Release mode still embeds curated cab IRs and amp variant assets while allowing user-loaded custom IRs
 
 ## Recent relevant history before this handoff update
+- 2026-06-05: merged the modeled boost pedal overhaul to `main`; baseline HEAD is now `dab31ad`
+- 2026-06-05: finalized boost pedal graphics/layout polish, generic labeling, and user-facing `0..10` boost controls with internal remapping preserved
 - 2026-06-04: landed build-time A2 slimmable-size control for all plugin-loaded slimmable NAM models; baseline HEAD is now `2fb6591`
 - 2026-06-04: fast-forwarded local `main` to include the `iplug2-upstream-update` branch; baseline HEAD is now `9ae005c`
 - 2026-06-04: added a repo-level rule to `AGENTS.md` stating that the user builds manually from Visual Studio and agents must not run builds unless explicitly asked
+- `dab31ad` `Polish boost pedal UI`
+- `7dd499a` `Route boost mode to modeled pedals`
+- `8a776d8` `Add modeled boost DSP`
+- `81ab484` `Prepare modeled boost controls`
 - `2fb6591` `Apply build-time slim setting to slimmable NAM loads`
 - `9ae005c` `Update iPlug2 mono input selection fix`
 - `4a47cc4` `Link iPlug2 UTF8 helpers in app and VST3`
@@ -95,7 +101,22 @@ Landed details:
 - Added release-mode embedded IR assets for the five `421` captures
 - Added missing Windows resource registration in `main.rc` so the new bitmap actually loads at runtime
 
-### 5) The broader feature baseline from earlier work still applies
+### 5) Modeled boost pedals are now landed on `main`
+Outcome:
+- The old boost `A/B` NAM switch path has been replaced in live use by two built-in modeled pedals.
+- The boost mode switch now compares `TS` and `PD` voices instead of loading stomp NAMs in the signal path.
+- The pedal graphics/layout were refreshed and the boost controls are now presented more like a hardware pedal.
+
+Important landed details:
+- Both boost modes are fully programmatic DSP and use preallocated state with 2x oversampled processing.
+- `Boost Drive`, `Boost Character`, and `Output Volume` now present as `0.0 .. 10.0` with `5.0` at noon and no unit text.
+- Internal remapping preserves the current DSP tuning:
+  - Drive control `0..10` maps to the prior `-10..+10 dB` range.
+  - Output level control `0..10` maps to the prior `-15..+15 dB` range.
+- The live mode switch is intentionally labeled generically (`Boost Type`) so users evaluate by ear rather than by brand matching.
+- The old stomp NAM boost assets/paths/loaders still exist in the codebase/settings flow for now; they were not deleted in this pass and may still be useful for future development experiments.
+
+### 6) The broader feature baseline from earlier work still applies
 Already landed on `main`:
 - Metering overhaul
 - Gate/stomp decoupling
@@ -104,14 +125,13 @@ Already landed on `main`:
 - Interactive Cab V1
 - Embedded curated cab IRs for release mode
 - Compressor stomp pedal v1
-- Boost v2 with `A/B` model selection
 - Amp model variants v1
 - Doubler improvement pass
 - Startup/default asset refresh
 - Amp-face scaffolding and slot-specific amp UI work
 - Tuner improvements and tuner UI polish
 
-### 6) Amp 2 tuning work is now landed on `main`
+### 7) Amp 2 tuning work is now landed on `main`
 Outcome:
 - Amp 2 no longer uses the old generic shared voicing as-is.
 - Amp 2 now has its own tuned post-model tone stack, slot-specific pre-gain taper, and a saturating master behavior.
@@ -122,7 +142,7 @@ Important landed details:
 - Amp 2 `Pre Gain` is intentionally remapped to `-20 dB / -5 dB / +10 dB` at min / noon / max.
 - Amp 2 `Master` now rises mostly as level first, then adds saturation/compression in the upper range instead of behaving as pure post-volume.
 
-### 7) Dev diagnostics overlay is now landed on `main`
+### 8) Dev diagnostics overlay is now landed on `main`
 Outcome:
 - A dev-only diagnostics readout can now be shown in both standalone and plugin builds.
 
@@ -131,7 +151,7 @@ Important landed details:
 - Standalone shows sample rate, block size, buffer latency estimate, DSP latency, DSP load, process CPU `current/average/peak`, and RAM.
 - Plugin builds intentionally omit CPU/RAM and show only DSP/buffer/latency stats, because plugin CPU/RAM would mostly reflect the host DAW process.
 
-### 8) A2 support and iPlug2 upstream updates are now part of the current baseline
+### 9) A2 support and iPlug2 upstream updates are now part of the current baseline
 Outcome:
 - `main` now includes the A2 dependency update plus the later iPlug2 upstream integration work that followed on top of it.
 
@@ -141,7 +161,7 @@ Important landed details:
 - Those follow-up commits cover upstream branch refresh, RtAudio validation, popup menu compatibility, UTF-8 helper linkage for app/VST3, and mono input selection behavior.
 - The current local `main` branch is the preferred starting baseline for further work.
 
-### 9) Build-time A2 slimmable-size control is now landed on `main`
+### 10) Build-time A2 slimmable-size control is now landed on `main`
 Outcome:
 - The plugin now applies a build-time slim value to every loaded NAM model that implements `nam::SlimmableModel`.
 
@@ -160,6 +180,7 @@ Important landed details:
 - User now builds manually after patches; do not run builds unless the user explicitly asks.
 - That build rule is now also recorded directly in `AGENTS.md`, not only in this handoff file.
 - The earlier stereo-collapse-through-cab concern appears to have been addressed by `d41b00c` (`Preserve stereo through cab IR processing`); do not reopen that investigation unless the user reports a current regression.
+- The modeled boost pedal baseline is now the accepted path on `main`; do not route the live stomp switch back through boost NAM slots unless the user explicitly asks.
 - Prefer small, reviewable follow-ups from the current stable `main` baseline.
 - Internal `NeuralAmpModeler` naming cleanup can wait.
 - If future work needs A2 CPU tuning, start from the landed `NAM_SLIMMABLE_SIZE` hook instead of adding a second model-load path.
@@ -186,6 +207,7 @@ Important landed details:
 ## Suggested next coding step
 1. Continue from the current stable `main` baseline and prefer small, reviewable follow-ups in the area the user explicitly requests next.
 2. If stereo behavior is questioned again, treat it as regression verification against `d41b00c` rather than an open unresolved architecture problem.
+3. The next small feature the user wants to tackle is normalizing reverb output for better UX.
 
 ## Starter prompt for the next agent
 You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
@@ -208,7 +230,7 @@ Current baseline:
 2. External-facing rebrand to `RE-AMP` is landed
 3. Amp bypass routing/state handling fixes are landed
 4. Curated cab mic set now includes `S-57`, `R-121`, and `M-421`
-5. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, boost v2, amp variants v1, doubler improvements, startup/default asset refresh, and slot-specific amp UI work are already landed
+5. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, amp variants v1, doubler improvements, startup/default asset refresh, and slot-specific amp UI work are already landed
 6. Do not reopen tuner work unless the user explicitly asks
 7. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
 8. Amp 2 custom tuning is landed on `main`: custom tone stack voicing, slot-specific `Pre Gain` taper, and a saturating `Master` behavior
@@ -217,8 +239,14 @@ Current baseline:
 11. Build-time A2 slimmable-size control is landed on `main` via `NAM_SLIMMABLE_SIZE` / `NAMConfig::SlimmableSize`, applied in `LoadNAMDSPForPath()`
 12. The user now builds manually after patches; do not run builds unless explicitly asked
 13. That no-build-without-user-prompt rule is now written directly in `AGENTS.md`
+14. The live boost pedal is now a built-in modeled dual-voice pedal on `main`:
+   - Boost mode switch compares `TS` and `PD`
+   - User-facing controls are `Boost Drive`, `Boost Character`, and `Output Volume`
+   - Those controls display `0..10` with `5` at noon and no unit text
+15. The old boost NAM slot plumbing still exists in code/settings for possible future development use, but it is not the live boost signal path now
 
 Suggested next task unless the user redirects:
 1. Start from the current `main` baseline and follow the user's next requested task
 2. If stereo behavior is reported again, verify against the `d41b00c` cab/IR stereo-preservation changes first
-3. Keep the patch small and reviewable from the current stable `main` baseline
+3. The next small feature request is normalizing reverb output for better UX
+4. Keep the patch small and reviewable from the current stable `main` baseline
