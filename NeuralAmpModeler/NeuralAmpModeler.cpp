@@ -159,6 +159,13 @@ int GetCabSlotPanParamIdx(const int slotIndex)
   return (slotIndex == 0) ? kCabAPan : kCabBPan;
 }
 
+double MakeOnePoleLowPassCoeff(const double frequencyHz, const double sampleRate)
+{
+  const double safeSampleRate = std::max(1.0, sampleRate);
+  const double clampedFrequency = std::clamp(frequencyHz, 1.0, 0.45 * safeSampleRate);
+  return 1.0 - std::exp(-2.0 * kPi * clampedFrequency / safeSampleRate);
+}
+
 #if NAM_DEV_DIAGNOSTICS
 uint64_t GetSteadyClockNowNs()
 {
@@ -4311,6 +4318,8 @@ void NeuralAmpModeler::OnReset()
   mStompBoostDriveSmoothCoeff = std::exp(-1.0 / (boostDriveSmoothSampleRate * kBoostDriveSmoothTimeSeconds));
   mStompBoostSmoothedDriveGain = DBToAmp(GetParam(kStompBoostDrive)->Value());
   _ResetBuiltInCompressor(sampleRate);
+  _ResetBuiltInTSBoost(sampleRate);
+  _ResetBuiltInPrecisionBoost(sampleRate);
   for (int slotIndex = 0; slotIndex < static_cast<int>(mToneStacks.size()); ++slotIndex)
   {
     if (mToneStacks[slotIndex] != nullptr)
@@ -9166,6 +9175,270 @@ void NeuralAmpModeler::_ProcessBuiltInCompressor(iplug::sample** inputs, iplug::
         inputSample * DBToAmp(-gainReductionDb) * autoMakeupGain * mBuiltInCompressor.smoothedLevelGain;
 
       outputs[c][s] = std::isfinite(compressed) ? static_cast<sample>(compressed) : 0.0f;
+    }
+  }
+}
+
+void NeuralAmpModeler::_ResetBuiltInTSBoost(const double sampleRate)
+{
+  mBuiltInTSBoost.sampleRate = std::max(1.0, sampleRate);
+  mBuiltInTSBoost.oversampledSampleRate = 2.0 * mBuiltInTSBoost.sampleRate;
+  constexpr double kControlSmoothTimeSeconds = 0.02;
+  mBuiltInTSBoost.controlSmoothCoeff =
+    std::exp(-1.0 / (mBuiltInTSBoost.sampleRate * kControlSmoothTimeSeconds));
+  mBuiltInTSBoost.preHighPassCoeff = MakeOnePoleLowPassCoeff(700.0, mBuiltInTSBoost.oversampledSampleRate);
+  mBuiltInTSBoost.darkToneLowPassCoeff = MakeOnePoleLowPassCoeff(550.0, mBuiltInTSBoost.oversampledSampleRate);
+  mBuiltInTSBoost.brightToneLowPassCoeff = MakeOnePoleLowPassCoeff(14500.0, mBuiltInTSBoost.oversampledSampleRate);
+  mBuiltInTSBoost.antiAliasLowPassCoeff =
+    MakeOnePoleLowPassCoeff(std::min(16000.0, 0.42 * mBuiltInTSBoost.sampleRate), mBuiltInTSBoost.oversampledSampleRate);
+  mBuiltInTSBoost.smoothedDriveGain = DBToAmp(31.0 + GetParam(kStompBoostDrive)->Value());
+  mBuiltInTSBoost.smoothedDriveAmount = std::clamp((GetParam(kStompBoostDrive)->Value() + 10.0) * 0.05, 0.0, 1.0);
+  mBuiltInTSBoost.smoothedTone = std::clamp(GetParam(kStompBoostTone)->Value() * 0.1, 0.0, 1.0);
+  mBuiltInTSBoost.smoothedLevelGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
+  mBuiltInTSBoost.previousInput.fill(0.0);
+  mBuiltInTSBoost.preHighPassLowState.fill(0.0);
+  mBuiltInTSBoost.darkToneState.fill(0.0);
+  mBuiltInTSBoost.brightToneState.fill(0.0);
+  mBuiltInTSBoost.antiAliasState.fill(0.0);
+}
+
+double NeuralAmpModeler::_ProcessBuiltInTSBoostSubSample(const size_t channel,
+                                                         const double inputSample,
+                                                         const double driveGain,
+                                                         const double driveAmount,
+                                                         const double tone,
+                                                         const double levelGain)
+{
+  if (channel >= kNumChannelsInternal)
+    return inputSample;
+
+  constexpr double kInputTrimGain = 1.15;
+  constexpr double kClipDriveTrim = 1.20;
+  constexpr double kDriveNormalizationInput = 0.12;
+  constexpr double kOutputTrimGain = 1.35;
+  constexpr double kClipBias = 0.035;
+
+  const double trimmedInput = inputSample * kInputTrimGain;
+  double& preLowState = mBuiltInTSBoost.preHighPassLowState[channel];
+  preLowState += mBuiltInTSBoost.preHighPassCoeff * (trimmedInput - preLowState);
+  const double tightenedInput = trimmedInput - preLowState;
+  const double voicedInput = 0.78 * tightenedInput + 0.22 * trimmedInput;
+  const double driveScale = driveGain * kClipDriveTrim;
+  const double lowDriveFocus = (1.0 - std::clamp(driveAmount, 0.0, 1.0)) * (1.0 - std::clamp(driveAmount, 0.0, 1.0));
+  const double lowDriveSoftBlend = 0.24 * lowDriveFocus;
+  const double effectiveDriveScale = driveScale * (1.0 - lowDriveSoftBlend) + lowDriveSoftBlend;
+  const double driven = voicedInput * effectiveDriveScale;
+  const double clipBiasShaped = static_cast<double>(nam::activations::fast_tanh(static_cast<float>(kClipBias)));
+  const double clipped =
+    static_cast<double>(nam::activations::fast_tanh(static_cast<float>(driven + kClipBias))) - clipBiasShaped;
+  const double driveNormalizationDenom =
+    std::max(1.0e-6,
+             static_cast<double>(
+               nam::activations::fast_tanh(static_cast<float>(kDriveNormalizationInput * effectiveDriveScale + kClipBias)))
+               - clipBiasShaped);
+  const double driveNormalized = clipped * (kDriveNormalizationInput / driveNormalizationDenom);
+
+  double& darkToneState = mBuiltInTSBoost.darkToneState[channel];
+  double& brightToneState = mBuiltInTSBoost.brightToneState[channel];
+  darkToneState += mBuiltInTSBoost.darkToneLowPassCoeff * (driveNormalized - darkToneState);
+  brightToneState += mBuiltInTSBoost.brightToneLowPassCoeff * (driveNormalized - brightToneState);
+  const double toneBlend = std::clamp(tone, 0.0, 1.0);
+  const double brightBand = driveNormalized - darkToneState;
+  const double lowDriveEdge = 0.10 * lowDriveFocus * brightBand;
+  const double vintageMidPush = 0.07 * (1.0 - 0.45 * toneBlend) * darkToneState;
+  const double toneShaped =
+    darkToneState + toneBlend * (brightToneState - darkToneState) + (0.21 * toneBlend * toneBlend * brightBand)
+    + vintageMidPush + lowDriveEdge;
+
+  double& antiAliasState = mBuiltInTSBoost.antiAliasState[channel];
+  antiAliasState += mBuiltInTSBoost.antiAliasLowPassCoeff * (toneShaped - antiAliasState);
+  const double driveBlend = std::clamp(driveAmount, 0.0, 1.0);
+  const double upperToneBlend = std::clamp((toneBlend - 0.5) * 2.0, 0.0, 1.0);
+  const double driveCompensationBlend = 0.85 * driveBlend + 0.15 * driveBlend * driveBlend;
+  const double outputCompensationDB =
+    -(10 * driveCompensationBlend + 1.5 * upperToneBlend * upperToneBlend
+      + 1.4 * driveBlend * upperToneBlend);
+  return antiAliasState * DBToAmp(outputCompensationDB) * levelGain * kOutputTrimGain;
+}
+
+void NeuralAmpModeler::_ProcessBuiltInTSBoost(iplug::sample** inputs, iplug::sample** outputs, const size_t numChannels,
+                                              const size_t numFrames)
+{
+  if (inputs == nullptr || outputs == nullptr)
+    return;
+
+  const size_t channelsToProcess = std::min(numChannels, kNumChannelsInternal);
+  const double driveTargetGain = DBToAmp(31.0 + GetParam(kStompBoostDrive)->Value());
+  const double driveAmountTarget = std::clamp((GetParam(kStompBoostDrive)->Value() + 10.0) * 0.05, 0.0, 1.0);
+  const double toneTarget = std::clamp(GetParam(kStompBoostTone)->Value() * 0.1, 0.0, 1.0);
+  const double levelTargetGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
+  const double controlCoeff = mBuiltInTSBoost.controlSmoothCoeff;
+
+  for (size_t s = 0; s < numFrames; ++s)
+  {
+    mBuiltInTSBoost.smoothedDriveGain =
+      driveTargetGain + controlCoeff * (mBuiltInTSBoost.smoothedDriveGain - driveTargetGain);
+    mBuiltInTSBoost.smoothedDriveAmount =
+      driveAmountTarget + controlCoeff * (mBuiltInTSBoost.smoothedDriveAmount - driveAmountTarget);
+    mBuiltInTSBoost.smoothedTone =
+      toneTarget + controlCoeff * (mBuiltInTSBoost.smoothedTone - toneTarget);
+    mBuiltInTSBoost.smoothedLevelGain =
+      levelTargetGain + controlCoeff * (mBuiltInTSBoost.smoothedLevelGain - levelTargetGain);
+
+    for (size_t c = 0; c < channelsToProcess; ++c)
+    {
+      if (inputs[c] == nullptr || outputs[c] == nullptr)
+        continue;
+
+      const double inputSample = static_cast<double>(inputs[c][s]);
+      const double midpointSample = 0.5 * (mBuiltInTSBoost.previousInput[c] + inputSample);
+      const double firstHalf =
+        _ProcessBuiltInTSBoostSubSample(c, midpointSample, mBuiltInTSBoost.smoothedDriveGain,
+                                        mBuiltInTSBoost.smoothedDriveAmount, mBuiltInTSBoost.smoothedTone,
+                                        mBuiltInTSBoost.smoothedLevelGain);
+      const double secondHalf =
+        _ProcessBuiltInTSBoostSubSample(c, inputSample, mBuiltInTSBoost.smoothedDriveGain,
+                                        mBuiltInTSBoost.smoothedDriveAmount, mBuiltInTSBoost.smoothedTone,
+                                        mBuiltInTSBoost.smoothedLevelGain);
+      mBuiltInTSBoost.previousInput[c] = inputSample;
+
+      const double outputSample = 0.5 * (firstHalf + secondHalf);
+      outputs[c][s] = std::isfinite(outputSample) ? static_cast<sample>(outputSample) : 0.0f;
+    }
+  }
+}
+
+void NeuralAmpModeler::_ResetBuiltInPrecisionBoost(const double sampleRate)
+{
+  mBuiltInPrecisionBoost.sampleRate = std::max(1.0, sampleRate);
+  mBuiltInPrecisionBoost.oversampledSampleRate = 2.0 * mBuiltInPrecisionBoost.sampleRate;
+  constexpr double kControlSmoothTimeSeconds = 0.02;
+  mBuiltInPrecisionBoost.controlSmoothCoeff =
+    std::exp(-1.0 / (mBuiltInPrecisionBoost.sampleRate * kControlSmoothTimeSeconds));
+  mBuiltInPrecisionBoost.attackLowCutLowCoeff =
+    MakeOnePoleLowPassCoeff(320.0, mBuiltInPrecisionBoost.oversampledSampleRate);
+  mBuiltInPrecisionBoost.attackLowCutHighCoeff =
+    MakeOnePoleLowPassCoeff(1150.0, mBuiltInPrecisionBoost.oversampledSampleRate);
+  mBuiltInPrecisionBoost.bodyLowPassCoeff =
+    MakeOnePoleLowPassCoeff(1050.0, mBuiltInPrecisionBoost.oversampledSampleRate);
+  mBuiltInPrecisionBoost.brightLowPassCoeff =
+    MakeOnePoleLowPassCoeff(3100.0, mBuiltInPrecisionBoost.oversampledSampleRate);
+  mBuiltInPrecisionBoost.antiAliasLowPassCoeff =
+    MakeOnePoleLowPassCoeff(std::min(17000.0, 0.43 * mBuiltInPrecisionBoost.sampleRate),
+                            mBuiltInPrecisionBoost.oversampledSampleRate);
+  const double precisionDriveAmount = std::clamp((GetParam(kStompBoostDrive)->Value() + 10.0) * 0.05, 0.0, 1.0);
+  mBuiltInPrecisionBoost.smoothedDriveGain =
+    DBToAmp(7.0 + 20.0 * precisionDriveAmount + 4.0 * precisionDriveAmount * precisionDriveAmount);
+  mBuiltInPrecisionBoost.smoothedCharacter = std::clamp(GetParam(kStompBoostTone)->Value() * 0.1, 0.0, 1.0);
+  mBuiltInPrecisionBoost.smoothedLevelGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
+  mBuiltInPrecisionBoost.previousInput.fill(0.0);
+  mBuiltInPrecisionBoost.attackLowState.fill(0.0);
+  mBuiltInPrecisionBoost.bodyState.fill(0.0);
+  mBuiltInPrecisionBoost.brightState.fill(0.0);
+  mBuiltInPrecisionBoost.antiAliasState.fill(0.0);
+}
+
+double NeuralAmpModeler::_ProcessBuiltInPrecisionBoostSubSample(const size_t channel,
+                                                                const double inputSample,
+                                                                const double driveGain,
+                                                                const double character,
+                                                                const double levelGain)
+{
+  if (channel >= kNumChannelsInternal)
+    return inputSample;
+
+  constexpr double kInputTrimGain = 1.08;
+  constexpr double kClipDriveTrim = 0.92;
+  constexpr double kDriveNormalizationInput = 0.10;
+  constexpr double kOutputTrimGain = 1.30;
+
+  const double characterBlend = std::clamp(character, 0.0, 1.0);
+  const double attackBlend = characterBlend * characterBlend * (3.0 - 2.0 * characterBlend);
+  const double attackCoeff =
+    mBuiltInPrecisionBoost.attackLowCutLowCoeff
+    + attackBlend * (mBuiltInPrecisionBoost.attackLowCutHighCoeff - mBuiltInPrecisionBoost.attackLowCutLowCoeff);
+
+  const double trimmedInput = inputSample * kInputTrimGain;
+  double& attackLowState = mBuiltInPrecisionBoost.attackLowState[channel];
+  attackLowState += attackCoeff * (trimmedInput - attackLowState);
+  const double tightenedInput = trimmedInput - attackLowState;
+  const double lowerMidPunch = 0.28 * (1.0 - attackBlend) * attackLowState;
+  const double attackVoicedInput = tightenedInput + lowerMidPunch;
+
+  const double driveScale = driveGain * kClipDriveTrim;
+  const double driven = attackVoicedInput * driveScale;
+  const double clipped = static_cast<double>(nam::activations::fast_tanh(static_cast<float>(driven)));
+  const double driveNormalizationDenom =
+    std::max(1.0e-6,
+             static_cast<double>(
+               nam::activations::fast_tanh(static_cast<float>(kDriveNormalizationInput * driveScale))));
+  const double driveNormalized = clipped * (kDriveNormalizationInput / driveNormalizationDenom);
+  const double cleanBlend = 0.18 + 0.10 * characterBlend;
+  const double driveVoiced = (1.0 - cleanBlend) * driveNormalized + cleanBlend * attackVoicedInput;
+
+  double& bodyState = mBuiltInPrecisionBoost.bodyState[channel];
+  double& brightState = mBuiltInPrecisionBoost.brightState[channel];
+  bodyState += mBuiltInPrecisionBoost.bodyLowPassCoeff * (driveVoiced - bodyState);
+  brightState += mBuiltInPrecisionBoost.brightLowPassCoeff * (driveVoiced - brightState);
+  const double pickBand = driveVoiced - brightState;
+  const double bodyPush = 0.16 * (1.0 - characterBlend) * bodyState;
+  const double brightPush = (0.08 + 0.30 * characterBlend * characterBlend) * pickBand;
+  const double characterMakeupBlend = 0.50 * characterBlend + 0.50 * characterBlend * characterBlend;
+  const double characterMakeupGain = DBToAmp(8.0 * characterMakeupBlend);
+  const double driveAmount =
+    std::clamp((AmpToDB(std::max(driveGain, 1.0e-9)) - 7.0) / 24.0, 0.0, 1.0);
+  const double driveCompensationBlend = 0.35 * driveAmount + 0.65 * driveAmount * driveAmount;
+  const double driveCompensationGain = DBToAmp(-6.0 * driveCompensationBlend);
+  const double characterShaped =
+    (driveVoiced + bodyPush + brightPush) * characterMakeupGain * driveCompensationGain;
+
+  double& antiAliasState = mBuiltInPrecisionBoost.antiAliasState[channel];
+  antiAliasState += mBuiltInPrecisionBoost.antiAliasLowPassCoeff * (characterShaped - antiAliasState);
+  return antiAliasState * levelGain * kOutputTrimGain;
+}
+
+void NeuralAmpModeler::_ProcessBuiltInPrecisionBoost(iplug::sample** inputs, iplug::sample** outputs,
+                                                     const size_t numChannels, const size_t numFrames)
+{
+  if (inputs == nullptr || outputs == nullptr)
+    return;
+
+  const size_t channelsToProcess = std::min(numChannels, kNumChannelsInternal);
+  const double precisionDriveAmount = std::clamp((GetParam(kStompBoostDrive)->Value() + 10.0) * 0.05, 0.0, 1.0);
+  const double driveTargetGain =
+    DBToAmp(7.0 + 20.0 * precisionDriveAmount + 4.0 * precisionDriveAmount * precisionDriveAmount);
+  const double characterTarget = std::clamp(GetParam(kStompBoostTone)->Value() * 0.1, 0.0, 1.0);
+  const double levelTargetGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
+  const double controlCoeff = mBuiltInPrecisionBoost.controlSmoothCoeff;
+
+  for (size_t s = 0; s < numFrames; ++s)
+  {
+    mBuiltInPrecisionBoost.smoothedDriveGain =
+      driveTargetGain + controlCoeff * (mBuiltInPrecisionBoost.smoothedDriveGain - driveTargetGain);
+    mBuiltInPrecisionBoost.smoothedCharacter =
+      characterTarget + controlCoeff * (mBuiltInPrecisionBoost.smoothedCharacter - characterTarget);
+    mBuiltInPrecisionBoost.smoothedLevelGain =
+      levelTargetGain + controlCoeff * (mBuiltInPrecisionBoost.smoothedLevelGain - levelTargetGain);
+
+    for (size_t c = 0; c < channelsToProcess; ++c)
+    {
+      if (inputs[c] == nullptr || outputs[c] == nullptr)
+        continue;
+
+      const double inputSample = static_cast<double>(inputs[c][s]);
+      const double midpointSample = 0.5 * (mBuiltInPrecisionBoost.previousInput[c] + inputSample);
+      const double firstHalf =
+        _ProcessBuiltInPrecisionBoostSubSample(c, midpointSample, mBuiltInPrecisionBoost.smoothedDriveGain,
+                                               mBuiltInPrecisionBoost.smoothedCharacter,
+                                               mBuiltInPrecisionBoost.smoothedLevelGain);
+      const double secondHalf =
+        _ProcessBuiltInPrecisionBoostSubSample(c, inputSample, mBuiltInPrecisionBoost.smoothedDriveGain,
+                                               mBuiltInPrecisionBoost.smoothedCharacter,
+                                               mBuiltInPrecisionBoost.smoothedLevelGain);
+      mBuiltInPrecisionBoost.previousInput[c] = inputSample;
+
+      const double outputSample = 0.5 * (firstHalf + secondHalf);
+      outputs[c][s] = std::isfinite(outputSample) ? static_cast<sample>(outputSample) : 0.0f;
     }
   }
 }

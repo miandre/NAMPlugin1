@@ -455,6 +455,46 @@ private:
     std::array<double, kNumChannelsInternal> detectorEnvelope = {0.0, 0.0};
   };
 
+  struct BuiltInTSBoostState
+  {
+    double sampleRate = 48000.0;
+    double oversampledSampleRate = 96000.0;
+    double controlSmoothCoeff = 0.0;
+    double preHighPassCoeff = 0.0;
+    double darkToneLowPassCoeff = 0.0;
+    double brightToneLowPassCoeff = 0.0;
+    double antiAliasLowPassCoeff = 0.0;
+    double smoothedDriveGain = 1.0;
+    double smoothedDriveAmount = 0.5;
+    double smoothedTone = 0.5;
+    double smoothedLevelGain = 1.0;
+    std::array<double, kNumChannelsInternal> previousInput = {0.0, 0.0};
+    std::array<double, kNumChannelsInternal> preHighPassLowState = {0.0, 0.0};
+    std::array<double, kNumChannelsInternal> darkToneState = {0.0, 0.0};
+    std::array<double, kNumChannelsInternal> brightToneState = {0.0, 0.0};
+    std::array<double, kNumChannelsInternal> antiAliasState = {0.0, 0.0};
+  };
+
+  struct BuiltInPrecisionBoostState
+  {
+    double sampleRate = 48000.0;
+    double oversampledSampleRate = 96000.0;
+    double controlSmoothCoeff = 0.0;
+    double attackLowCutLowCoeff = 0.0;
+    double attackLowCutHighCoeff = 0.0;
+    double bodyLowPassCoeff = 0.0;
+    double brightLowPassCoeff = 0.0;
+    double antiAliasLowPassCoeff = 0.0;
+    double smoothedDriveGain = 1.0;
+    double smoothedCharacter = 0.5;
+    double smoothedLevelGain = 1.0;
+    std::array<double, kNumChannelsInternal> previousInput = {0.0, 0.0};
+    std::array<double, kNumChannelsInternal> attackLowState = {0.0, 0.0};
+    std::array<double, kNumChannelsInternal> bodyState = {0.0, 0.0};
+    std::array<double, kNumChannelsInternal> brightState = {0.0, 0.0};
+    std::array<double, kNumChannelsInternal> antiAliasState = {0.0, 0.0};
+  };
+
   enum class TopNavSection : int
   {
     Amp = 0,
@@ -591,6 +631,15 @@ private:
 #endif
   void _ResetBuiltInCompressor(double sampleRate);
   void _ProcessBuiltInCompressor(iplug::sample** inputs, iplug::sample** outputs, size_t numChannels, size_t numFrames);
+  void _ResetBuiltInTSBoost(double sampleRate);
+  double _ProcessBuiltInTSBoostSubSample(size_t channel, double inputSample, double driveGain, double driveAmount,
+                                         double tone, double levelGain);
+  void _ProcessBuiltInTSBoost(iplug::sample** inputs, iplug::sample** outputs, size_t numChannels, size_t numFrames);
+  void _ResetBuiltInPrecisionBoost(double sampleRate);
+  double _ProcessBuiltInPrecisionBoostSubSample(size_t channel, double inputSample, double driveGain, double character,
+                                                double levelGain);
+  void _ProcessBuiltInPrecisionBoost(iplug::sample** inputs, iplug::sample** outputs, size_t numChannels,
+                                     size_t numFrames);
 
   // See: Unserialization.cpp
   void _UnserializeApplyConfig(nlohmann::json& config);
@@ -700,6 +749,8 @@ private:
   double mStompBoostDriveSmoothCoeff = 0.0;
   double mStompBoostSmoothedDriveGain = 1.0;
   BuiltInCompressorState mBuiltInCompressor;
+  BuiltInTSBoostState mBuiltInTSBoost;
+  BuiltInPrecisionBoostState mBuiltInPrecisionBoost;
 
   // Noise gates
   dsp::noise_gate::Trigger mNoiseGateTrigger;
