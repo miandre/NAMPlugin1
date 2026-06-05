@@ -132,6 +132,7 @@ enum EParams
   kStompCompressorActive,
   kStompBoostDrive,
   kStompBoostType,
+  kStompBoostTone,
   kNumParams
 };
 

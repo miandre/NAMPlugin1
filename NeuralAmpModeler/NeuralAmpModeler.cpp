@@ -1230,12 +1230,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kVirtualDoubleAmount)->InitDouble("Double", 65.0, 0.0, 100.0, 0.1, "");
   GetParam(kNoiseGateReleaseMs)->InitDouble("Gate Release", 40.0, 1.0, 100.0, 1.0, "");
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
-  GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -20.0, 20.0, 0.1);
+  GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -15.0, 15.0, 0.1);
   GetParam(kStompBoostActive)->InitBool("BoostActive", false);
   GetParam(kStompBoostDrive)->InitGain("Boost Drive", 0.0, -10.0, 10.0, 0.1);
-  GetParam(kStompBoostType)->InitBool("Boost Type", false);
-  GetParam(kStompBoostType)->SetDisplayText(0.0, "A");
-  GetParam(kStompBoostType)->SetDisplayText(1.0, "B");
+  GetParam(kStompBoostTone)->InitDouble("Boost Character", 5.0, 0.0, 10.0, 0.1);
+  GetParam(kStompBoostType)->InitBool("Boost Mode", false);
+  GetParam(kStompBoostType)->SetDisplayText(0.0, "TS");
+  GetParam(kStompBoostType)->SetDisplayText(1.0, "PD");
   GetParam(kStompCompressorAmount)->InitDouble("Comp", 0.0, 0.0, 100.0, 0.1, "%");
   GetParam(kStompCompressorLevel)->InitGain("Comp Level", 0.0, -18.0, 24.0, 0.1);
   GetParam(kStompCompressorHard)->InitBool("Comp Hard", false);
@@ -1639,6 +1640,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float stompCompressorSwitchX = designToUIX(1052.0f);
     const float stompCompressorSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
     const float stompBoostDriveX = designToUIX(1875.0f);
+    const float stompBoostToneX = designToUIX(2050.0f);
     const float stompBoostLevelX = designToUIX(2225.0f);
     const float stompBoostTypeX = designToUIX(2052.0f);
     const float stompBoostTypeY = designToUIY(1111.0f) + kStompButtonAnchorOffsetY;
@@ -1648,6 +1650,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const auto stompCompressorAmountArea = makePedalKnobArea(stompCompressorAmountX, stompKnobY);
     const auto stompCompressorLevelArea = makePedalKnobArea(stompCompressorLevelX, stompKnobY);
     const auto stompBoostDriveArea = makePedalKnobArea(stompBoostDriveX, stompKnobY);
+    const auto stompBoostToneArea = makePedalKnobArea(stompBoostToneX, stompKnobY);
     const auto stompBoostLevelArea = makePedalKnobArea(stompBoostLevelX, stompKnobY);
     const float stompButtonScale = 0.6f;
     const float stompButtonW =
@@ -2580,7 +2583,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       new NAMBitmapToggleControl(stompBoostTypeArea, kStompBoostType, horizonalSwitchLeftBitmap, horizonalSwitchRightBitmap),
       -1,
       "STOMP_CONTROLS")
-      ->SetTooltip("Boost voice: A / B.");
+      ->SetTooltip("Boost mode: TS style / Precision Drive style.");
     pGraphics->AttachControl(new NAMBitmapLEDControl(stompBoostOnLedArea, redLedOnBitmap, redLedOffBitmap),
                              kCtrlTagBoostOnLED,
                              "STOMP_CONTROLS");
@@ -2699,7 +2702,13 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "STOMP_CONTROLS")
-      ->SetTooltip("Boost model input drive.");
+      ->SetTooltip("Boost drive.");
+    pGraphics->AttachControl(
+      new NAMPedalKnobControl(stompBoostToneArea, kStompBoostTone, "", fxKnobNoLabelStyle, pedalKnobBitmap,
+                              pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
+      -1,
+      "STOMP_CONTROLS")
+      ->SetTooltip("Boost character. TS mode controls tone; PD mode blends attack tightness and bright cut.");
     pGraphics->AttachControl(
       new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "", fxKnobNoLabelStyle, pedalKnobBitmap,
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
