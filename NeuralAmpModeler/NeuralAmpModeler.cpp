@@ -3314,14 +3314,10 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     }
   }
   const bool noiseGateActive = GetParam(kNoiseGateActive)->Value();
-  const bool useBoostB = GetParam(kStompBoostType)->Bool();
-  ResamplingNAM* const activeStompModel = useBoostB ? mStompModelB.get() : mStompModel.get();
-  ResamplingNAM* const activeStompModelRight = useBoostB ? mStompModelRightB.get() : mStompModelRight.get();
-  const bool haveStereoStomp = (activeStompModel != nullptr) && (activeStompModelRight != nullptr);
+  const bool usePrecisionBoost = GetParam(kStompBoostType)->Bool();
   const bool compressorEnabled = mActiveStompCompressorEnabled && !stompBypassed;
-  const bool boostEnabled = mActiveStompBoostEnabled && !stompBypassed
-                            && ((numChannelsMonoCore == 1) ? (activeStompModel != nullptr) : haveStereoStomp);
-  const double boostDriveTargetGain = DBToAmp(GetParam(kStompBoostDrive)->Value());
+  const bool tsBoostEnabled = mActiveStompBoostEnabled && !stompBypassed && !usePrecisionBoost;
+  const bool precisionBoostEnabled = mActiveStompBoostEnabled && !stompBypassed && usePrecisionBoost;
   const bool modelActive = requestedAmpModelEnabled;
   const bool haveStereoModel = (mModel != nullptr) && (mModelRight != nullptr);
   const bool haveModelForCore = (numChannelsMonoCore == 1) ? (mModel != nullptr) : haveStereoModel;
@@ -3331,7 +3327,6 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
   const bool tunerActive = GetParam(kTunerActive)->Bool();
   const int transposeSemitones = static_cast<int>(std::lround(GetParam(kTransposeSemitones)->Value()));
   const NoiseGateMacroParams gateMacro = GetNoiseGateMacroParams(GetParam(kNoiseGateThreshold)->Value());
-  const double boostLevelGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
   const double preModelGain = mActiveAmpPreModelGain;
 
   if (tunerActive)
@@ -3459,63 +3454,17 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     modelInputPointers = compressorOutPointers;
   }
 
-  if (boostEnabled)
+  if (tsBoostEnabled)
   {
-    const bool shouldApplyBoostDrive =
-      (boostDriveTargetGain != 1.0) || (std::abs(mStompBoostSmoothedDriveGain - boostDriveTargetGain) > 1.0e-6);
-    if (shouldApplyBoostDrive)
-    {
-      const double boostDriveCoeff = mStompBoostDriveSmoothCoeff;
-      for (size_t s = 0; s < nFrames; ++s)
-      {
-        mStompBoostSmoothedDriveGain =
-          boostDriveTargetGain + boostDriveCoeff * (mStompBoostSmoothedDriveGain - boostDriveTargetGain);
-        for (size_t c = 0; c < numChannelsMonoCore; ++c)
-        {
-          if (modelInputPointers[c] == nullptr)
-            continue;
-          modelInputPointers[c][s] *= static_cast<sample>(mStompBoostSmoothedDriveGain);
-        }
-      }
-    }
-
     sample** boostOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
-    if (numChannelsMonoCore == 1)
-    {
-      activeStompModel->process(modelInputPointers, boostOutPointers, nFrames);
-    }
-    else
-    {
-      if (!bypassHeavySide[0])
-      {
-        sample* leftIn[1] = {modelInputPointers[0]};
-        sample* leftOut[1] = {boostOutPointers[0]};
-        activeStompModel->process(leftIn, leftOut, nFrames);
-      }
-      else
-      {
-        std::copy_n(modelInputPointers[0], numFrames, boostOutPointers[0]);
-      }
-
-      if (!bypassHeavySide[1])
-      {
-        sample* rightIn[1] = {modelInputPointers[1]};
-        sample* rightOut[1] = {boostOutPointers[1]};
-        activeStompModelRight->process(rightIn, rightOut, nFrames);
-      }
-      else
-      {
-        std::copy_n(modelInputPointers[1], numFrames, boostOutPointers[1]);
-      }
-    }
+    _ProcessBuiltInTSBoost(modelInputPointers, boostOutPointers, numChannelsMonoCore, nFrames);
     modelInputPointers = boostOutPointers;
   }
-
-  if (boostEnabled && boostLevelGain != 1.0)
+  else if (precisionBoostEnabled)
   {
-    for (size_t c = 0; c < numChannelsMonoCore; ++c)
-      for (size_t s = 0; s < numFrames; ++s)
-        modelInputPointers[c][s] *= boostLevelGain;
+    sample** boostOutPointers = (modelInputPointers == mInputPointers) ? mOutputPointers : mInputPointers;
+    _ProcessBuiltInPrecisionBoost(modelInputPointers, boostOutPointers, numChannelsMonoCore, nFrames);
+    modelInputPointers = boostOutPointers;
   }
 
   const int ampModelCrossfadeTargetSelection = mAmpModelCrossfadeTargetSelection;
@@ -5469,47 +5418,6 @@ void NeuralAmpModeler::OnParamChangeUI(int paramIdx, EParamSource source)
       case kStompBoostActive:
         if (auto* pBoostOnLED = pGraphics->GetControlWithTag(kCtrlTagBoostOnLED))
           pBoostOnLED->SetValueFromDelegate(active ? 1.0 : 0.0, 0);
-        if (source == kUI && active && (mAmpWorkflowMode != AmpWorkflowMode::Release))
-        {
-          const bool useBoostB = GetParam(kStompBoostType)->Bool();
-          const bool selectedBoostLoaded =
-            useBoostB ? ((mStompModelB != nullptr) || (mStagedStompModelB != nullptr))
-                      : ((mStompModel != nullptr) || (mStagedStompModel != nullptr));
-          if (selectedBoostLoaded)
-            break;
-
-          WDL_String fileName;
-          WDL_String path;
-          const WDL_String& selectedBoostPath = useBoostB ? mStompNAMPathB : mStompNAMPath;
-          if (selectedBoostPath.GetLength())
-          {
-            path.Set(selectedBoostPath.Get());
-            path.remove_filepart();
-          }
-          pGraphics->PromptForFile(
-            fileName, path, EFileAction::Open, "nam", [this, useBoostB](const WDL_String& chosenFileName, const WDL_String&) {
-              if (chosenFileName.GetLength())
-              {
-                const std::string msg = _StageStompModel(chosenFileName, useBoostB ? 1 : 0);
-                if (msg.size())
-                {
-                  std::stringstream ss;
-                  ss << "Failed to load boost model. Message:\n\n" << msg;
-                  _ShowMessageBox(GetUI(), ss.str().c_str(), "Failed to load boost model!", kMB_OK);
-                  GetParam(kStompBoostActive)->Set(0.0);
-                }
-                else
-                {
-                  GetParam(kStompBoostActive)->Set(1.0);
-                }
-              }
-              else
-              {
-                GetParam(kStompBoostActive)->Set(0.0);
-              }
-              SendParameterValueFromDelegate(kStompBoostActive, GetParam(kStompBoostActive)->GetNormalized(), true);
-            });
-        }
         break;
       case kStompBoostType:
         _RefreshSelectedBoostCapabilityState();
@@ -5739,13 +5647,7 @@ bool NeuralAmpModeler::OnMessage(int msgTag, int ctrlTag, int dataSize, const vo
         mShouldRemoveStompModelB = true;
       else
         mShouldRemoveStompModel = true;
-      if (GetParam(kStompBoostType)->Bool() == clearingBoostB)
-      {
-        _ClearStompCapabilityState();
-        _RefreshModelCapabilityIndicators();
-      }
-      else
-        _RefreshSelectedBoostCapabilityState();
+      _RefreshSelectedBoostCapabilityState();
       _MarkStandalonePresetDirty();
       return true;
     }
@@ -8521,8 +8423,7 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStompModelRight = nullptr;
     if (mStagedStompModel == nullptr && mStagedStompModelRight == nullptr)
       mStompNAMPath.Set("");
-    if (!GetParam(kStompBoostType)->Bool())
-      _ClearStompCapabilityState();
+    _ClearStompCapabilityState();
     _UpdateLatency();
   }
   if (mShouldRemoveStompModelB.exchange(false, std::memory_order_acq_rel))
@@ -8531,8 +8432,6 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStompModelRightB = nullptr;
     if (mStagedStompModelB == nullptr && mStagedStompModelRightB == nullptr)
       mStompNAMPathB.Set("");
-    if (GetParam(kStompBoostType)->Bool())
-      _ClearStompCapabilityState();
     _UpdateLatency();
   }
   for (int slotIndex = 0; slotIndex < kCabSlotCount; ++slotIndex)
@@ -8565,8 +8464,6 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStagedStompModel = nullptr;
     mStompModelRight = std::move(mStagedStompModelRight);
     mStagedStompModelRight = nullptr;
-    if (!GetParam(kStompBoostType)->Bool())
-      _SetStompCapabilityState(mStompModel->HasLoudness(), mStompModel->HasOutputLevel());
     _UpdateLatency();
   }
   if (mStagedStompModelB != nullptr && (!inputStereoMode || mStagedStompModelRightB != nullptr))
@@ -8575,8 +8472,6 @@ void NeuralAmpModeler::_ApplyDSPStaging()
     mStagedStompModelB = nullptr;
     mStompModelRightB = std::move(mStagedStompModelRightB);
     mStagedStompModelRightB = nullptr;
-    if (GetParam(kStompBoostType)->Bool())
-      _SetStompCapabilityState(mStompModelB->HasLoudness(), mStompModelB->HasOutputLevel());
     _UpdateLatency();
   }
   if (mPresetRecallMuteActive.load(std::memory_order_acquire))
@@ -10025,14 +9920,7 @@ void NeuralAmpModeler::_ClearStompCapabilityState()
 
 void NeuralAmpModeler::_RefreshSelectedBoostCapabilityState()
 {
-  const bool useBoostB = GetParam(kStompBoostType)->Bool();
-  ResamplingNAM* const selectedLiveModel = useBoostB ? mStompModelB.get() : mStompModel.get();
-  ResamplingNAM* const selectedStagedModel = useBoostB ? mStagedStompModelB.get() : mStagedStompModel.get();
-  ResamplingNAM* const selectedModel = (selectedStagedModel != nullptr) ? selectedStagedModel : selectedLiveModel;
-  if (selectedModel != nullptr)
-    _SetStompCapabilityState(selectedModel->HasLoudness(), selectedModel->HasOutputLevel());
-  else
-    _ClearStompCapabilityState();
+  _ClearStompCapabilityState();
   _RefreshModelCapabilityIndicators();
 }
 
@@ -10077,9 +9965,6 @@ void NeuralAmpModeler::_UpdateLatency()
     }
   }
   latency += ampLatency;
-  const int stompLatencyA = (mStompModel != nullptr) ? mStompModel->GetLatency() : 0;
-  const int stompLatencyB = (mStompModelB != nullptr) ? mStompModelB->GetLatency() : 0;
-  latency += std::max(stompLatencyA, stompLatencyB);
   // Other things that add latency here...
 
   // Feels weird to have to do this.
