@@ -166,6 +166,16 @@ double MakeOnePoleLowPassCoeff(const double frequencyHz, const double sampleRate
   return 1.0 - std::exp(-2.0 * kPi * clampedFrequency / safeSampleRate);
 }
 
+double BoostDriveControlToDB(const double value)
+{
+  return (value - 5.0) * 2.0;
+}
+
+double BoostLevelControlToDB(const double value)
+{
+  return (value - 5.0) * 3.0;
+}
+
 #if NAM_DEV_DIAGNOSTICS
 uint64_t GetSteadyClockNowNs()
 {
@@ -1237,9 +1247,9 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
   GetParam(kVirtualDoubleAmount)->InitDouble("Double", 65.0, 0.0, 100.0, 0.1, "");
   GetParam(kNoiseGateReleaseMs)->InitDouble("Gate Release", 40.0, 1.0, 100.0, 1.0, "");
   GetParam(kNoiseGateActive)->InitBool("NoiseGateActive", true);
-  GetParam(kStompBoostLevel)->InitGain("Boost Level", 0.0, -15.0, 15.0, 0.1);
+  GetParam(kStompBoostLevel)->InitDouble("Output Volume", 5.0, 0.0, 10.0, 0.1);
   GetParam(kStompBoostActive)->InitBool("BoostActive", false);
-  GetParam(kStompBoostDrive)->InitGain("Boost Drive", 0.0, -10.0, 10.0, 0.1);
+  GetParam(kStompBoostDrive)->InitDouble("Boost Drive", 5.0, 0.0, 10.0, 0.1);
   GetParam(kStompBoostTone)->InitDouble("Boost Character", 5.0, 0.0, 10.0, 0.1);
   GetParam(kStompBoostType)->InitBool("Boost Mode", false);
   GetParam(kStompBoostType)->SetDisplayText(0.0, "TS");
@@ -1652,18 +1662,27 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
     const float stompBoostTypeX = designToUIX(2052.0f);
     const float stompBoostTypeY = designToUIY(1111.0f) + kStompButtonAnchorOffsetY;
     const float stompKnobY = designToUIY(890.0f) + kStompKnobAnchorOffsetY;
+    const float stompBoostDriveY = designToUIY(860.0f) + kStompKnobAnchorOffsetY;
+    const float stompBoostToneY = designToUIY(965.0f) + kStompKnobAnchorOffsetY;
+    const float stompBoostLevelY = designToUIY(860.0f) + kStompKnobAnchorOffsetY;
     const float stompBoostSwitchX = designToUIX(2049.0f);
     const float stompSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
+    const float stompBoostSwitchY = designToUIY(1673.0f) + kStompButtonAnchorOffsetY;
     const auto stompCompressorAmountArea = makePedalKnobArea(stompCompressorAmountX, stompKnobY);
     const auto stompCompressorLevelArea = makePedalKnobArea(stompCompressorLevelX, stompKnobY);
-    const auto stompBoostDriveArea = makePedalKnobArea(stompBoostDriveX, stompKnobY);
-    const auto stompBoostToneArea = makePedalKnobArea(stompBoostToneX, stompKnobY);
-    const auto stompBoostLevelArea = makePedalKnobArea(stompBoostLevelX, stompKnobY);
+    const auto stompBoostDriveArea = makePedalKnobArea(stompBoostDriveX, stompBoostDriveY);
+    const auto stompBoostToneArea = makePedalKnobArea(stompBoostToneX, stompBoostToneY);
+    const auto stompBoostLevelArea = makePedalKnobArea(stompBoostLevelX, stompBoostLevelY);
     const float stompButtonScale = 0.6f;
     const float stompButtonW =
       stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.W()) * stompButtonScale : 46.0f;
     const float stompButtonH =
       stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.H()) * stompButtonScale : 30.0f;
+    const float stompBoostButtonScale = 0.6f;
+    const float stompBoostButtonW =
+      stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.W()) * stompBoostButtonScale : 46.0f;
+    const float stompBoostButtonH =
+      stompButtonUpBitmap.IsValid() ? static_cast<float>(stompButtonUpBitmap.H()) * stompBoostButtonScale : 30.0f;
     const auto stompCompressorToggleArea =
       IRECT(stompCompressorToggleX - 36.0f, stompCompressorToggleY - 40.0f, stompCompressorToggleX + 36.0f, stompCompressorToggleY + 10.0f);
     const auto stompCompressorSwitchArea =
@@ -1676,11 +1695,20 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
             stompCompressorSwitchArea.T - 40.0f,
             stompCompressorSwitchArea.MW() + 10.0f,
             stompCompressorSwitchArea.T - 20.0f);
+    const float stompBoostTypeHalfWidthLeft = 30.0f;
+    const float stompBoostTypeHalfWidthRight = 30.0f;
+    const float stompBoostTypeHalfHeightTop = 22.0f;
+    const float stompBoostTypeHalfHeightBottom = 22.0f;
     const auto stompBoostTypeArea =
-      IRECT(stompBoostTypeX - 30.0f, stompBoostTypeY - 40.0f, stompBoostTypeX + 36.0f, stompBoostTypeY + 10.0f);
+      IRECT(stompBoostTypeX - stompBoostTypeHalfWidthLeft,
+            stompBoostTypeY - stompBoostTypeHalfHeightTop,
+            stompBoostTypeX + stompBoostTypeHalfWidthRight,
+            stompBoostTypeY + stompBoostTypeHalfHeightBottom);
     const auto stompBoostSwitchArea =
-      IRECT(stompBoostSwitchX - 0.5f * stompButtonW, stompSwitchY - 0.5f * stompButtonH, stompBoostSwitchX + 0.5f * stompButtonW,
-            stompSwitchY + 0.5f * stompButtonH);
+      IRECT(stompBoostSwitchX - 0.5f * stompBoostButtonW,
+            stompBoostSwitchY - 0.5f * stompBoostButtonH,
+            stompBoostSwitchX + 0.5f * stompBoostButtonW,
+            stompBoostSwitchY + 0.5f * stompBoostButtonH);
     const auto stompBoostOnLedArea = IRECT(stompBoostSwitchArea.MW() - 10.0f, stompBoostSwitchArea.T - 280.0f,
                                            stompBoostSwitchArea.MW() + 10.0f, stompBoostSwitchArea.T - 260.0f);
     // FX section coordinates come from the same 3x design canvas used by the stomp section.
@@ -2590,7 +2618,7 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
       new NAMBitmapToggleControl(stompBoostTypeArea, kStompBoostType, horizonalSwitchLeftBitmap, horizonalSwitchRightBitmap),
       -1,
       "STOMP_CONTROLS")
-      ->SetTooltip("Boost mode: TS style / Precision Drive style.");
+      ->SetTooltip("Boost Type");
     pGraphics->AttachControl(new NAMBitmapLEDControl(stompBoostOnLedArea, redLedOnBitmap, redLedOffBitmap),
                              kCtrlTagBoostOnLED,
                              "STOMP_CONTROLS");
@@ -2709,18 +2737,19 @@ NeuralAmpModeler::NeuralAmpModeler(const InstanceInfo& info)
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "STOMP_CONTROLS")
-      ->SetTooltip("Boost drive.");
+      ->SetTooltip("Boost Drive");
     pGraphics->AttachControl(
       new NAMPedalKnobControl(stompBoostToneArea, kStompBoostTone, "", fxKnobNoLabelStyle, pedalKnobBitmap,
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
       -1,
       "STOMP_CONTROLS")
-      ->SetTooltip("Boost character. TS mode controls tone; PD mode blends attack tightness and bright cut.");
+      ->SetTooltip("Boost Character");
     pGraphics->AttachControl(
       new NAMPedalKnobControl(stompBoostLevelArea, kStompBoostLevel, "", fxKnobNoLabelStyle, pedalKnobBitmap,
                               pedalKnobShadowBitmap, kPedalKnobScale, 8.0f, -5.0f),
       -1,
-      "STOMP_CONTROLS");
+      "STOMP_CONTROLS")
+      ->SetTooltip("Output Volume");
     pGraphics->AttachControl(new NAMEQFaderSliderControl(fxEqBand31Area, kFXEQBand31Hz, fxEqSliderStyle, eqFaderKnobBitmap),
                              -1,
                              "EQ_CONTROLS");
@@ -4265,7 +4294,7 @@ void NeuralAmpModeler::OnReset()
   const double boostDriveSmoothSampleRate = std::max(1.0, sampleRate);
   constexpr double kBoostDriveSmoothTimeSeconds = 0.02;
   mStompBoostDriveSmoothCoeff = std::exp(-1.0 / (boostDriveSmoothSampleRate * kBoostDriveSmoothTimeSeconds));
-  mStompBoostSmoothedDriveGain = DBToAmp(GetParam(kStompBoostDrive)->Value());
+  mStompBoostSmoothedDriveGain = DBToAmp(BoostDriveControlToDB(GetParam(kStompBoostDrive)->Value()));
   _ResetBuiltInCompressor(sampleRate);
   _ResetBuiltInTSBoost(sampleRate);
   _ResetBuiltInPrecisionBoost(sampleRate);
@@ -9086,10 +9115,12 @@ void NeuralAmpModeler::_ResetBuiltInTSBoost(const double sampleRate)
   mBuiltInTSBoost.brightToneLowPassCoeff = MakeOnePoleLowPassCoeff(14500.0, mBuiltInTSBoost.oversampledSampleRate);
   mBuiltInTSBoost.antiAliasLowPassCoeff =
     MakeOnePoleLowPassCoeff(std::min(16000.0, 0.42 * mBuiltInTSBoost.sampleRate), mBuiltInTSBoost.oversampledSampleRate);
-  mBuiltInTSBoost.smoothedDriveGain = DBToAmp(31.0 + GetParam(kStompBoostDrive)->Value());
-  mBuiltInTSBoost.smoothedDriveAmount = std::clamp((GetParam(kStompBoostDrive)->Value() + 10.0) * 0.05, 0.0, 1.0);
+  const double driveDB = BoostDriveControlToDB(GetParam(kStompBoostDrive)->Value());
+  const double levelDB = BoostLevelControlToDB(GetParam(kStompBoostLevel)->Value());
+  mBuiltInTSBoost.smoothedDriveGain = DBToAmp(31.0 + driveDB);
+  mBuiltInTSBoost.smoothedDriveAmount = std::clamp((driveDB + 10.0) * 0.05, 0.0, 1.0);
   mBuiltInTSBoost.smoothedTone = std::clamp(GetParam(kStompBoostTone)->Value() * 0.1, 0.0, 1.0);
-  mBuiltInTSBoost.smoothedLevelGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
+  mBuiltInTSBoost.smoothedLevelGain = DBToAmp(levelDB);
   mBuiltInTSBoost.previousInput.fill(0.0);
   mBuiltInTSBoost.preHighPassLowState.fill(0.0);
   mBuiltInTSBoost.darkToneState.fill(0.0);
@@ -9163,10 +9194,12 @@ void NeuralAmpModeler::_ProcessBuiltInTSBoost(iplug::sample** inputs, iplug::sam
     return;
 
   const size_t channelsToProcess = std::min(numChannels, kNumChannelsInternal);
-  const double driveTargetGain = DBToAmp(31.0 + GetParam(kStompBoostDrive)->Value());
-  const double driveAmountTarget = std::clamp((GetParam(kStompBoostDrive)->Value() + 10.0) * 0.05, 0.0, 1.0);
+  const double driveDB = BoostDriveControlToDB(GetParam(kStompBoostDrive)->Value());
+  const double levelDB = BoostLevelControlToDB(GetParam(kStompBoostLevel)->Value());
+  const double driveTargetGain = DBToAmp(31.0 + driveDB);
+  const double driveAmountTarget = std::clamp((driveDB + 10.0) * 0.05, 0.0, 1.0);
   const double toneTarget = std::clamp(GetParam(kStompBoostTone)->Value() * 0.1, 0.0, 1.0);
-  const double levelTargetGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
+  const double levelTargetGain = DBToAmp(levelDB);
   const double controlCoeff = mBuiltInTSBoost.controlSmoothCoeff;
 
   for (size_t s = 0; s < numFrames; ++s)
@@ -9221,11 +9254,13 @@ void NeuralAmpModeler::_ResetBuiltInPrecisionBoost(const double sampleRate)
   mBuiltInPrecisionBoost.antiAliasLowPassCoeff =
     MakeOnePoleLowPassCoeff(std::min(17000.0, 0.43 * mBuiltInPrecisionBoost.sampleRate),
                             mBuiltInPrecisionBoost.oversampledSampleRate);
-  const double precisionDriveAmount = std::clamp((GetParam(kStompBoostDrive)->Value() + 10.0) * 0.05, 0.0, 1.0);
+  const double driveDB = BoostDriveControlToDB(GetParam(kStompBoostDrive)->Value());
+  const double levelDB = BoostLevelControlToDB(GetParam(kStompBoostLevel)->Value());
+  const double precisionDriveAmount = std::clamp((driveDB + 10.0) * 0.05, 0.0, 1.0);
   mBuiltInPrecisionBoost.smoothedDriveGain =
     DBToAmp(7.0 + 20.0 * precisionDriveAmount + 4.0 * precisionDriveAmount * precisionDriveAmount);
   mBuiltInPrecisionBoost.smoothedCharacter = std::clamp(GetParam(kStompBoostTone)->Value() * 0.1, 0.0, 1.0);
-  mBuiltInPrecisionBoost.smoothedLevelGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
+  mBuiltInPrecisionBoost.smoothedLevelGain = DBToAmp(levelDB);
   mBuiltInPrecisionBoost.previousInput.fill(0.0);
   mBuiltInPrecisionBoost.attackLowState.fill(0.0);
   mBuiltInPrecisionBoost.bodyState.fill(0.0);
@@ -9299,11 +9334,13 @@ void NeuralAmpModeler::_ProcessBuiltInPrecisionBoost(iplug::sample** inputs, ipl
     return;
 
   const size_t channelsToProcess = std::min(numChannels, kNumChannelsInternal);
-  const double precisionDriveAmount = std::clamp((GetParam(kStompBoostDrive)->Value() + 10.0) * 0.05, 0.0, 1.0);
+  const double driveDB = BoostDriveControlToDB(GetParam(kStompBoostDrive)->Value());
+  const double levelDB = BoostLevelControlToDB(GetParam(kStompBoostLevel)->Value());
+  const double precisionDriveAmount = std::clamp((driveDB + 10.0) * 0.05, 0.0, 1.0);
   const double driveTargetGain =
     DBToAmp(7.0 + 20.0 * precisionDriveAmount + 4.0 * precisionDriveAmount * precisionDriveAmount);
   const double characterTarget = std::clamp(GetParam(kStompBoostTone)->Value() * 0.1, 0.0, 1.0);
-  const double levelTargetGain = DBToAmp(GetParam(kStompBoostLevel)->Value());
+  const double levelTargetGain = DBToAmp(levelDB);
   const double controlCoeff = mBuiltInPrecisionBoost.controlSmoothCoeff;
 
   for (size_t s = 0; s < numFrames; ++s)
