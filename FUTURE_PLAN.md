@@ -1,4 +1,4 @@
-Last updated: 2026-06-05
+Last updated: 2026-06-06
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -133,29 +133,21 @@ Important nuances:
 - Standalone shows DSP stats plus process CPU `current/average/peak` and RAM
 - Plugin builds intentionally omit CPU/RAM and show only DSP/buffer/latency stats
 
+### Done: Reverb output normalization UX pass
+Outcome:
+- Reverb output now uses an upper-half mix-dependent post-mix compensation curve to keep perceived loudness more consistent as the dry anchor fades out.
+
+Important nuances:
+- The landed implementation is a small DSP-only follow-up in `_ProcessFXReverbStage()` inside `NeuralAmpModeler/NeuralAmpModelerFX.cpp`.
+- The current dry/wet blend law was intentionally preserved in this pass; compensation is applied after the existing dry/wet sum.
+- The current user-tuned values on `main` are:
+  - `postMixCompStart = 0.49`
+  - `postMixCompMaxGain = 2.4`
+  - `postMixCompCurve = pow(postMixCompNorm, 1.40)`
+- If future tuning is needed, start with those constants before changing the wet-path voicing or blend law.
+- The main residual risk to watch is headroom pressure at high `Mix` plus long `Decay`, because the post-mix gain stacks with the pre-existing wet makeup.
+
 ## Active milestones
-
-### Milestone R: Reverb output normalization UX pass
-Goal:
-- Make reverb output feel more level-consistent across useful settings so users hear tone/space changes more than raw volume jumps
-
-Why now:
-- This is the next small feature the user explicitly wants to work on
-- It is a contained DSP/UX follow-up that fits the current small-patch workflow
-
-Recommended implementation shape:
-- Identify which reverb controls currently create the most noticeable output gain swings in normal use
-- Prefer lightweight gain compensation or parameter-dependent makeup within the existing reverb path instead of broad architectural changes
-- Preserve some natural perceived loudness variation from tonal changes; the goal is better UX, not mathematically flat loudness at every setting
-- Keep the solution deterministic and easy to tune by ear in follow-up passes
-
-Risk:
-- Medium
-
-RT safety watch-outs:
-- No allocations/locks/I/O/logging in audio-thread paths
-- Keep compensation in the existing audio-thread-safe DSP path
-- Avoid adding extra buffer passes unless they are clearly necessary
 
 ### Milestone B: Release asset packaging and final variant strategy
 Goal:
@@ -218,11 +210,11 @@ Examples:
 - off-state visual language
 
 ## Recommended execution order from now
-1. Milestone R: reverb output normalization UX pass
-2. Resume Milestone B when the final release asset set is clearer
-3. Milestone F only if the user returns to transpose
-4. Milestone D only after Cab v1 remains stable in regular use
-5. Treat additional UI polish as a low-risk side lane, not the main roadmap
+1. Resume Milestone B when the final release asset set is clearer
+2. Milestone F only if the user returns to transpose
+3. Milestone D only after Cab v1 remains stable in regular use
+4. Treat additional UI polish as a low-risk side lane, not the main roadmap
+5. If reverb loudness is revisited, treat it as tuning on the landed post-mix compensation curve rather than a new milestone
 
 ## Next-agent note
 Use the starter prompt in `AGENT_SESSION_SUMMARY.md`.

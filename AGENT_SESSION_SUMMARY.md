@@ -1,4 +1,4 @@
-Last updated: 2026-06-05
+Last updated: 2026-06-06
 
 Purpose: concise handoff so a new agent can continue from the current stable baseline without replaying the full chat history.
 
@@ -10,7 +10,7 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 
 ## Current repository state
 - Active branch: `main`
-- HEAD at handoff: `dab31ad`
+- HEAD at handoff: `e5eccd5`
 - Working tree at handoff:
   - clean
 - Current product name for user-facing outputs: `RE-AMP`
@@ -22,11 +22,14 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 - Release mode still embeds curated cab IRs and amp variant assets while allowing user-loaded custom IRs
 
 ## Recent relevant history before this handoff update
+- 2026-06-06: landed reverb post-mix output compensation on `main`; baseline HEAD is now `e5eccd5`
+- 2026-06-06: user tuned the final reverb compensation values by ear in the working patch before commit/push
 - 2026-06-05: merged the modeled boost pedal overhaul to `main`; baseline HEAD is now `dab31ad`
 - 2026-06-05: finalized boost pedal graphics/layout polish, generic labeling, and user-facing `0..10` boost controls with internal remapping preserved
 - 2026-06-04: landed build-time A2 slimmable-size control for all plugin-loaded slimmable NAM models; baseline HEAD is now `2fb6591`
 - 2026-06-04: fast-forwarded local `main` to include the `iplug2-upstream-update` branch; baseline HEAD is now `9ae005c`
 - 2026-06-04: added a repo-level rule to `AGENTS.md` stating that the user builds manually from Visual Studio and agents must not run builds unless explicitly asked
+- `e5eccd5` `Add reverb post-mix output compensation`
 - `dab31ad` `Polish boost pedal UI`
 - `7dd499a` `Route boost mode to modeled pedals`
 - `8a776d8` `Add modeled boost DSP`
@@ -172,6 +175,20 @@ Important landed details:
 - Visual Studio preprocessor override usage is `NAM_SLIMMABLE_SIZE=0.5` in project properties; do not prepend `/D` in the property field.
 - The runtime call clamps the configured value to `0.0 .. 1.0` before calling `SetSlimmableSize()`.
 
+### 11) Reverb post-mix output normalization is now landed on `main`
+Outcome:
+- The reverb mix control now applies an additional post-mix output compensation curve in the upper half of the mix range.
+- The current dry/wet blend feel is intentionally preserved in the lower half while reducing the perceived loudness drop as the dry anchor fades out.
+
+Important landed details:
+- The change is isolated to `_ProcessFXReverbStage()` in `NeuralAmpModeler/NeuralAmpModelerFX.cpp`.
+- Compensation is applied after the existing dry/wet sum, so the patch does not retune the separate dry/wet balance law in this pass.
+- The current user-tuned values on `main` are:
+  - `postMixCompStart = 0.49`
+  - `postMixCompMaxGain = 2.4`
+  - `postMixCompCurve = pow(postMixCompNorm, 1.40)`
+- The main residual watch-out is headroom pressure at high `Mix` plus long `Decay`, because this post-mix gain stacks on top of the existing wet makeup behavior.
+
 ## Important current conclusions
 - Do not reopen tuner work unless the user explicitly asks.
 - Do not restart the old amp/IR artifact investigation from scratch; `main` already contains the accepted baseline.
@@ -181,6 +198,7 @@ Important landed details:
 - That build rule is now also recorded directly in `AGENTS.md`, not only in this handoff file.
 - The earlier stereo-collapse-through-cab concern appears to have been addressed by `d41b00c` (`Preserve stereo through cab IR processing`); do not reopen that investigation unless the user reports a current regression.
 - The modeled boost pedal baseline is now the accepted path on `main`; do not route the live stomp switch back through boost NAM slots unless the user explicitly asks.
+- The reverb normalization pass is now landed; if the user wants more adjustment, treat it as tuning/refinement of the current post-mix compensation curve rather than reopening the whole reverb architecture.
 - Prefer small, reviewable follow-ups from the current stable `main` baseline.
 - Internal `NeuralAmpModeler` naming cleanup can wait.
 - If future work needs A2 CPU tuning, start from the landed `NAM_SLIMMABLE_SIZE` hook instead of adding a second model-load path.
@@ -207,7 +225,7 @@ Important landed details:
 ## Suggested next coding step
 1. Continue from the current stable `main` baseline and prefer small, reviewable follow-ups in the area the user explicitly requests next.
 2. If stereo behavior is questioned again, treat it as regression verification against `d41b00c` rather than an open unresolved architecture problem.
-3. The next small feature the user wants to tackle is normalizing reverb output for better UX.
+3. If reverb loudness is revisited, start by tuning the landed post-mix compensation curve in `NeuralAmpModelerFX.cpp` before changing the wet-path voicing or dry/wet law.
 
 ## Starter prompt for the next agent
 You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
@@ -244,9 +262,13 @@ Current baseline:
    - User-facing controls are `Boost Drive`, `Boost Character`, and `Output Volume`
    - Those controls display `0..10` with `5` at noon and no unit text
 15. The old boost NAM slot plumbing still exists in code/settings for possible future development use, but it is not the live boost signal path now
+16. Reverb post-mix output compensation is now landed on `main` in `_ProcessFXReverbStage()` with the current user-tuned upper-half mix compensation values:
+   - `postMixCompStart = 0.49`
+   - `postMixCompMaxGain = 2.4`
+   - `postMixCompCurve = pow(postMixCompNorm, 1.40)`
 
 Suggested next task unless the user redirects:
 1. Start from the current `main` baseline and follow the user's next requested task
 2. If stereo behavior is reported again, verify against the `d41b00c` cab/IR stereo-preservation changes first
-3. The next small feature request is normalizing reverb output for better UX
+3. If reverb output balance is revisited, refine the landed post-mix compensation curve first rather than replacing the blend architecture
 4. Keep the patch small and reviewable from the current stable `main` baseline
