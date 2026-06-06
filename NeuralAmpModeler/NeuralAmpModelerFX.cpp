@@ -600,6 +600,12 @@ void NeuralAmpModeler::_ProcessFXReverbStage(sample** ioPointers, const size_t n
     const double wetMixShaped = std::pow(wetMix, 1.48);
     const double dryMix = std::cos(0.5 * kPi * wetMixShaped);
     const double wetGain = std::sin(0.5 * kPi * wetMixShaped);
+    const double postMixCompStart = 0.49;
+    const double postMixCompMaxGain = 2.4;
+    const double postMixCompNorm =
+      std::clamp((wetMix - postMixCompStart) / std::max(1.0e-6, 1.0 - postMixCompStart), 0.0, 1.0);
+    const double postMixCompCurve = std::pow(postMixCompNorm, 1.40);
+    const double postMixCompGain = 1.0 + (postMixCompMaxGain - 1.0) * postMixCompCurve;
     const double decayWetCompShape = std::pow(decayKnobNorm, 1.18);
     const double baseWetMakeupTargetGain = 1.84;
     const double decayWetCompGain = 0.78 * decayWetCompShape;
@@ -851,7 +857,7 @@ void NeuralAmpModeler::_ProcessFXReverbStage(sample** ioPointers, const size_t n
 
     for (size_t c = 0; c < numChannelsInternal; ++c)
     {
-      const double mixedOut = dryMix * drySamples[c] + (wetGain * wetMakeupGain) * wetSamples[c];
+      const double mixedOut = (dryMix * drySamples[c] + (wetGain * wetMakeupGain) * wetSamples[c]) * postMixCompGain;
       ioPointers[c][s] = static_cast<sample>(finiteClamp(mixedOut, kReverbStateLimit));
     }
 
