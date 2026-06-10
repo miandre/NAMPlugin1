@@ -3406,7 +3406,13 @@ void NeuralAmpModeler::ProcessBlock(iplug::sample** inputs, iplug::sample** outp
     {
       // Clean bypass while tuning, using post-input-gain mono signal.
       std::feupdateenv(&fe_state);
-      _ProcessOutput(mInputPointers, outputs, numFrames, numChannelsMonoCore, numChannelsExternalOut);
+      _ProcessOutputWithTargetGain(
+        mInputPointers,
+        outputs,
+        numFrames,
+        numChannelsMonoCore,
+        numChannelsExternalOut,
+        _GetOutputGainForModel(nullptr));
       _UpdateMeters(nullptr, outputs, numFrames, 0, numChannelsExternalOut);
 #if NAM_DEV_DIAGNOSTICS
       publishDevDiagnosticsTiming();
@@ -9848,10 +9854,16 @@ void NeuralAmpModeler::_ProcessInput(iplug::sample** inputs, const size_t nFrame
 void NeuralAmpModeler::_ProcessOutput(iplug::sample** inputs, iplug::sample** outputs, const size_t nFrames,
                                       const size_t nChansIn, const size_t nChansOut)
 {
+  _ProcessOutputWithTargetGain(inputs, outputs, nFrames, nChansIn, nChansOut, mOutputGain);
+}
+
+void NeuralAmpModeler::_ProcessOutputWithTargetGain(iplug::sample** inputs, iplug::sample** outputs, const size_t nFrames,
+                                                    const size_t nChansIn, const size_t nChansOut,
+                                                    const double targetGain)
+{
   if (outputs == nullptr)
     return;
   double gain = mSmoothedOutputGain;
-  const double targetGain = mOutputGain;
   const double gainSmoothCoeff = mOutputGainSmoothCoeff;
   for (size_t s = 0; s < nFrames; ++s)
   {

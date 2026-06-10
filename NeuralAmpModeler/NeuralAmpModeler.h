@@ -616,6 +616,8 @@ private:
   // :param nChansOut: Out to external
   void _ProcessOutput(iplug::sample** inputs, iplug::sample** outputs, const size_t nFrames, const size_t nChansIn,
                       const size_t nChansOut);
+  void _ProcessOutputWithTargetGain(iplug::sample** inputs, iplug::sample** outputs, size_t nFrames, size_t nChansIn,
+                                    size_t nChansOut, double targetGain);
   // Resetting for models and IRs, called by OnReset
   void _ResetModelAndIR(const double sampleRate, const int maxBlockSize);
 
