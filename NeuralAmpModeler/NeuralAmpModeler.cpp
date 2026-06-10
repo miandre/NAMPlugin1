@@ -129,6 +129,27 @@ constexpr float kAmpFaceKnobAreaWidth = 80.0f;
 constexpr int kCabSlotCount = 2;
 #if NAM_DEV_DIAGNOSTICS
 constexpr uint64_t kDevDiagnosticsUITextUpdateIntervalNs = 250000000ULL;
+constexpr int DevDiagnosticsBuildMarkerCharValue(const char c)
+{
+  return static_cast<int>(static_cast<unsigned char>(c));
+}
+constexpr int kDevDiagnosticsBuildMarker =
+  1 + ((DevDiagnosticsBuildMarkerCharValue(__DATE__[0]) * 3 +
+        DevDiagnosticsBuildMarkerCharValue(__DATE__[1]) * 5 +
+        DevDiagnosticsBuildMarkerCharValue(__DATE__[2]) * 7 +
+        DevDiagnosticsBuildMarkerCharValue(__DATE__[4]) * 11 +
+        DevDiagnosticsBuildMarkerCharValue(__DATE__[5]) * 13 +
+        DevDiagnosticsBuildMarkerCharValue(__DATE__[7]) * 17 +
+        DevDiagnosticsBuildMarkerCharValue(__DATE__[8]) * 19 +
+        DevDiagnosticsBuildMarkerCharValue(__DATE__[9]) * 23 +
+        DevDiagnosticsBuildMarkerCharValue(__DATE__[10]) * 29 +
+        DevDiagnosticsBuildMarkerCharValue(__TIME__[0]) * 31 +
+        DevDiagnosticsBuildMarkerCharValue(__TIME__[1]) * 37 +
+        DevDiagnosticsBuildMarkerCharValue(__TIME__[3]) * 41 +
+        DevDiagnosticsBuildMarkerCharValue(__TIME__[4]) * 43 +
+        DevDiagnosticsBuildMarkerCharValue(__TIME__[6]) * 47 +
+        DevDiagnosticsBuildMarkerCharValue(__TIME__[7]) * 53) %
+       100);
 #if defined(APP_API) && defined(_WIN32)
 constexpr uint64_t kDevDiagnosticsProcessPollIntervalNs = 250000000ULL;
 #endif
@@ -9016,8 +9037,9 @@ void NeuralAmpModeler::_RefreshDevDiagnostics()
 
   std::ostringstream diagnosticsText;
   diagnosticsText << std::fixed << std::setprecision(1);
-  diagnosticsText << "DEV  SR " << sampleRate << "  Blk " << lastBlockFrames << "  Buf " << bufferLatencyMs << "/"
-                  << roundTripBufferLatencyMs << " ms  DSP " << dspLatencySamples << " smp/" << dspLatencyMs << " ms";
+  diagnosticsText << "#" << kDevDiagnosticsBuildMarker << "  DEV  SR " << sampleRate << "  Blk " << lastBlockFrames
+                  << "  Buf " << bufferLatencyMs << "/" << roundTripBufferLatencyMs << " ms  DSP "
+                  << dspLatencySamples << " smp/" << dspLatencyMs << " ms";
   diagnosticsText << "\nLoad " << dspAverageMs << "/" << dspPeakMs << " ms  " << dspAveragePercent << "/"
                   << dspPeakPercent << "%";
 #if defined(APP_API) && defined(_WIN32)
@@ -9027,6 +9049,32 @@ void NeuralAmpModeler::_RefreshDevDiagnostics()
 #else
   diagnosticsText << "  DSPLat " << dspLatencyMs << " ms";
 #endif
+  const auto tunerDebug = mTunerAnalyzer.DebugSnapshot();
+  diagnosticsText << "\nTun raw ";
+  if (tunerDebug.candidateValid)
+    diagnosticsText << tunerDebug.rawMidiNote << " " << std::showpos << tunerDebug.rawCents << std::noshowpos;
+  else
+    diagnosticsText << "--";
+  diagnosticsText << "  ph ";
+  if (tunerDebug.phaseAttempted)
+  {
+    diagnosticsText << (tunerDebug.phaseUsed ? "*" : (tunerDebug.phaseEstimated ? "~" : "x"))
+                    << tunerDebug.phaseMidiNote;
+    if (tunerDebug.phaseEstimated)
+    {
+      diagnosticsText << " " << std::showpos << tunerDebug.phaseCents << std::noshowpos << " q"
+                      << tunerDebug.phasePurity;
+    }
+  }
+  else
+  {
+    diagnosticsText << "--";
+  }
+  diagnosticsText << "  out ";
+  if (mTunerAnalyzer.HasPitch())
+    diagnosticsText << mTunerAnalyzer.MidiNote() << " " << std::showpos << mTunerAnalyzer.Cents() << std::noshowpos;
+  else
+    diagnosticsText << "--";
 
   const std::string text = diagnosticsText.str();
   const char* previousText = mLastDevDiagnosticsText.Get();

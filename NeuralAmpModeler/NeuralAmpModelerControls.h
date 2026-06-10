@@ -1940,82 +1940,18 @@ public:
   void SetTunerState(const bool active, const bool hasPitch, const int midiNote, const float cents)
   {
     const float clampedCents = static_cast<float>(std::clamp(static_cast<double>(cents), -50.0, 50.0));
-    bool snapToTarget = false;
     mActive = active;
     mHasPitch = hasPitch;
     if (!mActive || !mHasPitch)
     {
       mDisplayedMidiNote = -1;
-      mPendingMidiNote = -1;
-      mPendingMidiCount = 0;
-      mNeedleHoldFrames = 0;
-      mTargetCents = 0.0f;
       mDisplayCents = 0.0f;
       SetDirty(false);
       return;
     }
 
-    // The analyzer already does note locking and attack handling, so keep the display
-    // responsive and avoid adding another heavy layer of lag here.
-    if (mDisplayedMidiNote < 0)
-    {
-      mDisplayedMidiNote = midiNote;
-      mPendingMidiNote = -1;
-      mPendingMidiCount = 0;
-      snapToTarget = true;
-    }
-    else if (midiNote != mDisplayedMidiNote)
-    {
-      if (mPendingMidiNote == midiNote)
-        ++mPendingMidiCount;
-      else
-      {
-        mPendingMidiNote = midiNote;
-        mPendingMidiCount = 1;
-      }
-
-      if (mPendingMidiCount >= 2)
-      {
-        mDisplayedMidiNote = midiNote;
-        mPendingMidiNote = -1;
-        mPendingMidiCount = 0;
-        snapToTarget = true;
-      }
-      else
-      {
-        mNeedleHoldFrames = std::max(mNeedleHoldFrames, 1);
-      }
-    }
-    else
-    {
-      mPendingMidiNote = -1;
-      mPendingMidiCount = 0;
-    }
-
-    mTargetCents = clampedCents;
-    if (snapToTarget)
-    {
-      mNeedleHoldFrames = 0;
-      mDisplayCents = mTargetCents;
-    }
-    else if (mNeedleHoldFrames > 0)
-    {
-      --mNeedleHoldFrames;
-    }
-    else
-    {
-      const float delta = mTargetCents - mDisplayCents;
-      const bool movingAwayFromCenter =
-        (std::fabs(mTargetCents) > std::fabs(mDisplayCents)) && ((mTargetCents * mDisplayCents) >= 0.0f);
-      const float alpha = std::fabs(delta) > 14.0f ? 0.46f : 0.26f;
-      float step = alpha * delta;
-      if (movingAwayFromCenter)
-        step *= 0.78f;
-
-      const float maxStep = movingAwayFromCenter ? 4.8f : 7.0f;
-      step = std::clamp(step, -maxStep, maxStep);
-      mDisplayCents += step;
-    }
+    mDisplayedMidiNote = midiNote;
+    mDisplayCents = clampedCents;
 
     SetDirty(false);
   }
@@ -2074,7 +2010,7 @@ public:
     centsStream.setf(std::ios::showpos);
     centsStream.setf(std::ios::fixed);
     centsStream.precision(1);
-    centsStream << mTargetCents;
+    centsStream << mDisplayCents;
     const IRECT centsRect(panel.L, lineY - 48.0f, panel.R, lineY - 28.0f);
     g.DrawText(secondaryText, centsStream.str().c_str(), centsRect);
 
@@ -2096,10 +2032,6 @@ private:
   bool mActive = false;
   bool mHasPitch = false;
   int mDisplayedMidiNote = -1;
-  int mPendingMidiNote = -1;
-  int mPendingMidiCount = 0;
-  int mNeedleHoldFrames = 0;
-  float mTargetCents = 0.0f;
   float mDisplayCents = 0.0f;
 };
 

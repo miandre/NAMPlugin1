@@ -1,3 +1,5 @@
+#pragma once
+
 #define PLUG_NAME "RE-AMP"
 #define PLUG_MFR "A.N.D"
 #define PLUG_VERSION_HEX 0x00000001
