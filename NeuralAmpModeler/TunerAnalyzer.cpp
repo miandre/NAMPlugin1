@@ -483,9 +483,9 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
     const bool lowAttackNote = mPublishedMidiNote <= 50;
     const bool midAttackNote = mPublishedMidiNote <= 55;
     if (attackOnset)
-      mAttackSettleFrames = lowAttackNote ? 14 : (midAttackNote ? 10 : 6);
+      mAttackSettleFrames = lowAttackNote ? 10 : (midAttackNote ? 7 : 4);
     else if (attackSharpMeasurement)
-      mAttackSettleFrames = std::max(mAttackSettleFrames, lowAttackNote ? 11 : (midAttackNote ? 8 : 4));
+      mAttackSettleFrames = std::max(mAttackSettleFrames, lowAttackNote ? 8 : (midAttackNote ? 6 : 3));
     mPreviousRms = 0.82 * mPreviousRms + 0.18 * candidate.rms;
   }
   else
@@ -544,13 +544,13 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
         const bool targetNearCenter =
           std::max(std::fabs(targetCents), std::fabs(mFilteredTargetCents)) <= 18.0f;
         const bool targetCrossingCenter = targetNearCenter && (targetCents * mFilteredTargetCents) < 0.0f;
-        float targetAlpha = targetNearCenter ? (targetCrossingCenter ? 0.20f : 0.10f) : 0.16f;
+        float targetAlpha = targetNearCenter ? (targetCrossingCenter ? 0.20f : 0.10f) : 0.14f;
         if (std::fabs(targetDelta) > 18.0f)
-          targetAlpha = 0.28f;
+          targetAlpha = 0.22f;
         if (clarity < 0.82)
           targetAlpha *= 0.70f;
 
-        const float maxTargetStep = targetCrossingCenter ? 1.20f : (targetNearCenter ? 0.85f : 2.3f);
+        const float maxTargetStep = targetCrossingCenter ? 1.20f : (targetNearCenter ? 0.85f : 1.8f);
         mFilteredTargetCents += std::clamp(targetAlpha * targetDelta, -maxTargetStep, maxTargetStep);
       }
       else
@@ -559,11 +559,25 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
       }
 
       float targetForDisplay = mFilteredTargetCents;
+      bool attackAllowsTracking = false;
+      const float attackDelta = targetForDisplay - mDisplayCents;
       const bool attackSharpBias =
-        mAttackSettleFrames > 0 && targetForDisplay > (mDisplayCents + 0.5f);
+        mAttackSettleFrames > 0 && attackDelta > 0.5f;
       if (attackSharpBias)
       {
-        const float attackMaxStep = midiNote <= 50 ? 0.18f : (midiNote <= 55 ? 0.25f : 0.35f);
+        const bool alreadyMovingSharp =
+          mDisplayVelocityCents > (midiNote <= 50 ? 0.020f : (midiNote <= 55 ? 0.028f : 0.035f));
+        const float persistentLeadThreshold = midiNote <= 50 ? 5.0f : (midiNote <= 55 ? 3.5f : 2.0f);
+        const int initialGuardFrames = midiNote <= 50 ? 8 : (midiNote <= 55 ? 5 : 3);
+        const bool persistentTargetLead =
+          attackDelta > persistentLeadThreshold && mAttackSettleFrames <= initialGuardFrames;
+        attackAllowsTracking = alreadyMovingSharp || persistentTargetLead;
+
+        const float baseAttackStep = midiNote <= 50 ? 0.28f : (midiNote <= 55 ? 0.36f : 0.48f);
+        const float trackingAttackStep = midiNote <= 50 ? 0.80f : (midiNote <= 55 ? 1.00f : 1.20f);
+        const float catchUpAttackStep = midiNote <= 50 ? 0.55f : (midiNote <= 55 ? 0.72f : 0.90f);
+        const float attackMaxStep =
+          alreadyMovingSharp ? trackingAttackStep : (persistentTargetLead ? catchUpAttackStep : baseAttackStep);
         targetForDisplay = std::min(targetForDisplay, mDisplayCents + attackMaxStep);
       }
 
@@ -573,22 +587,31 @@ void TunerAnalyzer::Update(const double pluginSampleRate) noexcept
       const bool movingTowardCenter = crossingCenter || std::fabs(targetForDisplay) < std::fabs(mDisplayCents);
       const bool largeCorrection = std::fabs(delta) > 28.0f;
       float velocityGain = fineTuneRegion ? (movingTowardCenter ? 0.070f : 0.035f)
-                                          : (movingTowardCenter ? 0.20f : 0.14f);
+                                          : (movingTowardCenter ? 0.16f : 0.105f);
       if (largeCorrection)
-        velocityGain = movingTowardCenter ? 0.28f : 0.20f;
+        velocityGain = movingTowardCenter ? 0.21f : 0.15f;
       if (clarity < 0.78)
         velocityGain *= 0.70f;
       if (attackSharpBias)
-        velocityGain = std::min(velocityGain, midiNote <= 50 ? 0.025f : 0.040f);
+      {
+        const float attackTrackingGain = midiNote <= 50 ? 0.052f : (midiNote <= 55 ? 0.060f : 0.070f);
+        const float attackHoldGain = midiNote <= 50 ? 0.025f : 0.040f;
+        velocityGain = attackAllowsTracking ? std::max(velocityGain, attackTrackingGain)
+                                            : std::min(velocityGain, attackHoldGain);
+      }
 
-      const float maxAttackVelocity = midiNote <= 50 ? 0.14f : (midiNote <= 55 ? 0.18f : 0.22f);
+      const float maxAttackVelocity = attackAllowsTracking
+                                        ? (midiNote <= 50 ? 0.36f : (midiNote <= 55 ? 0.48f : 0.58f))
+                                        : (midiNote <= 50 ? 0.14f : (midiNote <= 55 ? 0.18f : 0.22f));
       const float maxVelocity = attackSharpBias ? maxAttackVelocity
-                                                : (movingTowardCenter ? (fineTuneRegion ? 0.70f : 3.8f)
-                                                                      : (fineTuneRegion ? 0.34f : 2.6f));
+                                                : (movingTowardCenter ? (fineTuneRegion ? 0.70f : 2.6f)
+                                                                      : (fineTuneRegion ? 0.34f : 1.8f));
       const float maxAcceleration =
-        attackSharpBias ? (midiNote <= 50 ? 0.030f : 0.05f)
+        attackSharpBias ? (attackAllowsTracking
+                             ? (midiNote <= 50 ? 0.070f : (midiNote <= 55 ? 0.085f : 0.105f))
+                             : (midiNote <= 50 ? 0.030f : 0.05f))
                         : (fineTuneRegion ? (movingTowardCenter ? 0.075f : 0.045f)
-                                          : (largeCorrection ? 0.70f : 0.42f));
+                                          : (largeCorrection ? 0.42f : 0.28f));
       const float targetVelocity = std::clamp(velocityGain * delta, -maxVelocity, maxVelocity);
       const float acceleration = std::clamp(targetVelocity - mDisplayVelocityCents,
                                             -maxAcceleration,
