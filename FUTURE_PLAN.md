@@ -1,4 +1,4 @@
-Last updated: 2026-06-06
+Last updated: 2026-06-10
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -80,12 +80,17 @@ Outcome:
 Outcome:
 - Amp presentation and behavior can now diverge per slot without rewriting the whole editor
 
-### Done: Tuner improvement pass
+### Done: Tuner 2.0 baseline + BYP monitor fix
 Outcome:
-- The tuner is much more usable and the major center-jump bug is fixed
+- The tuner detection path was rebuilt around a cleaner MPM/NSDF-style baseline
+- Guitar tuning is materially more stable across standard 7-string range and tested alternate tunings
+- 5-string bass low B and C-tuned bass low C are now handled after moving to an `8192` analysis frame
+- Tuner BYP monitor output no longer depends on the amp model active when opening the tuner
 
-Important note:
-- Do not casually reopen tuner behavior
+Important nuances:
+- Current tuner detection is considered the accepted baseline; avoid rewriting it unless new test evidence justifies it
+- Tuner display/UX smoothing is still a valid polish target
+- Keep any future tuner UI changes isolated from detector/DSP changes where practical
 
 ### Done: Amp/IR switching artifact reduction
 Outcome:
@@ -149,6 +154,26 @@ Important nuances:
 
 ## Active milestones
 
+### Active short-term task: Tuner UI overview
+Goal:
+- Review the tuner UI now that Tuner 2.0 detection is stable
+
+Scope:
+- Fine-tune tuner smoothing for better UX
+- Make a small graphics/usability update to the tuner display
+
+Constraints:
+- Start from the current Tuner 2.0 detector baseline
+- Do not reopen the detector architecture unless testing shows a concrete regression
+- Keep the patch small and focused on user-facing tuner feel/readability
+- Preserve the existing `MUTE` / `BYP` / `ON` workflow
+
+Risk:
+- Low-medium
+
+RT safety watch-outs:
+- UI-only smoothing/display changes should not allocate, lock, log, or perform I/O from the audio callback
+
 ### Milestone B: Release asset packaging and final variant strategy
 Goal:
 - Finish the remaining release-mode packaging strategy beyond the current curated cab and amp variant embedding
@@ -210,11 +235,12 @@ Examples:
 - off-state visual language
 
 ## Recommended execution order from now
-1. Resume Milestone B when the final release asset set is clearer
-2. Milestone F only if the user returns to transpose
-3. Milestone D only after Cab v1 remains stable in regular use
-4. Treat additional UI polish as a low-risk side lane, not the main roadmap
-5. If reverb loudness is revisited, treat it as tuning on the landed post-mix compensation curve rather than a new milestone
+1. Complete the tuner UI overview: smoothing UX first, then a small graphics/usability pass
+2. Resume Milestone B when the final release asset set is clearer
+3. Milestone F only if the user returns to transpose
+4. Milestone D only after Cab v1 remains stable in regular use
+5. Treat additional UI polish as a low-risk side lane, not the main roadmap
+6. If reverb loudness is revisited, treat it as tuning on the landed post-mix compensation curve rather than a new milestone
 
 ## Next-agent note
 Use the starter prompt in `AGENT_SESSION_SUMMARY.md`.

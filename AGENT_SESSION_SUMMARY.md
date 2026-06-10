@@ -1,4 +1,4 @@
-Last updated: 2026-06-06
+Last updated: 2026-06-10
 
 Purpose: concise handoff so a new agent can continue from the current stable baseline without replaying the full chat history.
 
@@ -8,227 +8,104 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 3. `AGENT_SESSION_SUMMARY.md`
 4. `FUTURE_PLAN.md`
 
-## Current repository state
-- Active branch: `main`
-- HEAD at handoff: `e5eccd5`
-- Working tree at handoff:
-  - clean
+## Current repository state at handoff
+- Active branch after merge: `main`
+- Tuner 2.0 work was developed on `feature/tuner-2.0-baseline` and fast-forward merged into `main`
+- Latest tuner commits included in `main`:
+  - `6b12fde` `Establish tuner 2.0 baseline`
+  - `7bc1a96` `Fix tuner bypass monitor gain`
+- Working tree should be clean after this handover commit
+- iPlug2 submodule state at handoff check:
+  - `c4a2c31be1a2b5b7d932fd50ea268b0241e26836 iPlug2 (v1.0.0-beta-696-gc4a2c31be)`
+  - `origin` = `https://github.com/miandre/iPlug2.git`
+  - `upstream` = `https://github.com/iPlug2/iPlug2.git`
 - Current product name for user-facing outputs: `RE-AMP`
-- Internal code/project naming is still mostly `NeuralAmpModeler` and that is intentional for now
-- Current curated cab mic set:
-  - `S-57`
-  - `R-121`
-  - `M-421`
-- Release mode still embeds curated cab IRs and amp variant assets while allowing user-loaded custom IRs
+- Internal code/project naming is still mostly `NeuralAmpModeler`; do not rename internally unless explicitly requested
 
-## Recent relevant history before this handoff update
-- 2026-06-06: landed reverb post-mix output compensation on `main`; baseline HEAD is now `e5eccd5`
-- 2026-06-06: user tuned the final reverb compensation values by ear in the working patch before commit/push
-- 2026-06-05: merged the modeled boost pedal overhaul to `main`; baseline HEAD is now `dab31ad`
-- 2026-06-05: finalized boost pedal graphics/layout polish, generic labeling, and user-facing `0..10` boost controls with internal remapping preserved
-- 2026-06-04: landed build-time A2 slimmable-size control for all plugin-loaded slimmable NAM models; baseline HEAD is now `2fb6591`
-- 2026-06-04: fast-forwarded local `main` to include the `iplug2-upstream-update` branch; baseline HEAD is now `9ae005c`
-- 2026-06-04: added a repo-level rule to `AGENTS.md` stating that the user builds manually from Visual Studio and agents must not run builds unless explicitly asked
-- `e5eccd5` `Add reverb post-mix output compensation`
-- `dab31ad` `Polish boost pedal UI`
-- `7dd499a` `Route boost mode to modeled pedals`
-- `8a776d8` `Add modeled boost DSP`
-- `81ab484` `Prepare modeled boost controls`
-- `2fb6591` `Apply build-time slim setting to slimmable NAM loads`
-- `9ae005c` `Update iPlug2 mono input selection fix`
-- `4a47cc4` `Link iPlug2 UTF8 helpers in app and VST3`
-- `2866063` `Update iPlug2 popup menu compatibility fix`
-- `3c319a4` `Update iPlug2 RtAudio validation fix`
-- `1f16bd2` `Update iPlug2 upstream branch`
-- `9311b5b` `Update dependencies for A2 NAM support`
-- `de8c435` `Add dev diagnostics readout overlay`
-- `2f3b0ec` `Add Amp 2 saturating master stage`
-- `5e73f81` `Tune Amp 2 tone stack and pre gain`
-- `89f5c72` `Add curated MD-421 cab IR option`
-- `94429bd` `Fix amp bypass routing and state handling`
-- `e544f42` `Remove generated Python bytecode`
-- `9e9e4fa` `Rename external product identity to RE-AMP`
-- `00d08c4` `Rebrand app assets and standalone metadata`
-- `d66c291` `Update future plan`
-- `f800e1b` `Merge branch 'reduce-amp-switch-artifacts'`
-- `6ab8e9a` `Update artifact work handover`
-- `9d378e6` `Reduce IR switching artifacts`
-- `e2fed53` `Reduce amp switching artifacts`
+## User workflow constraints
+- The user builds manually from Visual Studio.
+- Do not run builds unless explicitly asked.
+- Audio/performance validation is `Release | x64` only.
+- Standalone audio testing should be run without debugger (`Ctrl+F5`).
+- Debug performance is not meaningful for DSP judgement.
+- Local `NeuralAmpModeler/config.h` churn is expected during development; do not treat dev-toggle dirtiness alone as a blocker.
 
-## What is completed now
-
-### 1) Artifact reduction work is already merged to `main`
+## Tuner 2.0 baseline now landed on main
 Outcome:
-- The old amp/cab switching investigation branch is no longer the active baseline.
-- `main` already contains the amp and IR switching cleanup work.
+- Tuner pitch tracking is substantially improved compared with the first tuner iteration.
+- Standard 7-string guitar tuning now works well across `B E A D G B E`.
+- Alternate guitar tunings tested by the user, including C tuning, work well.
+- 5-string bass low B and C-tuned bass low C are now handled after the larger analysis-frame change.
+- Tuner BYP monitor volume no longer depends on which amp model was active when opening the tuner.
 
-Landed details:
-- Amp variant switching is materially cleaner, especially in `Normalized` mode.
-- Amp slot switching uses a short masked handoff instead of the older click/clonk behavior.
-- Cab enable/source/IR changes use slot-local old/new IR crossfades instead of the failed whole-output mute path.
+Important landed tuner details:
+- `TunerAnalyzer::kAnalysisSize` is now `8192`.
+- The tuner uses a cleaner MPM/NSDF-style detector with note confirmation, display target smoothing, and attack suppression.
+- The larger `8192` frame fixed practical bass-low stability without unacceptable CPU cost or noticeable guitar lag in user testing.
+- Tuner diagnostics were added under `NAM_DEV_DIAGNOSTICS`:
+  - diagnostics line includes `Tun raw ... ph ... out ...`
+  - `ph *` means phase estimate was applied
+  - `ph ~` means phase was estimated but not trusted/applied
+  - `ph x` means phase was attempted but rejected
+  - `q` is the phase purity score
+- Dev diagnostics overlay also includes a build marker (`#NN`) generated from `__DATE__`/`__TIME__` so the user can verify they are testing a new build.
+- `NeuralAmpModeler/config.h` now has `#pragma once` so tuner diagnostics macros are available consistently when `TunerAnalyzer.h` is included.
 
-Settled constants on the merged baseline:
-- `kAmpSlotSwitchDeClickSamples = 512`
-- `kAmpModelVariantCrossfadeSamples = 512`
-- `kPathToggleTransitionSamples = 512`
-- `kAmpSlotTransitionSamples = 3072`
-- `kOutputGainSmoothTimeSeconds = 0.02`
-- `kIRTransitionSamples = 12288`
+Important tuner conclusions from testing:
+- The original high-string center jump was caused by octave-down detection: e.g. B3 was internally read as MIDI 47 instead of 59.
+- The octave-promotion rule was tightened so normal guitar A2 and above do not collapse to lower-octave candidates.
+- The explicit bass-low fallback scan was removed after the `8192` frame made it redundant and riskier than useful.
+- General low-note attack suppression remains; the A/D-only attack tweak was reverted after the true issue was found to be octave detection.
+- The user reported the final baseline works well on guitar and bass.
 
-### 2) External-facing rebrand to `RE-AMP` is landed
-Outcome:
-- Windows/mac standalone metadata, output naming, and installer/package naming were rebranded externally.
+Tuner BYP monitor fix:
+- The old BYP issue was confirmed: tuner BYP output volume depended on the amp model active when opening the tuner.
+- Cause: tuner BYP used `_ProcessOutput()`, which used `mOutputGain` including active-model loudness/calibration compensation.
+- Fix: tuner BYP now calls `_ProcessOutputWithTargetGain(..., _GetOutputGainForModel(nullptr))`.
+- Result: BYP monitor uses the clean post-input-gain signal plus user `Output` level only, not model loudness/calibration compensation.
 
-Important nuance:
-- Internal source file names, class names, and most project names still use `NeuralAmpModeler`.
-- That internal rename has not been done and should not be reopened unless the user asks.
-
-### 3) Amp bypass behavior is fixed on `main`
-Outcome:
-- Bypassing the whole AMP section now passes dry signal forward into the cab stage instead of muting.
-- Turning an amp off with its amp-face on/off button now bypasses the full amp stage, not just the model block.
-- `Normalized` output mode no longer applies model normalization gain to dry audio when the model stage is bypassed.
-
-Important landed details:
-- The successful fix was in the live amp-stage state selection in `ProcessBlock()`, not more downstream routing guesses.
-- The cab handoff cleanup remains part of the current baseline.
-
-### 4) Curated `MD-421` cab support is landed
-Outcome:
-- The curated cab system now includes a third mic source exposed in the UI as `M-421`.
-
-Landed details:
-- Added curated folder token `421`
-- Added UI source label `M-421`
-- Added `Mic/421.png`
-- Added release-mode embedded IR assets for the five `421` captures
-- Added missing Windows resource registration in `main.rc` so the new bitmap actually loads at runtime
-
-### 5) Modeled boost pedals are now landed on `main`
-Outcome:
-- The old boost `A/B` NAM switch path has been replaced in live use by two built-in modeled pedals.
-- The boost mode switch now compares `TS` and `PD` voices instead of loading stomp NAMs in the signal path.
-- The pedal graphics/layout were refreshed and the boost controls are now presented more like a hardware pedal.
-
-Important landed details:
-- Both boost modes are fully programmatic DSP and use preallocated state with 2x oversampled processing.
-- `Boost Drive`, `Boost Character`, and `Output Volume` now present as `0.0 .. 10.0` with `5.0` at noon and no unit text.
-- Internal remapping preserves the current DSP tuning:
-  - Drive control `0..10` maps to the prior `-10..+10 dB` range.
-  - Output level control `0..10` maps to the prior `-15..+15 dB` range.
-- The live mode switch is intentionally labeled generically (`Boost Type`) so users evaluate by ear rather than by brand matching.
-- The old stomp NAM boost assets/paths/loaders still exist in the codebase/settings flow for now; they were not deleted in this pass and may still be useful for future development experiments.
-
-### 6) The broader feature baseline from earlier work still applies
-Already landed on `main`:
-- Metering overhaul
-- Gate/stomp decoupling
-- Preset/session restore fixes
-- Plugin preset stomp NAM / cab IR restore fixes
-- Interactive Cab V1
-- Embedded curated cab IRs for release mode
-- Compressor stomp pedal v1
-- Amp model variants v1
-- Doubler improvement pass
-- Startup/default asset refresh
-- Amp-face scaffolding and slot-specific amp UI work
-- Tuner improvements and tuner UI polish
-
-### 7) Amp 2 tuning work is now landed on `main`
-Outcome:
-- Amp 2 no longer uses the old generic shared voicing as-is.
-- Amp 2 now has its own tuned post-model tone stack, slot-specific pre-gain taper, and a saturating master behavior.
-
-Important landed details:
-- Amp 2 keeps the same visible control set: `Pre Gain`, `Bass`, `Mid`, `Treble`, `Presence`, `Depth`, `Master`, plus `DEPTH` and `SCOOP`.
-- Amp 2 `A/B` variants still share the same tone stack and master behavior; the variant switch remains model-only.
-- Amp 2 `Pre Gain` is intentionally remapped to `-20 dB / -5 dB / +10 dB` at min / noon / max.
-- Amp 2 `Master` now rises mostly as level first, then adds saturation/compression in the upper range instead of behaving as pure post-volume.
-
-### 8) Dev diagnostics overlay is now landed on `main`
-Outcome:
-- A dev-only diagnostics readout can now be shown in both standalone and plugin builds.
-
-Important landed details:
-- Controlled by `NAM_DEV_DIAGNOSTICS` in `NeuralAmpModeler/config.h`.
-- Standalone shows sample rate, block size, buffer latency estimate, DSP latency, DSP load, process CPU `current/average/peak`, and RAM.
-- Plugin builds intentionally omit CPU/RAM and show only DSP/buffer/latency stats, because plugin CPU/RAM would mostly reflect the host DAW process.
-
-### 9) A2 support and iPlug2 upstream updates are now part of the current baseline
-Outcome:
-- `main` now includes the A2 dependency update plus the later iPlug2 upstream integration work that followed on top of it.
-
-Important landed details:
-- The A2-related dependency baseline is represented by `9311b5b` (`Update dependencies for A2 NAM support`).
-- The current baseline also includes the later iPlug2 fixes from `iplug2-upstream-update`.
-- Those follow-up commits cover upstream branch refresh, RtAudio validation, popup menu compatibility, UTF-8 helper linkage for app/VST3, and mono input selection behavior.
-- The current local `main` branch is the preferred starting baseline for further work.
-
-### 10) Build-time A2 slimmable-size control is now landed on `main`
-Outcome:
-- The plugin now applies a build-time slim value to every loaded NAM model that implements `nam::SlimmableModel`.
-
-Important landed details:
-- The central application point is `LoadNAMDSPForPath()` in `NeuralAmpModeler/NeuralAmpModeler.cpp`.
-- That path covers embedded and external model loads before `ResamplingNAM` wrapping, so the setting reaches staged amp models, right-channel companion models, and stomp models.
-- `NeuralAmpModeler/config.h` now exposes an override-friendly `NAM_SLIMMABLE_SIZE` macro plus typed `NAMConfig::SlimmableSize`.
-- Visual Studio preprocessor override usage is `NAM_SLIMMABLE_SIZE=0.5` in project properties; do not prepend `/D` in the property field.
-- The runtime call clamps the configured value to `0.0 .. 1.0` before calling `SetSlimmableSize()`.
-
-### 11) Reverb post-mix output normalization is now landed on `main`
-Outcome:
-- The reverb mix control now applies an additional post-mix output compensation curve in the upper half of the mix range.
-- The current dry/wet blend feel is intentionally preserved in the lower half while reducing the perceived loudness drop as the dry anchor fades out.
-
-Important landed details:
-- The change is isolated to `_ProcessFXReverbStage()` in `NeuralAmpModeler/NeuralAmpModelerFX.cpp`.
-- Compensation is applied after the existing dry/wet sum, so the patch does not retune the separate dry/wet balance law in this pass.
-- The current user-tuned values on `main` are:
+## Other current baseline items still apply
+- Amp/IR switching artifact reduction is merged.
+- External-facing rebrand to `RE-AMP` is landed.
+- Amp bypass routing/state handling fixes are landed.
+- Curated cab mic set includes `S-57`, `R-121`, and `M-421`.
+- Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading.
+- Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, amp variants v1, doubler improvements, startup/default asset refresh, and slot-specific amp UI work are already landed.
+- Amp 2 custom tuning is landed: custom tone stack voicing, slot-specific `Pre Gain` taper, and saturating `Master` behavior.
+- Dev diagnostics overlay is landed: standalone shows CPU/RAM plus DSP stats; plugin builds intentionally show only DSP/buffer/latency stats.
+- A2 dependency update and iPlug2 upstream follow-up baseline remain landed.
+- Build-time A2 slimmable-size control remains landed via `NAM_SLIMMABLE_SIZE` / `NAMConfig::SlimmableSize`, applied in `LoadNAMDSPForPath()`.
+- The live boost pedal is a built-in modeled dual-voice pedal; the old boost NAM slot plumbing still exists for possible future development but is not the live boost signal path.
+- Reverb post-mix output compensation is landed in `_ProcessFXReverbStage()` with:
   - `postMixCompStart = 0.49`
   - `postMixCompMaxGain = 2.4`
   - `postMixCompCurve = pow(postMixCompNorm, 1.40)`
-- The main residual watch-out is headroom pressure at high `Mix` plus long `Decay`, because this post-mix gain stacks on top of the existing wet makeup behavior.
-
-## Important current conclusions
-- Do not reopen tuner work unless the user explicitly asks.
-- Do not restart the old amp/IR artifact investigation from scratch; `main` already contains the accepted baseline.
-- Keep custom IR support in release mode.
-- Use the slot presentation / behavior / resolved-spec scaffolding for future amp-specific divergence.
-- User now builds manually after patches; do not run builds unless the user explicitly asks.
-- That build rule is now also recorded directly in `AGENTS.md`, not only in this handoff file.
-- The earlier stereo-collapse-through-cab concern appears to have been addressed by `d41b00c` (`Preserve stereo through cab IR processing`); do not reopen that investigation unless the user reports a current regression.
-- The modeled boost pedal baseline is now the accepted path on `main`; do not route the live stomp switch back through boost NAM slots unless the user explicitly asks.
-- The reverb normalization pass is now landed; if the user wants more adjustment, treat it as tuning/refinement of the current post-mix compensation curve rather than reopening the whole reverb architecture.
-- Prefer small, reviewable follow-ups from the current stable `main` baseline.
-- Internal `NeuralAmpModeler` naming cleanup can wait.
-- If future work needs A2 CPU tuning, start from the landed `NAM_SLIMMABLE_SIZE` hook instead of adding a second model-load path.
-
-## Build/config baseline to preserve
-- Audio/performance validation: `Release | x64` only
-- Standalone audio test: run without debugger (`Ctrl+F5`)
-- Do not evaluate DSP performance in Debug
-- The user now builds manually after each patch unless they explicitly ask otherwise
-- The user manually built and verified the A2 slim-setting change before pushing it
-- Do not assume local `config.h` matches committed defaults during user testing
-- Local `NeuralAmpModeler/config.h` churn is expected during the dev phase, especially for toggles like `NAM_STARTUP_TMPLOAD_DEFAULTS`, `NAM_DEV_DIAGNOSTICS`, `NAM_RELEASE_MODE`, and `NAM_RELEASE_IGNORE_PRESET_MODEL_PATHS`; do not treat that dirtiness alone as a blocker
 
 ## Current policy notes
-- Audio-thread rules still apply:
-  - no allocations
-  - no locks or waits
-  - no file/network/UI/logging in callback
+- Real-time audio rules still apply in `ProcessBlock()` and anything it calls:
+  - no heap allocation
+  - no locks/waits/sleeps
+  - no file/network/UI/logging
   - no exceptions across the callback
-- Keep diffs small and reviewable
-- Dev-mode policy is active:
-  - breaking changes are acceptable if they improve architecture or iteration speed
+  - deterministic preallocated processing only
+- Keep diffs small and reviewable.
+- Do not revert user changes unless explicitly requested.
+- Prefer targeted patches over broad refactors.
 
-## Suggested next coding step
-1. Continue from the current stable `main` baseline and prefer small, reviewable follow-ups in the area the user explicitly requests next.
-2. If stereo behavior is questioned again, treat it as regression verification against `d41b00c` rather than an open unresolved architecture problem.
-3. If reverb loudness is revisited, start by tuning the landed post-mix compensation curve in `NeuralAmpModelerFX.cpp` before changing the wet-path voicing or dry/wet law.
+## Suggested next task
+The user requested the next task be a UI overview of the Tuner, consisting of two parts:
+1. Fine-tune tuner smoothing for better UX.
+2. Make a small tuner graphics update for better usability.
+
+Suggested approach:
+- Start from the current `main` baseline.
+- Treat current tuner detection as the accepted baseline; do not rewrite detector logic unless new evidence appears.
+- First evaluate UX smoothing by eye/feel on guitar and bass before changing constants.
+- Keep graphics changes small and usability-driven; preserve the current overall tuner look unless the user asks for a larger redesign.
+- Keep any tuner UI changes isolated from DSP where possible.
 
 ## Starter prompt for the next agent
-You are continuing work in `D:\\Dev\\NAMPlugin` on branch `main`.
+You are continuing work in `D:\Dev\NAMPlugin` on branch `main`.
 
 Read first, in this exact order:
 1. `AGENTS.md`
@@ -244,31 +121,14 @@ Then confirm current repo/submodule state:
 - `git -C iPlug2 remote -v`
 
 Current baseline:
-1. `main` already includes the merged amp/IR switching artifact reduction work from `reduce-amp-switch-artifacts`
-2. External-facing rebrand to `RE-AMP` is landed
-3. Amp bypass routing/state handling fixes are landed
-4. Curated cab mic set now includes `S-57`, `R-121`, and `M-421`
-5. Metering, gate/stomp decoupling, preset/session restore fixes, Cab V1, compressor stomp v1, amp variants v1, doubler improvements, startup/default asset refresh, and slot-specific amp UI work are already landed
-6. Do not reopen tuner work unless the user explicitly asks
-7. Release mode embeds curated cab IRs and amp variant assets while still allowing custom IR loading
-8. Amp 2 custom tuning is landed on `main`: custom tone stack voicing, slot-specific `Pre Gain` taper, and a saturating `Master` behavior
-9. Dev diagnostics overlay is landed: standalone shows CPU/RAM plus DSP stats, plugin builds intentionally show only DSP/buffer/latency stats
-10. The A2 dependency update baseline is landed on `main`, and local `main` also includes the iPlug2 upstream follow-up commits through `9ae005c`
-11. Build-time A2 slimmable-size control is landed on `main` via `NAM_SLIMMABLE_SIZE` / `NAMConfig::SlimmableSize`, applied in `LoadNAMDSPForPath()`
-12. The user now builds manually after patches; do not run builds unless explicitly asked
-13. That no-build-without-user-prompt rule is now written directly in `AGENTS.md`
-14. The live boost pedal is now a built-in modeled dual-voice pedal on `main`:
-   - Boost mode switch compares `TS` and `PD`
-   - User-facing controls are `Boost Drive`, `Boost Character`, and `Output Volume`
-   - Those controls display `0..10` with `5` at noon and no unit text
-15. The old boost NAM slot plumbing still exists in code/settings for possible future development use, but it is not the live boost signal path now
-16. Reverb post-mix output compensation is now landed on `main` in `_ProcessFXReverbStage()` with the current user-tuned upper-half mix compensation values:
-   - `postMixCompStart = 0.49`
-   - `postMixCompMaxGain = 2.4`
-   - `postMixCompCurve = pow(postMixCompNorm, 1.40)`
+1. `main` includes the Tuner 2.0 baseline and tuner BYP monitor gain fix.
+2. Tuner detection now uses an `8192` analysis frame and works well for tested guitar and 5-string bass low B.
+3. Tuner BYP monitor output is independent of active amp model loudness/calibration compensation.
+4. External-facing product identity is `RE-AMP`; internal `NeuralAmpModeler` naming remains intentional.
+5. User builds manually after patches; do not run builds unless explicitly asked.
+6. Keep patches small and audio-thread safe.
 
 Suggested next task unless the user redirects:
-1. Start from the current `main` baseline and follow the user's next requested task
-2. If stereo behavior is reported again, verify against the `d41b00c` cab/IR stereo-preservation changes first
-3. If reverb output balance is revisited, refine the landed post-mix compensation curve first rather than replacing the blend architecture
-4. Keep the patch small and reviewable from the current stable `main` baseline
+1. UI overview of the Tuner.
+2. Part one: fine-tune smoothing for better UX.
+3. Part two: small tuner graphics update for better usability.
