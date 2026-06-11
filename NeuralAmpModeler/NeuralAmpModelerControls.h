@@ -1946,12 +1946,18 @@ public:
     {
       mDisplayedMidiNote = -1;
       mDisplayCents = 0.0f;
+      mInTune = false;
       SetDirty(false);
       return;
     }
 
+    if (mDisplayedMidiNote != midiNote)
+      mInTune = false;
+
     mDisplayedMidiNote = midiNote;
     mDisplayCents = clampedCents;
+    const float absoluteCents = std::fabs(mDisplayCents);
+    mInTune = mInTune ? absoluteCents <= kInTuneExitCents : absoluteCents <= kInTuneEnterCents;
 
     SetDirty(false);
   }
@@ -1969,26 +1975,54 @@ public:
     const float centerX = 0.5f * (lineL + lineR);
     const float xRange = 0.5f * (lineR - lineL);
     const float baselineThickness = 2.6f;
+    const float needleThickness = 4.2f;
+    const float gateNeedleRadius = 5.2f;
+    const float needleRadius = 6.4f;
+    const IColor inTuneColor(255, 96, 230, 120);
+    const IColor gradientGreen(185, 96, 230, 120);
+    const IColor gradientAmber(185, 242, 184, 72);
+    const IColor gradientRed(170, 235, 76, 76);
 
-    // Baseline + "in tune" zone for quick readability.
-    g.DrawLine(COLOR_WHITE.WithOpacity(0.42f), lineL, lineY, lineR, lineY, &mBlend, baselineThickness);
-    const float inTuneHalfWidth = (5.0f / 50.0f) * xRange;
-    g.DrawLine(IColor(220, 100, 220, 130), centerX - inTuneHalfWidth, lineY, centerX + inTuneHalfWidth, lineY, &mBlend,
-               baselineThickness + 1.2f);
+    // Keep the gate width independent from small visual changes to the needle dot.
+    const float gateHalfWidth = (kInTuneEnterCents / 50.0f) * xRange + gateNeedleRadius;
+    const float gateL = centerX - gateHalfWidth;
+    const float gateR = centerX + gateHalfWidth;
+    const float negative25X = centerX - 0.5f * xRange;
+    const float positive25X = centerX + 0.5f * xRange;
+    const float leftAmberStop = (negative25X - lineL) / (gateL - lineL);
+    const float rightAmberStop = (positive25X - gateR) / (lineR - gateR);
+    g.PathMoveTo(lineL, lineY);
+    g.PathLineTo(gateL, lineY);
+    g.PathStroke(IPattern::CreateLinearGradient(lineL, lineY, gateL, lineY,
+                                                {{gradientRed, 0.0f},
+                                                 {gradientAmber, leftAmberStop},
+                                                 {gradientGreen, 1.0f}}),
+                 baselineThickness, {}, &mBlend);
+    g.PathMoveTo(gateR, lineY);
+    g.PathLineTo(lineR, lineY);
+    g.PathStroke(IPattern::CreateLinearGradient(gateR, lineY, lineR, lineY,
+                                                {{gradientGreen, 0.0f},
+                                                 {gradientAmber, rightAmberStop},
+                                                 {gradientRed, 1.0f}}),
+                 baselineThickness, {}, &mBlend);
 
-    // Readable ticks at -50, -25, 0, +25, +50 cents.
-    const float tickNorms[] = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
+    const IColor gateColor = mInTune ? inTuneColor : inTuneColor.WithOpacity(0.76f);
+    g.DrawLine(gateColor.WithOpacity(mInTune ? 0.82f : 0.58f), gateL, lineY, gateR, lineY, &mBlend,
+               baselineThickness + 1.4f);
+    g.DrawLine(gateColor, gateL, lineY - 10.0f, gateL, lineY + 10.0f, &mBlend, 2.4f);
+    g.DrawLine(gateColor, gateR, lineY - 10.0f, gateR, lineY + 10.0f, &mBlend, 2.4f);
+
+    // Readable ticks at -50, -25, +25, +50 cents. The center gate replaces the zero tick.
+    const float tickNorms[] = {-1.0f, -0.5f, 0.5f, 1.0f};
     for (const float norm : tickNorms)
     {
       const float x = centerX + norm * xRange;
-      const float tickHalfHeight = (norm == 0.0f) ? 13.0f : 9.0f;
-      const IColor tickColor =
-        (norm == 0.0f) ? PluginColors::NAM_THEMECOLOR.WithOpacity(0.95f) : COLOR_WHITE.WithOpacity(0.38f);
-      g.DrawLine(tickColor, x, lineY - tickHalfHeight, x, lineY + tickHalfHeight, &mBlend, (norm == 0.0f) ? 2.0f : 1.2f);
+      g.DrawLine(COLOR_WHITE.WithOpacity(0.38f), x, lineY - 9.0f, x, lineY + 9.0f, &mBlend, 1.2f);
     }
 
+    const IColor readoutColor = mInTune ? inTuneColor : COLOR_WHITE;
     const float noteFontSize = std::max(30.0f, panel.H() * 0.40f);
-    IText primaryText(noteFontSize, COLOR_WHITE, "Michroma-Regular", EAlign::Center, EVAlign::Middle);
+    IText primaryText(noteFontSize, readoutColor, "Michroma-Regular", EAlign::Center, EVAlign::Middle);
     IText secondaryText(12.0f, COLOR_WHITE.WithOpacity(0.85f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
     if (!mActive)
     {
@@ -2012,16 +2046,19 @@ public:
     centsStream.precision(1);
     centsStream << mDisplayCents;
     const IRECT centsRect(panel.L, lineY - 48.0f, panel.R, lineY - 28.0f);
-    g.DrawText(secondaryText, centsStream.str().c_str(), centsRect);
+    const IText centsText(12.0f, readoutColor.WithOpacity(0.85f), "Roboto-Regular", EAlign::Center, EVAlign::Middle);
+    g.DrawText(centsText, centsStream.str().c_str(), centsRect);
 
     const float needleX = centerX + (mDisplayCents / 50.0f) * xRange;
-    const IColor needleColor =
-      (std::fabs(mDisplayCents) <= 4.0f) ? IColor(255, 96, 230, 120) : PluginColors::NAM_THEMECOLOR;
-    g.DrawLine(needleColor, needleX, lineY - 18.0f, needleX, lineY + 8.0f, &mBlend, 3.2f);
-    g.FillCircle(needleColor.WithOpacity(0.9f), needleX, lineY, 3.6f, &mBlend);
+    const IColor needleColor = mInTune ? inTuneColor : PluginColors::NAM_THEMECOLOR;
+    g.DrawLine(needleColor, needleX, lineY - 18.0f, needleX, lineY + 8.0f, &mBlend, needleThickness);
+    g.FillCircle(needleColor.WithOpacity(0.9f), needleX, lineY, needleRadius, &mBlend);
   }
 
 private:
+  static constexpr float kInTuneEnterCents = 1.0f;
+  static constexpr float kInTuneExitCents = 1.2f;
+
   static const char* _GetNoteNameNoOctave(const int midiNote)
   {
     static const char* kNoteNames[] = {"C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B"};
@@ -2031,6 +2068,7 @@ private:
 
   bool mActive = false;
   bool mHasPitch = false;
+  bool mInTune = false;
   int mDisplayedMidiNote = -1;
   float mDisplayCents = 0.0f;
 };
