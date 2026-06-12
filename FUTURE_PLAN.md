@@ -1,4 +1,4 @@
-Last updated: 2026-06-10
+Last updated: 2026-06-12
 
 Purpose: active roadmap for remaining work.
 This file is mandatory onboarding context for every new agent.
@@ -89,8 +89,24 @@ Outcome:
 
 Important nuances:
 - Current tuner detection is considered the accepted baseline; avoid rewriting it unless new test evidence justifies it
-- Tuner display/UX smoothing is still a valid polish target
 - Keep any future tuner UI changes isolated from detector/DSP changes where practical
+
+### Done: Tuner smoothing and in-tune UI overview
+Outcome:
+- Tuner motion was retuned for a calmer response without restoring the previous heavy display lag
+- The in-tune state now gives the user a clear target instead of requiring exact overlap with a same-width center line
+- The final graphics were evaluated through several user-tested iterations and approved
+
+Important nuances:
+- Analyzer-side smoothing remains the single source of displayed cents motion
+- In-tune entry is `+/-1.0` cent with exit hysteresis at `+/-1.2` cents
+- The center uses a two-marker gate, while note/cents/needle turn green together in tune
+- The baseline uses mirrored red-to-amber-to-green gradients and keeps neutral ticks
+- The needle dot is intentionally larger than the gate-sizing reference; future needle art changes should not silently alter tuning tolerance
+- The `MUTE` / `BYP` / `ON` workflow and existing panel layout were preserved
+- Landed commits:
+  - `8b918ee` `Polish tuner response feel`
+  - `4670e51` `Improve tuner in-tune guidance`
 
 ### Done: Amp/IR switching artifact reduction
 Outcome:
@@ -154,25 +170,42 @@ Important nuances:
 
 ## Active milestones
 
-### Active short-term task: Tuner UI overview
+### Future candidate: Amp 1 tone-stack and control redesign
 Goal:
-- Review the tuner UI now that Tuner 2.0 detection is stable
+- Explore a more intentional Amp 1 voicing and control surface instead of leaving Amp 1 on the generic tone-stack behavior
 
-Scope:
-- Fine-tune tuner smoothing for better UX
-- Make a small graphics/usability update to the tuner display
+Current state:
+- Amp 1 uses `ToneStackKind::BasicNam`
+- Amp 1 uses `MasterBehaviorKind::Standard`
+- Its current shared controls are `Pre Gain`, `Bass`, `Mid`, `Treble`, `Presence`, `Depth`, and `Master`
+- Amp 1 A/B remains a model-only `CHARACTER` switch with shared controls
+- Amp 2 already provides the established pattern for slot-specific tone-stack, master, controls, and presentation behavior
 
-Constraints:
-- Start from the current Tuner 2.0 detector baseline
-- Do not reopen the detector architecture unless testing shows a concrete regression
-- Keep the patch small and focused on user-facing tuner feel/readability
-- Preserve the existing `MUTE` / `BYP` / `ON` workflow
+Possible scope:
+- Define the intended Amp 1 archetype and musical role before choosing DSP
+- Evaluate a dedicated `Amp1ToneStack` and slot-specific pre-gain/master behavior
+- Decide whether `Presence` and `Depth` remain continuous controls or whether one/both should be replaced or reshaped
+- Consider slot-specific labels, ranges, tapers, switches, and control placement
+- Keep A/B variants model-only unless there is a deliberate reason to make controls variant-specific
+- Reuse existing parameter IDs where practical; discuss any parameter or serialization changes before implementation
+
+Likely implementation points:
+- `NeuralAmpModeler/ToneStack.h` and `ToneStack.cpp`
+- `NeuralAmpModeler/NeuralAmpModeler.h`
+- `_GetAmpSlotPresentationSpec()`, `_GetAmpSlotBehaviorSpec()`, `_CreateToneStack()`, and master/pre-gain mapping in `NeuralAmpModeler.cpp`
+- `NeuralAmpModelerControls.h` and amp artwork/resources only if the agreed control surface requires UI changes
+
+Decision gate:
+- Do not code this from the generic idea alone
+- First agree on target voicing, control names/types, ranges, defaults, and whether preset/state behavior may change
 
 Risk:
-- Low-medium
+- Medium
 
 RT safety watch-outs:
-- UI-only smoothing/display changes should not allocate, lock, log, or perform I/O from the audio callback
+- Tone-stack filters and master behavior must be prepared outside the callback and process deterministically
+- No allocations, locks, string construction, I/O, or logging in `ProcessBlock()` paths
+- Avoid adding callback-time slot branching beyond the established resolved behavior/state pattern
 
 ### Milestone B: Release asset packaging and final variant strategy
 Goal:
@@ -235,7 +268,7 @@ Examples:
 - off-state visual language
 
 ## Recommended execution order from now
-1. Complete the tuner UI overview: smoothing UX first, then a small graphics/usability pass
+1. If Amp 1 is selected next, complete the voicing/control design discussion before implementation
 2. Resume Milestone B when the final release asset set is clearer
 3. Milestone F only if the user returns to transpose
 4. Milestone D only after Cab v1 remains stable in regular use

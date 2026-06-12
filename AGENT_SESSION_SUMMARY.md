@@ -1,4 +1,4 @@
-Last updated: 2026-06-10
+Last updated: 2026-06-12
 
 Purpose: concise handoff so a new agent can continue from the current stable baseline without replaying the full chat history.
 
@@ -9,12 +9,16 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 4. `FUTURE_PLAN.md`
 
 ## Current repository state at handoff
-- Active branch after merge: `main`
-- Tuner 2.0 work was developed on `feature/tuner-2.0-baseline` and fast-forward merged into `main`
-- Latest tuner commits included in `main`:
+- Active branch: `main`
+- Current HEAD at this handoff: `5e7bc90` `Minor Doubler tweeks`
+- Recent commits included in `main`:
   - `6b12fde` `Establish tuner 2.0 baseline`
   - `7bc1a96` `Fix tuner bypass monitor gain`
-- Working tree should be clean after this handover commit
+  - `8b918ee` `Polish tuner response feel`
+  - `4670e51` `Improve tuner in-tune guidance`
+  - `0bd95aa` `Update VS project`
+  - `5e7bc90` `Minor Doubler tweeks`
+- `origin/main` matched `5e7bc90` before these documentation edits
 - iPlug2 submodule state at handoff check:
   - `c4a2c31be1a2b5b7d932fd50ea268b0241e26836 iPlug2 (v1.0.0-beta-696-gc4a2c31be)`
   - `origin` = `https://github.com/miandre/iPlug2.git`
@@ -30,13 +34,14 @@ Purpose: concise handoff so a new agent can continue from the current stable bas
 - Debug performance is not meaningful for DSP judgement.
 - Local `NeuralAmpModeler/config.h` churn is expected during development; do not treat dev-toggle dirtiness alone as a blocker.
 
-## Tuner 2.0 baseline now landed on main
+## Tuner 2.0 baseline and UI overview now landed on main
 Outcome:
 - Tuner pitch tracking is substantially improved compared with the first tuner iteration.
 - Standard 7-string guitar tuning now works well across `B E A D G B E`.
 - Alternate guitar tunings tested by the user, including C tuning, work well.
 - 5-string bass low B and C-tuned bass low C are now handled after the larger analysis-frame change.
 - Tuner BYP monitor volume no longer depends on which amp model was active when opening the tuner.
+- Tuner response smoothing and the in-tune display were polished and visually approved by the user.
 
 Important landed tuner details:
 - `TunerAnalyzer::kAnalysisSize` is now `8192`.
@@ -64,6 +69,21 @@ Tuner BYP monitor fix:
 - Fix: tuner BYP now calls `_ProcessOutputWithTargetGain(..., _GetOutputGainForModel(nullptr))`.
 - Result: BYP monitor uses the clean post-input-gain signal plus user `Output` level only, not model loudness/calibration compensation.
 
+Tuner smoothing polish:
+- Commit `8b918ee` shortened attack-settle holds and retuned target/velocity limits for a calmer but more responsive display.
+- The analyzer remains the owner of tuner motion smoothing; `NAMTunerDisplayControl` consumes the final published cents value directly.
+- Do not add a second display-side needle filter unless new testing demonstrates a concrete need.
+
+Tuner graphics/usability pass:
+- Commit `4670e51` updated `NAMTunerDisplayControl` in `NeuralAmpModeler/NeuralAmpModelerControls.h`.
+- In-tune state enters at `+/-1.0` cent and exits beyond `+/-1.2` cents to provide small hysteresis.
+- The old broad green segment and center tick were replaced with a narrow two-marker center gate.
+- The note name, cents readout, and needle turn green together only in the accepted in-tune state.
+- The baseline now uses mirrored red-to-amber-to-green gradients, with amber aligned around the `+/-25` cent ticks.
+- The needle line/dot were enlarged for readability while the gate width remains independently fixed.
+- The existing `MUTE` / `BYP` / `ON` workflow and panel layout were preserved.
+- The user evaluated multiple visual iterations in the standalone UI and approved the final result.
+
 ## Other current baseline items still apply
 - Amp/IR switching artifact reduction is merged.
 - External-facing rebrand to `RE-AMP` is landed.
@@ -80,6 +100,12 @@ Tuner BYP monitor fix:
   - `postMixCompStart = 0.49`
   - `postMixCompMaxGain = 2.4`
   - `postMixCompCurve = pow(postMixCompNorm, 1.40)`
+- Visual Studio project files were refreshed in `0bd95aa`; do not undo that project-file state as unrelated churn.
+- The latest doubler tuning in `5e7bc90` changed:
+  - `kSpreadMaxMs` from `14.0` to `18.0`
+  - `kRightTrimMaxDB` from `-3.9` to `-2.9`
+  - `kKnobMinSpreadMs` from `6.0` to `10.0`
+  - `kKnobMinRightTrimDB` from `-1.2` to `-0.2`
 
 ## Current policy notes
 - Real-time audio rules still apply in `ProcessBlock()` and anything it calls:
@@ -93,16 +119,14 @@ Tuner BYP monitor fix:
 - Prefer targeted patches over broad refactors.
 
 ## Suggested next task
-The user requested the next task be a UI overview of the Tuner, consisting of two parts:
-1. Fine-tune tuner smoothing for better UX.
-2. Make a small tuner graphics update for better usability.
+The tuner UI overview is complete. A newly recorded future design candidate is an Amp 1 tone-stack and control pass.
 
-Suggested approach:
-- Start from the current `main` baseline.
-- Treat current tuner detection as the accepted baseline; do not rewrite detector logic unless new evidence appears.
-- First evaluate UX smoothing by eye/feel on guitar and bass before changing constants.
-- Keep graphics changes small and usability-driven; preserve the current overall tuner look unless the user asks for a larger redesign.
-- Keep any tuner UI changes isolated from DSP where possible.
+Before implementing Amp 1 changes:
+- Discuss the intended amp character, desired control set, and which current controls should stay, move, or be repurposed.
+- Amp 1 currently uses `ToneStackKind::BasicNam`, `MasterBehaviorKind::Standard`, the common `Pre Gain / Bass / Mid / Treble / Presence / Depth / Master` controls, and an A/B `CHARACTER` model switch.
+- Use the existing slot-specific presentation/behavior architecture and Amp 2 custom tone-stack pattern rather than adding Amp 1 special cases in the audio callback.
+- Decide whether existing parameter IDs can be reused with slot-specific behavior. Ask before adding parameters or changing preset/state serialization.
+- Any new tone-stack processing must remain preallocated, deterministic, and allocation/lock/I/O free in `ProcessBlock()`.
 
 ## Starter prompt for the next agent
 You are continuing work in `D:\Dev\NAMPlugin` on branch `main`.
@@ -121,14 +145,14 @@ Then confirm current repo/submodule state:
 - `git -C iPlug2 remote -v`
 
 Current baseline:
-1. `main` includes the Tuner 2.0 baseline and tuner BYP monitor gain fix.
-2. Tuner detection now uses an `8192` analysis frame and works well for tested guitar and 5-string bass low B.
-3. Tuner BYP monitor output is independent of active amp model loudness/calibration compensation.
-4. External-facing product identity is `RE-AMP`; internal `NeuralAmpModeler` naming remains intentional.
-5. User builds manually after patches; do not run builds unless explicitly asked.
-6. Keep patches small and audio-thread safe.
+1. `main` includes the completed Tuner 2.0 detector, smoothing, BYP monitor fix, and in-tune graphics pass.
+2. Tuner detection uses an `8192` analysis frame and works well for tested guitar and 5-string bass low B.
+3. The tuner UI uses a `+/-1.0` cent entry threshold, `+/-1.2` cent exit hysteresis, a center gate, and mirrored tuning gradients.
+4. Latest HEAD before handover docs is `5e7bc90`, including the latest minor doubler tuning.
+5. External-facing product identity is `RE-AMP`; internal `NeuralAmpModeler` naming remains intentional.
+6. User builds manually after patches; do not run builds unless explicitly asked.
+7. Keep patches small and audio-thread safe.
 
 Suggested next task unless the user redirects:
-1. UI overview of the Tuner.
-2. Part one: fine-tune smoothing for better UX.
-3. Part two: small tuner graphics update for better usability.
+1. Discuss a possible Amp 1 tone-stack and control redesign.
+2. Agree on the target voicing and control surface before changing code or serialization.
