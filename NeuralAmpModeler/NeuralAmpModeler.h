@@ -390,6 +390,7 @@ private:
   enum class ToneStackKind : int
   {
     BasicNam = 0,
+    Amp1,
     Amp2
   };
 

@@ -97,6 +97,69 @@ void dsp::tone_stack::BasicNamToneStack::SetParam(const std::string name, const 
   }
 }
 
+DSP_SAMPLE** dsp::tone_stack::Amp1ToneStack::Process(DSP_SAMPLE** inputs, const int numChannels, const int numFrames)
+{
+  DSP_SAMPLE** bassPointers = mToneBass.Process(inputs, numChannels, numFrames);
+  DSP_SAMPLE** midPointers = mToneMid.Process(bassPointers, numChannels, numFrames);
+  DSP_SAMPLE** treblePointers = mAmp1Treble.Process(midPointers, numChannels, numFrames);
+  DSP_SAMPLE** presencePointers = mTonePresence.Process(treblePointers, numChannels, numFrames);
+  DSP_SAMPLE** depthPointers = mToneDepth.Process(presencePointers, numChannels, numFrames);
+  return depthPointers;
+}
+
+void dsp::tone_stack::Amp1ToneStack::SetParam(const std::string name, const double val)
+{
+  const double sampleRate = GetSampleRate();
+
+  if (name == "bass")
+  {
+    mBassVal = val;
+    const double bassGainDB = (val >= 5.0) ? (0.8 * (val - 5.0)) : (1.4 * (val - 5.0)); // -7 / +4
+    const double bassFrequency = 130.0;
+    const double bassQuality = 0.8;
+    recursive_linear_filter::BiquadParams bassParams(sampleRate, bassFrequency, bassQuality, bassGainDB);
+    mToneBass.SetParams(bassParams);
+  }
+  else if (name == "middle")
+  {
+    mMiddleVal = val;
+    const bool boosting = val >= 5.0;
+    const double midGainDB = (boosting ? 1.0 : 1.2) * (val - 5.0); // -6 / +5
+    const double midFrequency = boosting ? 900.0 : 600.0;
+    const double midQuality = boosting ? 0.7 : 0.65;
+    recursive_linear_filter::BiquadParams midParams(sampleRate, midFrequency, midQuality, midGainDB);
+    mToneMid.SetParams(midParams);
+  }
+  else if (name == "treble")
+  {
+    mTrebleVal = val;
+    const double trebleGainDB = (val >= 5.0) ? (0.8 * (val - 5.0)) : (1.0 * (val - 5.0)); // -5 / +4
+    const double trebleFrequency = 2500.0;
+    const double trebleQuality = 0.65;
+    recursive_linear_filter::BiquadParams trebleParams(sampleRate, trebleFrequency, trebleQuality, trebleGainDB);
+    mAmp1Treble.SetParams(trebleParams);
+  }
+  else if (name == "presence")
+  {
+    mPresenceVal = val;
+    const double presenceGainDB = (val >= 5.0) ? (0.5 * (val - 5.0)) : (1.4 * (val - 5.0)); // -7 / +2.5
+    const double presenceFrequency = 6200.0;
+    const double presenceQuality = 0.707;
+    recursive_linear_filter::BiquadParams presenceParams(
+      sampleRate, presenceFrequency, presenceQuality, presenceGainDB);
+    mTonePresence.SetParams(presenceParams);
+  }
+  else if (name == "depth")
+  {
+    mDepthVal = val;
+    const double depthGainDB = (val >= 5.0) ? (1.0 * (val - 5.0)) : (0.8 * (val - 5.0)); // -4 / +5
+    const double depthFrequency = 85.0;
+    const double depthQuality = 0.85;
+    recursive_linear_filter::BiquadParams depthParams(sampleRate, depthFrequency, depthQuality, depthGainDB);
+    mToneDepth.SetParams(depthParams);
+  }
+}
+
 DSP_SAMPLE** dsp::tone_stack::Amp2ToneStack::Process(DSP_SAMPLE** inputs, const int numChannels, const int numFrames)
 {
   DSP_SAMPLE** bassPointers = mToneBass.Process(inputs, numChannels, numFrames);

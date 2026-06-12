@@ -7841,7 +7841,9 @@ NeuralAmpModeler::AmpSlotBehaviorSpec NeuralAmpModeler::_GetAmpSlotBehaviorSpec(
 {
   const int clampedSlot = std::clamp(slotIndex, 0, static_cast<int>(mAmpSlotStates.size()) - 1);
   AmpSlotBehaviorSpec spec;
-  spec.toneStackKind = (clampedSlot == kAmp2SlotIndex) ? ToneStackKind::Amp2 : ToneStackKind::BasicNam;
+  spec.toneStackKind = (clampedSlot == kAmp1SlotIndex)
+                         ? ToneStackKind::Amp1
+                         : ((clampedSlot == kAmp2SlotIndex) ? ToneStackKind::Amp2 : ToneStackKind::BasicNam);
   spec.masterBehaviorKind =
     (clampedSlot == kAmp2SlotIndex) ? MasterBehaviorKind::Amp2Saturating : MasterBehaviorKind::Standard;
   spec.supportedControls.fill(false);
@@ -7904,6 +7906,7 @@ std::unique_ptr<dsp::tone_stack::AbstractToneStack> NeuralAmpModeler::_CreateTon
 {
   switch (kind)
   {
+    case ToneStackKind::Amp1: return std::make_unique<dsp::tone_stack::Amp1ToneStack>();
     case ToneStackKind::Amp2: return std::make_unique<dsp::tone_stack::Amp2ToneStack>();
     case ToneStackKind::BasicNam:
     default: return std::make_unique<dsp::tone_stack::BasicNamToneStack>();
